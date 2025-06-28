@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package whiteboard;
+
+service WhiteboardService {
+  rpc UpdateWhiteboard(UpdateWhiteboardRequest) returns (UpdateWhiteboardResponse);
+  rpc GetWhiteboardData(GetWhiteboardDataRequest) returns (GetWhiteboardDataResponse);
+  rpc ClearWhiteboard(ClearWhiteboardRequest) returns (ClearWhiteboardResponse);
+  rpc UpdatePermissions(UpdatePermissionsRequest) returns (UpdatePermissionsResponse);
+  rpc GetPermissions(GetPermissionsRequest) returns (GetPermissionsResponse);
+  rpc HandlePointer(HandlePointerRequest) returns (HandlePointerResponse);
+  rpc HandlePointerLeave(HandlePointerLeaveRequest) returns (HandlePointerLeaveResponse);
+}
+
+message PositionMouse {
+  double x = 1;
+  double y = 2;
+}
+
+message WhiteboardElement {
+  string id = 1;
+  string type = 2;
+  double x = 3;
+  double y = 4;
+  string data = 5; // JSON string containing element-specific data
+}
+
+message WhiteboardState {
+  string room_id = 1;
+  repeated WhiteboardElement elements = 2;
+  string state = 3; // JSON string containing additional state data
+  repeated string allowed_users = 4;
+  string updated_at = 5;
+}
+
+// UpdateWhiteboard
+message UpdateWhiteboardRequest {
+  string room_id = 1;
+  repeated WhiteboardElement elements = 2;
+  string state = 3; // JSON string
+}
+
+message UpdateWhiteboardResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+// GetWhiteboardData
+message GetWhiteboardDataRequest {
+  string room_id = 1;
+}
+
+message GetWhiteboardDataResponse {
+  bool success = 1;
+  WhiteboardState whiteboard_data = 2;
+}
+
+// ClearWhiteboard
+message ClearWhiteboardRequest {
+  string room_id = 1;
+}
+
+message ClearWhiteboardResponse {
+  bool success = 1;
+}
+
+// UpdatePermissions
+message UpdatePermissionsRequest {
+  string room_id = 1;
+  repeated string allowed_users = 2;
+}
+
+message UpdatePermissionsResponse {
+  bool success = 1;
+}
+
+// GetPermissions
+message GetPermissionsRequest {
+  string room_id = 1;
+}
+
+message GetPermissionsResponse {
+  bool success = 1;
+  repeated string allowed_users = 2;
+}
+
+// HandlePointer
+message HandlePointerRequest {
+  string room_id = 1;
+  PositionMouse position = 2;
+  string user_id = 3;
+}
+
+message HandlePointerResponse {
+  bool success = 1;
+}
+
+// HandlePointerLeave
+message HandlePointerLeaveRequest {
+  string room_id = 1;
+  string user_id = 2;
+}
+
+message HandlePointerLeaveResponse {
+  bool success = 1;
+}

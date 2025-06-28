@@ -1,0 +1,290 @@
+syntax = "proto3";
+
+package sfu;
+
+service SfuService {
+  rpc CreateMediaRoom(CreateMediaRoomRequest) returns (CreateMediaRoomResponse);
+  rpc GetStreams(GetStreamsRequest) returns (GetStreamsResponse);
+  rpc ConnectTransport(ConnectTransportRequest) returns (ConnectTransportResponse);
+  rpc RemoveUserMedia(RemoveUserMediaRequest) returns (RemoveUserMediaResponse);
+  rpc CreateTransport(CreateTransportRequest) returns (CreateTransportResponse);
+  rpc GetIceServers(GetIceServersRequest) returns (GetIceServersResponse);
+  rpc SaveStream(SaveStreamRequest) returns (SaveStreamResponse);
+  rpc GetStreamById(GetStreamByIdRequest) returns (GetStreamByIdResponse);
+  rpc RemoveStream(RemoveStreamRequest) returns (RemoveStreamResponse);
+  rpc SaveProducerToStream(SaveProducerToStreamRequest) returns (SaveProducerToStreamResponse);
+  rpc GetStreamByProducer(GetStreamByProducerRequest) returns (GetStreamByProducerResponse);
+  rpc RemoveProducer(RemoveProducerRequest) returns (RemoveProducerResponse);
+  rpc CreateConsumer(CreateConsumerRequest) returns (CreateConsumerResponse);
+  rpc GetMediaRouter(GetMediaRouterRequest) returns (GetMediaRouterResponse);
+  rpc ResumeConsumer(ResumeConsumerRequest) returns (ResumeConsumerResponse);
+  rpc UnpublishStream(UnpublishStreamRequest) returns (UnpublishStreamResponse);
+  rpc UpdateStream(UpdateStreamRequest) returns (UpdateStreamResponse);  rpc RemoveParticipantMedia(RemoveParticipantMediaRequest) returns (RemoveParticipantMediaResponse);
+  rpc CloseMediaRoom(CloseMediaRoomRequest) returns (CloseMediaRoomResponse);
+  rpc HandlePresence(HandlePresenceRequest) returns (HandlePresenceResponse);
+  rpc CreateProducer(CreateProducerRequest) returns (CreateProducerResponse);
+  rpc SaveProducer(SaveProducerRequest) returns (SaveProducerResponse);
+}
+
+// Stream definition
+message Stream {
+  string stream_id = 1;
+  string publisher_id = 2;
+  string producer_id = 3;
+  string metadata = 4; // JSON string
+  string rtp_parameters = 5; // JSON string
+  string room_id = 6;
+}
+
+// CreateMediaRoom messages
+message CreateMediaRoomRequest {
+  string room_id = 1;
+}
+
+message CreateMediaRoomResponse {
+  string status = 1;
+  optional string data = 2; // JSON string containing router data
+}
+
+// GetStreams messages
+message GetStreamsRequest {
+  string room_id = 1;
+}
+
+message GetStreamsResponse {
+  string status = 1;
+  repeated Stream streams = 2;
+}
+
+// ConnectTransport messages
+message ConnectTransportRequest {
+  string transport_id = 1;
+  string dtls_parameters = 2; // JSON string
+  string participant_data = 3; // JSON string
+}
+
+message ConnectTransportResponse {
+  bool success = 1;
+  string message = 2;
+  optional string transport_data = 3; // JSON string containing transport info
+}
+
+// RemoveUserMedia messages
+message RemoveUserMediaRequest {
+  string room_id = 1;
+  string peer_id = 2;
+}
+
+message RemoveUserMediaResponse {
+  repeated string removed_stream_ids = 1;
+}
+
+// CreateTransport messages
+message CreateTransportRequest {
+  string room_id = 1;
+}
+
+message CreateTransportResponse {
+  string status = 1;
+  optional string transport_data = 2; // JSON string
+}
+
+// GetIceServers messages
+message GetIceServersRequest {
+  // Empty for now
+}
+
+message GetIceServersResponse {
+  string status = 1;
+  repeated IceServer ice_servers = 2;
+}
+
+message IceServer {
+  string urls = 1;
+  string username = 2;
+  string credential = 3;
+}
+
+// SaveStream messages
+message SaveStreamRequest {
+  string room_id = 1;
+  Stream stream = 2;
+}
+
+message SaveStreamResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// GetStreamById messages
+message GetStreamByIdRequest {
+  string stream_id = 1;
+}
+
+message GetStreamByIdResponse {
+  string status = 1;
+  Stream stream = 2;
+}
+
+// RemoveStream messages
+message RemoveStreamRequest {
+  string room_id = 1;
+  string stream_id = 2;
+}
+
+message RemoveStreamResponse {
+  string status = 1;
+}
+
+// SaveProducerToStream messages
+message SaveProducerToStreamRequest {
+  string room_id = 1;
+  string producer_id = 2;
+  Stream stream = 3;
+}
+
+message SaveProducerToStreamResponse {
+  string status = 1;
+}
+
+// GetStreamByProducer messages
+message GetStreamByProducerRequest {
+  string producer_id = 1;
+}
+
+message GetStreamByProducerResponse {
+  string status = 1;
+  Stream stream = 2;
+}
+
+// RemoveProducer messages
+message RemoveProducerRequest {
+  string room_id = 1;
+  string stream_id = 2;
+}
+
+message RemoveProducerResponse {
+  string status = 1;
+}
+
+// CreateConsumer messages
+message CreateConsumerRequest {
+  string room_id = 1;
+  string stream_id = 2;
+  string transport_id = 3;
+  string rtp_capabilities = 4; // JSON string
+  string participant_data = 5; // JSON string
+}
+
+message CreateConsumerResponse {
+  string status = 1;
+  optional string consumer_data = 2; // JSON string
+}
+
+// GetMediaRouter messages
+message GetMediaRouterRequest {
+  string room_id = 1;
+}
+
+message GetMediaRouterResponse {
+  string status = 1;
+  optional string router_data = 2; // JSON string
+}
+
+// ResumeConsumer messages
+message ResumeConsumerRequest {
+  string room_id = 1;
+  string consumer_id = 2;
+  string participant_id = 3;
+}
+
+message ResumeConsumerResponse {
+  string status = 1;
+  string message = 2;
+}
+
+// UnpublishStream messages
+message UnpublishStreamRequest {
+  string room_id = 1;
+  string stream_id = 2;
+  string participant_id = 3;
+}
+
+message UnpublishStreamResponse {
+  string status = 1;
+  string message = 2;
+}
+
+// UpdateStream messages
+message UpdateStreamRequest {
+  string stream_id = 1;
+  string participant_id = 2;
+  string metadata = 3; // JSON string
+  string room_id = 4;
+}
+
+message UpdateStreamResponse {
+  string status = 1;
+  string message = 2;
+}
+
+// RemoveParticipantMedia messages
+message RemoveParticipantMediaRequest {
+  string room_id = 1;
+  string participant_id = 2;
+}
+
+message RemoveParticipantMediaResponse {
+  string status = 1;
+  repeated string removed_streams = 2;
+}
+
+// CloseMediaRoom messages
+message CloseMediaRoomRequest {
+  string room_id = 1;
+}
+
+message CloseMediaRoomResponse {
+  string status = 1;
+  string message = 2;
+}
+
+// HandlePresence messages
+message HandlePresenceRequest {
+  string room_id = 1;
+  string peer_id = 2;
+  string metadata = 3; // JSON string
+}
+
+message HandlePresenceResponse {
+  string status = 1;
+  string presence_data = 2; // JSON string
+}
+
+// CreateProducer messages
+message CreateProducerRequest {
+  string room_id = 1;
+  string transport_id = 2;
+  string kind = 3; // 'audio' or 'video'
+  string rtp_parameters = 4; // JSON string
+  string participant_data = 5; // JSON string
+  string metadata = 6; // JSON string
+}
+
+message CreateProducerResponse {
+  string status = 1;
+  string message = 2;
+  optional string producer_data = 3; // JSON string containing producer info
+}
+
+// SaveProducer messages
+message SaveProducerRequest {
+  string room_id = 1;
+  string stream_id = 2;
+  string producer_data = 3; // JSON string
+}
+
+message SaveProducerResponse {
+  string status = 1;
+  string message = 2;
+}

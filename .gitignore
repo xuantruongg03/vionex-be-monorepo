@@ -1,0 +1,24 @@
+# Ignore node_modules ở tất cả subfolders
+**/node_modules
+**/secrets/
+**/test
+
+# Nếu có file build
+**/dist
+**/build
+
+# IDE/editor files
+.vscode/
+.idea/
+*.log
+.env
+**/.env
+
+# Optional: Docker volume or temp files
+**/.DS_Store
+**/tmp/
+
+run-chat.bat
+run-gateway.bat
+run-room.bat
+run-sfu.bat

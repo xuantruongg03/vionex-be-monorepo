@@ -1,0 +1,235 @@
+syntax = "proto3";
+
+package room;
+
+service RoomService {
+  rpc IsRoomExists(IsRoomExistsRequest) returns (IsRoomExistsResponse){};
+  rpc CreateRoom(CreateRoomRequest) returns (CreateRoomResponse){};
+  rpc JoinRoom(JoinRoomRequest) returns (JoinRoomResponse){};
+  rpc IsRoomLocked(IsRoomLockedRequest) returns (IsRoomLockedResponse){};
+  rpc VerifyRoomPassword(VerifyRoomPasswordRequest) returns (VerifyRoomPasswordResponse){};
+  rpc GetRoom(GetRoomRequest) returns (GetRoomResponse){};
+  rpc SetParticipant(SetParticipantRequest) returns (SetParticipantResponse){};
+  rpc GetParticipants(GetParticipantsRequest) returns (GetParticipantsResponse){};
+  rpc GetParticipantBySocketId(GetParticipantBySocketIdRequest) returns (GetParticipantBySocketIdResponse){};
+  rpc RemoveParticipant(RemoveParticipantRequest) returns (RemoveParticipantResponse){};
+  rpc SetTransport(SetTransportRequest) returns (SetTransportResponse){};
+  rpc SetProducer(SetProducerRequest) returns (SetProducerResponse){};
+  rpc GetParticipantRoom(GetParticipantRoomRequest) returns (GetParticipantRoomResponse){};
+  rpc RemoveProducerFromParticipant(RemoveProducerFromParticipantRequest) returns (RemoveProducerFromParticipantResponse){};
+  rpc LeaveRoom(LeaveRoomRequest) returns (LeaveRoomResponse){};
+  rpc UpdateParticipantRtpCapabilities(UpdateParticipantRtpCapabilitiesRequest) returns (UpdateParticipantRtpCapabilitiesResponse){};
+  rpc IsUsernameAvailable(IsUsernameAvailableRequest) returns (IsUsernameAvailableResponse){};
+  rpc GetParticipantByPeerId(GetParticipantByPeerIdRequest) returns (GetParticipantByPeerIdResponse){};
+}
+
+message GetParticipantByPeerIdRequest {
+  string peer_id = 1;
+  string room_id = 2;
+}
+
+message GetParticipantByPeerIdResponse {
+  Participant participant = 1;
+}
+
+// Messages for IsUsernameAvailable
+message IsUsernameAvailableRequest {
+  string room_id = 1;
+  string username = 2;
+}
+
+message IsUsernameAvailableResponse {
+  bool success = 1;
+  optional string message = 2; // Optional message for additional context
+}
+
+// Messages for IsRoomExists
+message IsRoomExistsRequest {
+  string room_id = 1;
+}
+
+message IsRoomExistsResponse {
+  bool is_exists = 1;
+}
+
+// Messages for CreateRoom
+message CreateRoomRequest {
+  string room_id = 1;
+}
+
+message CreateRoomResponse {
+  string room_id = 1;
+  string message = 2;
+  bool success = 3;
+}
+
+// Messages for JoinRoom
+message JoinRoomRequest {
+  string room_id = 1;
+  string user_id = 2;
+}
+
+message JoinRoomResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Messages for LeaveRoom
+message LeaveRoomRequest {
+  string room_id = 1;
+  string participant_id = 2;
+  string socket_id = 3;
+}
+
+message LeaveRoomResponse {
+  bool success = 1;
+  string message = 2;
+  repeated string removed_streams = 3;
+  optional string new_creator = 4; // For backward compatibility, can be null
+  bool is_room_empty = 5;
+  string participant_id = 6;
+}
+
+// Messages for IsRoomLocked
+message IsRoomLockedRequest {
+  string room_id = 1;
+}
+
+message IsRoomLockedResponse {
+  bool locked = 1;
+}
+
+// Messages for VerifyRoomPassword
+message VerifyRoomPasswordRequest {
+  string room_id = 1;
+  string password = 2;
+}
+
+message VerifyRoomPasswordResponse {
+  bool valid = 1;
+}
+
+// Messages for GetRoom
+message GetRoomRequest {
+  string room_id = 1;
+}
+
+message GetRoomResponse {
+  Room data = 1;
+  bool success = 2;
+}
+
+message Room {
+  string room_id = 1;
+  repeated Participant participants = 2;
+  bool isLocked = 3;
+}
+
+// Participant definition
+message Participant {
+  string socket_id = 1;
+  string peer_id = 2;
+  map<string, string> transports = 3; // transportId -> JSON string
+  map<string, string> producers = 4; // producerId -> JSON string
+  map<string, string> consumers = 5; // consumerId -> JSON string
+  bool is_creator = 6;
+  int64 time_arrive = 7; // timestamp in milliseconds
+  string rtp_capabilities = 8; // JSON string
+}
+
+// Messages for SetParticipant
+message SetParticipantRequest {
+  string room_id = 1;
+  Participant participant = 2;
+}
+
+message SetParticipantResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Messages for GetParticipants
+message GetParticipantsRequest {
+  string room_id = 1;
+}
+
+message GetParticipantsResponse {
+  repeated Participant participants = 1;
+}
+
+// Messages for GetParticipantBySocketId
+message GetParticipantBySocketIdRequest {
+  string socket_id = 1;
+}
+
+message GetParticipantBySocketIdResponse {
+  Participant participant = 1;
+}
+
+// Messages for RemoveParticipant
+message RemoveParticipantRequest {
+  string room_id = 1;
+  string peer_id = 2;
+}
+
+message RemoveParticipantResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Messages for SetTransport
+message SetTransportRequest {
+  string room_id = 1;
+  string transport_data = 2; // JSON string
+  string peer_id = 3;
+}
+
+message SetTransportResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Messages for SetProducer
+message SetProducerRequest {
+  string room_id = 1;
+  string producer_data = 2; // JSON string
+  string peer_id = 3;
+}
+
+message SetProducerResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Messages for GetParticipantRoom
+message GetParticipantRoomRequest {
+  string peer_id = 1;
+}
+
+message GetParticipantRoomResponse {
+  string room_id = 1;
+}
+
+// Messages for RemoveProducerFromParticipant
+message RemoveProducerFromParticipantRequest {
+  string room_id = 1;
+  string peer_id = 2;
+  string producer_id = 3;
+}
+
+message RemoveProducerFromParticipantResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Messages for UpdateParticipantRtpCapabilities
+message UpdateParticipantRtpCapabilitiesRequest {
+  string peer_id = 1;
+  string rtp_capabilities = 2; // JSON string
+}
+
+message UpdateParticipantRtpCapabilitiesResponse {
+  bool success = 1;
+  string message = 2;
+  string error = 3;
+}
