@@ -9,12 +9,10 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { RoomClientService } from './clients/room.client';
-import { Participant, Stream } from './interfaces/interface';
-import { WebSocketEventService } from './services/websocket-event.service';
-import { HttpBroadcastService } from './services/http-broadcast.service';
-import * as mediasoupTypes from 'mediasoup/node/lib/types';
-import { firstValueFrom } from 'rxjs';
 import { SfuClientService } from './clients/sfu.client';
+import { Participant } from './interfaces/interface';
+import { HttpBroadcastService } from './services/http-broadcast.service';
+import { WebSocketEventService } from './services/websocket-event.service';
 
 @WebSocketGateway({
   transports: ['websocket'],
@@ -41,60 +39,56 @@ export class GatewayGateway
   }
 
   async handleDisconnect(client: Socket) {
-    console.log(`[Gateway] Client disconnecting: ${client.id}`);
-
     // Get participant info before cleanup
     let peerId = this.connectionMap.get(client.id);
     let roomId = peerId ? this.roomParticipantMap.get(peerId) : null;
 
-    // If no mapping found, try to find participant by scanning all participants
     if (!peerId || !roomId) {
-      console.log(`[Gateway] No mapping found for socket ${client.id}, scanning for participant...`);        // Search through all known rooms to find participant with this socket_id    // If no mapping found, try to find participant by querying Room service directly
-    if (!peerId || !roomId) {
-      console.log(`[Gateway] No mapping found for socket ${client.id}, querying Room service...`);
-      
       try {
         // Query Room service to find any participant with this socket_id
-        const participantInfo = await this.roomClient.findParticipantBySocketId(client.id);
+        const participantInfo = await this.roomClient.findParticipantBySocketId(
+          client.id,
+        );
         if (participantInfo) {
           peerId = participantInfo.peerId;
           roomId = participantInfo.roomId;
-          console.log(`[Gateway] Found participant via Room service - PeerId: ${peerId}, RoomId: ${roomId}`);
         }
       } catch (error) {
-        console.log(`[Gateway] Room service lookup failed, will try scanning approach`);
-        
+        console.log(
+          `[Gateway] Room service lookup failed, will try scanning approach`,
+        );
+
         // Fallback: Search through socket.io rooms to find participant
         try {
           // Try a more targeted approach first - look for pending-ws patterns
-          const pendingPeerId = client.id.startsWith('pending-ws-') ? 
-            client.id.replace('pending-ws-', '') : null;
-          
+          const pendingPeerId = client.id.startsWith('pending-ws-')
+            ? client.id.replace('pending-ws-', '')
+            : null;
+
           if (pendingPeerId) {
             // Direct lookup for pending WebSocket connections
             const targetRoomId = this.roomParticipantMap.get(pendingPeerId);
             if (targetRoomId) {
               peerId = pendingPeerId;
               roomId = targetRoomId;
-              console.log(`[Gateway] Found pending-ws participant - PeerId: ${peerId}, RoomId: ${roomId}`);
             }
           }
-          
+
           // If still not found, do full scan
           if (!peerId || !roomId) {
             const allRooms = await this.getAllRoomsWithParticipants();
-            
+
             for (const [currentRoomId, participants] of allRooms) {
-              const participant = participants.find(p => 
-                p.socket_id === client.id || 
-                p.socket_id === `pending-ws-${client.id}` ||
-                (p.socket_id && p.socket_id.includes(client.id))
+              const participant = participants.find(
+                (p) =>
+                  p.socket_id === client.id ||
+                  p.socket_id === `pending-ws-${client.id}` ||
+                  (p.socket_id && p.socket_id.includes(client.id)),
               );
-              
+
               if (participant) {
                 peerId = participant.peer_id || participant.peerId;
                 roomId = currentRoomId;
-                console.log(`[Gateway] Found participant by socket scan - PeerId: ${peerId}, RoomId: ${roomId}`);
                 break;
               }
             }
@@ -104,28 +98,15 @@ export class GatewayGateway
         }
       }
     }
-    }
-
-    console.log(`[Gateway] Disconnect - PeerId: ${peerId}, RoomId: ${roomId}`);
-    console.log(`[Gateway] Connection map before cleanup:`, [...this.connectionMap.entries()]);
-    console.log(`[Gateway] Room participant map:`, [...this.roomParticipantMap.entries()]);
 
     if (peerId && roomId) {
       try {
-        // Call SFU service to remove participant media
-        console.log(
-          `[Gateway] Removing participant media for ${peerId} from room ${roomId}`,
-        );
         try {
           const removeMediaResponse =
             await this.sfuClient.removeParticipantMedia({
               room_id: roomId,
               participant_id: peerId,
             });
-          console.log(
-            `[Gateway] Removed participant media:`,
-            removeMediaResponse,
-          );
 
           // Broadcast stream-removed events for each removed stream
           if (
@@ -145,36 +126,17 @@ export class GatewayGateway
             }
           }
         } catch (error) {
-          console.error(
-            '🔌 [BACKEND] Error removing participant media:',
-            error,
-          );
+          console.error('[BACKEND] Error removing participant media:', error);
         }
-
-        // Call Room service directly to leave room
-        console.log(
-          `[Gateway] Calling Room service directly to leave room for ${peerId} in room ${roomId}`,
-        );
-        console.log(
-          `[Gateway] LeaveRoom parameters: { roomId: ${roomId}, participantId: ${peerId}, socketId: ${client.id} }`,
-        );
         const leaveRoomResponse = await this.roomClient.leaveRoom({
           roomId: roomId,
           participantId: peerId,
           socketId: client.id,
         });
-        console.log(
-          `[Gateway] Room service leave room response:`,
-          leaveRoomResponse,
-        );
 
         // Have client leave the socket.io room
         client.leave(roomId);
 
-        // Broadcast peer-left event to all remaining clients in room
-        console.log(
-          `[Gateway] Broadcasting peer-left for ${peerId} to room ${roomId}`,
-        );
         this.io.to(roomId).emit('sfu:peer-left', {
           peerId: peerId,
         });
@@ -199,11 +161,7 @@ export class GatewayGateway
         // Add delay to ensure Room service has time to update after leave request
         setTimeout(async () => {
           try {
-            console.log(
-              `[Gateway] Fetching updated room info for room ${roomId} after ${peerId} left (with 2s delay)`,
-            );
             const updatedRoom = await this.roomClient.getRoom(roomId);
-            console.log(`[Gateway] Updated room info:`, updatedRoom);
 
             if (
               updatedRoom &&
@@ -218,27 +176,10 @@ export class GatewayGateway
                 }),
               );
 
-              console.log(
-                `[Gateway] Broadcasting updated users to room ${roomId}:`,
-                users,
-              );
-              console.log(
-                `[Gateway] User count after ${peerId} left: ${users.length}`,
-              );
-
               // Verify the left user is not in the list
               const leftUserStillPresent = users.find(
                 (u) => u.peerId === peerId,
               );
-              if (leftUserStillPresent) {
-                console.error(
-                  `[Gateway] ERROR: User ${peerId} still present in room after leaving!`,
-                );
-              } else {
-                console.log(
-                  `[Gateway] SUCCESS: User ${peerId} successfully removed from room`,
-                );
-              }
 
               this.io.to(roomId).emit('sfu:users-updated', {
                 users: users,
@@ -246,14 +187,14 @@ export class GatewayGateway
             }
           } catch (error) {
             console.error(
-              '🔌 [BACKEND] Error broadcasting updated users list:',
+              '[BACKEND] Error broadcasting updated users list:',
               error,
             );
           }
         }, 2000); // Increase delay to 2 seconds
       } catch (error) {
         console.error(
-          '🔌 [BACKEND] Error calling room service leave room:',
+          '[BACKEND] Error calling room service leave room:',
           error,
         );
       }
@@ -268,7 +209,6 @@ export class GatewayGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { roomId: string; peerId: string; password?: string },
   ) {
-    console.log(`[Gateway] handleJoin called - Socket: ${client.id}, PeerId: ${data.peerId}, Room: ${data.roomId}`);
     // Check if room is password protected
     const isRoomLocked = await this.roomClient.isRoomLocked(data.roomId);
     if (isRoomLocked) {
@@ -339,30 +279,19 @@ export class GatewayGateway
       );
       return;
     }
-    
+
     // Check if participant already exists (from HTTP join)
     let existingParticipant: Participant | null = null;
     try {
-      console.log(`[Gateway] Checking for existing participant ${data.peerId} in room ${data.roomId}`);
       existingParticipant = await this.roomClient.getParticipantByPeerId(
         data.roomId,
         data.peerId,
       );
-      console.log(`[Gateway] getParticipantByPeerId result:`, existingParticipant);
-      
-      if (existingParticipant) {
-        console.log(`[Gateway] Found existing participant with socket_id: ${existingParticipant.socket_id}`);
-      } else {
-        console.log(`[Gateway] No existing participant found for ${data.peerId}`);
-      }
     } catch (error) {
       console.log(`[Gateway] getParticipantByPeerId threw error:`, error);
-      // Participant doesn't exist yet
     }
 
     if (existingParticipant) {
-      console.log(`[Gateway] Found existing participant ${data.peerId}, updating socket_id from ${existingParticipant.socket_id} to ${client.id}`);
-      
       // Update existing participant's socket_id to the WebSocket connection
       existingParticipant.socket_id = client.id;
 
@@ -371,9 +300,6 @@ export class GatewayGateway
 
         // Store the mapping for gateway routing - IMPORTANT for disconnect handling
         this.storeParticipantMapping(client.id, data.peerId, data.roomId);
-        
-        console.log(`[Gateway] Mapping stored for existing participant - Socket: ${client.id} -> PeerId: ${data.peerId} -> Room: ${data.roomId}`);
-        console.log(`[Gateway] Current connection map size: ${this.connectionMap.size}`);
 
         // Emit join success with existing participant data
         this.eventService.emitToClient(client, 'sfu:join-success', {
@@ -410,12 +336,12 @@ export class GatewayGateway
             );
           }
         } catch (error) {
-          console.error('❌ Failed to broadcast updated users list:', error);
+          console.error('Failed to broadcast updated users list:', error);
         }
 
         return; // Exit early since we updated existing participant
       } catch (error) {
-        console.error(`❌ Failed to update existing participant:`, error);
+        console.error(`Failed to update existing participant:`, error);
         this.eventService.emitError(
           client,
           'Failed to update participant',
@@ -440,9 +366,6 @@ export class GatewayGateway
 
       // Track the connection mapping for disconnect cleanup - IMPORTANT
       this.storeParticipantMapping(client.id, data.peerId, data.roomId);
-      
-      console.log(`[Gateway] Mapping stored for new participant - Socket: ${client.id} -> PeerId: ${data.peerId} -> Room: ${data.roomId}`);
-      console.log(`[Gateway] Current connection map size: ${this.connectionMap.size}`);
 
       // Emit join success immediately after participant is added
       this.eventService.emitToClient(client, 'sfu:join-success', {
@@ -552,8 +475,6 @@ export class GatewayGateway
         data.isProducer,
       );
 
-      console.log('[Gateway] SFU transport response:', transportInfo);
-
       // Parse the transport_data from SFU gRPC response
       let actualTransportData;
       if ((transportInfo as any).transport_data) {
@@ -567,9 +488,6 @@ export class GatewayGateway
       } else {
         actualTransportData = transportInfo;
       }
-
-      console.log('[Gateway] Parsed transport data:', actualTransportData);
-
       client.emit('sfu:transport-created', {
         ...actualTransportData,
         isProducer: data.isProducer,
@@ -628,15 +546,6 @@ export class GatewayGateway
     try {
       const peerId = data.peerId || this.getParticipantBySocketId(client.id);
       const roomId = data.roomId || (await this.getRoomIdBySocketId(client.id));
-
-      console.log('[Gateway] Produce request:', {
-        transportId: data.transportId,
-        kind: data.kind,
-        peerId,
-        roomId,
-        metadata: data.metadata,
-        rtpParameters: !!data.rtpParameters,
-      });
 
       // Ensure metadata is not undefined
       const safeMetadata = data.metadata || {};
@@ -794,16 +703,16 @@ export class GatewayGateway
   // Helper method to get all rooms with participants for disconnect handling
   private async getAllRoomsWithParticipants(): Promise<Map<string, any[]>> {
     const roomsMap = new Map<string, any[]>();
-    
+
     // Since we don't have a direct way to get all rooms, we'll use the room participant map
     // to identify rooms, then get their details
     const knownRoomIds = new Set<string>();
-    
+
     // Collect room IDs from the participant map
     for (const roomId of this.roomParticipantMap.values()) {
       knownRoomIds.add(roomId);
     }
-    
+
     // Also check rooms that clients are joined to
     for (const [socketId, rooms] of this.io.sockets.adapter.rooms) {
       // Skip individual socket rooms (they have same ID as socket)
@@ -811,7 +720,7 @@ export class GatewayGateway
         knownRoomIds.add(socketId);
       }
     }
-    
+
     // Get participants for each known room
     for (const roomId of knownRoomIds) {
       try {
@@ -823,7 +732,7 @@ export class GatewayGateway
         console.error(`[Gateway] Error getting room ${roomId}:`, error);
       }
     }
-    
+
     return roomsMap;
   }
 

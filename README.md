@@ -228,18 +228,8 @@ See the [LICENSE](LICENSE) file for full details.
 
 For commercial licensing inquiries, please contact us.
 
----
-
-## 📞 Support & Contact
-
-- **Documentation**: [docs.vionex.com](https://docs.vionex.com)
-- **Issues**: [GitHub Issues](https://github.com/your-org/vionex-backend/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/vionex-backend/discussions)
-- **Email**: support@vionex.com
-
----
-
+----
 <div align="center">
-  <p>Built with ❤️ by the Vionex Team</p>
+  <p>Built with by xuantruongg003</p>
   <p>© 2025 Vionex Project. All rights reserved.</p>
 </div>
