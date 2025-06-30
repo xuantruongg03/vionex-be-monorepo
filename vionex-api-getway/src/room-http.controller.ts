@@ -85,7 +85,7 @@ export class RoomHttpController {
 
       // Create participant
       const participant: Participant = {
-        socket_id: `pending-ws-${body.peerId}`, // Will be updated when WebSocket connects
+        socket_id: `pending-ws-${roomId}-${body.peerId}`, // Will be updated when WebSocket connects, format: pending-ws-{roomId}-{peerId}
         peer_id: body.peerId,
         transports: new Map(),
         producers: new Map(),
@@ -95,7 +95,7 @@ export class RoomHttpController {
       };
 
       await this.roomClient.setParticipant(roomId, participant);
-      
+
       // Note: Router capabilities are now handled via WebSocket connection
       // Get router capabilities
       // const router = await this.signalingClient.createMediaRoom(roomId);
@@ -220,7 +220,8 @@ export class RoomHttpController {
   ) {
     return {
       success: false,
-      message: 'Transport creation is now handled via WebSocket connection. Please use WebSocket API.',
+      message:
+        'Transport creation is now handled via WebSocket connection. Please use WebSocket API.',
       redirectTo: 'WebSocket sfu:create-transport event',
     };
   }
@@ -234,7 +235,8 @@ export class RoomHttpController {
   ) {
     return {
       success: false,
-      message: 'Transport connection is now handled via WebSocket. Please use WebSocket API.',
+      message:
+        'Transport connection is now handled via WebSocket. Please use WebSocket API.',
       redirectTo: 'WebSocket sfu:connect-transport event',
     };
   }
@@ -254,7 +256,8 @@ export class RoomHttpController {
   ) {
     return {
       success: false,
-      message: 'Media production is now handled via WebSocket. Please use WebSocket API.',
+      message:
+        'Media production is now handled via WebSocket. Please use WebSocket API.',
       redirectTo: 'WebSocket sfu:produce event',
     };
   }
@@ -272,7 +275,8 @@ export class RoomHttpController {
   ) {
     return {
       success: false,
-      message: 'Media consumption is now handled via WebSocket. Please use WebSocket API.',
+      message:
+        'Media consumption is now handled via WebSocket. Please use WebSocket API.',
       redirectTo: 'WebSocket sfu:consume event',
     };
   }
@@ -286,7 +290,8 @@ export class RoomHttpController {
   ) {
     return {
       success: false,
-      message: 'Consumer resume is now handled via WebSocket. Please use WebSocket API.',
+      message:
+        'Consumer resume is now handled via WebSocket. Please use WebSocket API.',
       redirectTo: 'WebSocket sfu:resume-consumer event',
     };
   }
@@ -300,7 +305,8 @@ export class RoomHttpController {
   ) {
     return {
       success: false,
-      message: 'Stream unpublishing is now handled via WebSocket. Please use WebSocket API.',
+      message:
+        'Stream unpublishing is now handled via WebSocket. Please use WebSocket API.',
       redirectTo: 'WebSocket sfu:unpublish event',
     };
   }
@@ -314,7 +320,8 @@ export class RoomHttpController {
   ) {
     return {
       success: false,
-      message: 'Stream updates are now handled via WebSocket. Please use WebSocket API.',
+      message:
+        'Stream updates are now handled via WebSocket. Please use WebSocket API.',
       redirectTo: 'WebSocket sfu:update-stream event',
     };
   }

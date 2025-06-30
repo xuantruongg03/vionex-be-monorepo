@@ -19,6 +19,11 @@ export interface ChatMessage {
   sender_name: string;
   text: string;
   timestamp?: string;
+  fileUrl?: string;
+  fileName?: string;
+  fileType?: string;
+  fileSize?: number;
+  isImage?: boolean;
 }
 
 export interface Stream {
@@ -84,6 +89,15 @@ export interface RoomGrpcService {
   }): Observable<{ success: boolean; message: string }>;
 
   getParticipants(data: { room_id: string }): Observable<any[]>;
+
+  getParticipantByPeerId(data: {
+    room_id: string;
+    peer_id: string;
+  }): Observable<{ participant: Participant | null }>;
+
+  getParticipantBySocketId(data: {
+    socket_id: string;
+  }): Observable<{ participant: any }>;
 
   removeParticipant(data: {
     room_id: string;
@@ -284,6 +298,11 @@ export interface ChatGRPCService {
     sender: string;
     sender_name: string;
     text: string;
+    fileUrl?: string;
+    fileName?: string;
+    fileType?: string;
+    fileSize?: number;
+    isImage?: boolean;
   }): Observable<{ success: boolean; message: ChatMessage | null }>;
 
   getMessages(data: {

@@ -31,6 +31,8 @@ export interface SfuGrpcService {
     transport_id: string;
     room_id: string;
     peer_id: string;
+    rtp_capabilities: string;
+    participant_data: string;
   }): any;
   resumeConsumer(data: {
     consumer_id: string;
@@ -46,6 +48,12 @@ export interface SfuGrpcService {
     producer_id: string;
     metadata: string;
     rtp_parameters: string;
+    room_id: string;
+  }): any;
+  updateStream(data: {
+    stream_id: string;
+    participant_id: string;
+    metadata: string;
     room_id: string;
   }): any;
   removeStream(data: { stream_id: string }): any;
@@ -79,10 +87,18 @@ export class SfuClientService implements OnModuleInit {
   }
 
   async getRouterRtpCapabilities(roomId: string) {
-    const result = await firstValueFrom(
+    const result: any = await firstValueFrom(
       this.sfuService.getMediaRouter({ room_id: roomId }),
     );
-    return result;
+    console.log('[SfuClient] getRouterRtpCapabilities result:', result);
+
+    if (result && result.router_data) {
+      const capabilities = JSON.parse(result.router_data);
+      console.log('[SfuClient] Parsed router capabilities:', capabilities);
+      return capabilities;
+    }
+
+    throw new Error('No router capabilities returned from SFU service');
   }
 
   async createTransport(roomId: string, peerId: string, isProducer: boolean) {
@@ -134,6 +150,8 @@ export class SfuClientService implements OnModuleInit {
     transportId: string,
     roomId: string,
     peerId: string,
+    rtpCapabilities?: any,
+    participantData?: any,
   ) {
     return firstValueFrom(
       this.sfuService.createConsumer({
@@ -141,6 +159,10 @@ export class SfuClientService implements OnModuleInit {
         transport_id: transportId,
         room_id: roomId,
         peer_id: peerId,
+        rtp_capabilities: JSON.stringify(rtpCapabilities || {}),
+        participant_data: JSON.stringify(
+          participantData || { peer_id: peerId },
+        ),
       }),
     );
   }
@@ -192,6 +214,15 @@ export class SfuClientService implements OnModuleInit {
     return firstValueFrom(this.sfuService.removeParticipantMedia(data));
   }
 
+  async updateStream(data: {
+    stream_id: string;
+    participant_id: string;
+    metadata: string;
+    room_id: string;
+  }) {
+    return firstValueFrom(this.sfuService.updateStream(data));
+  }
+
   // Method aliases for compatibility with gateway handlers
   async produce(
     transportId: string,
@@ -216,8 +247,17 @@ export class SfuClientService implements OnModuleInit {
     transportId: string,
     roomId: string,
     peerId: string,
+    rtpCapabilities?: any,
+    participantData?: any,
   ) {
-    return this.createConsumer(streamId, transportId, roomId, peerId);
+    return this.createConsumer(
+      streamId,
+      transportId,
+      roomId,
+      peerId,
+      rtpCapabilities,
+      participantData,
+    );
   }
 
   async sendPresence(roomId: string, peerId: string, metadata: any) {

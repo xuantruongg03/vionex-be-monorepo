@@ -1,7 +1,7 @@
 # 🎥 VIONEX - Advanced Video Conferencing Platform
 
 <div align="center">
-  <img src="https://via.placeholder.com/400x120/2C3E50/FFFFFF?text=VIONEX" alt="Vionex Logo" width="400"/>
+  <img src="https://res.cloudinary.com/dcweof28t/image/upload/v1751123716/image_products/logo_o34pnk.png" alt="Vionex Logo" width="400"/>
   
   <p><strong>Next-Generation Video Conferencing Solution</strong></p>
   

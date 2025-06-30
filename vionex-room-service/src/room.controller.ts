@@ -253,9 +253,24 @@ export class RoomGrpcController {
     room_id: string;
   }): Promise<GetParticipantByPeerIdResponse> {
     try {
+      console.log(
+        `[RoomService] Looking for participant: roomId=${data.room_id}, peerId=${data.peer_id}`,
+      );
+
       const participant = this.roomService.getParticipantByPeerId(
         data.peer_id,
         data.room_id,
+      );
+
+      console.log(
+        `[RoomService] Found participant:`,
+        participant
+          ? {
+              peer_id: participant.peer_id,
+              socket_id: participant.socket_id,
+              is_creator: participant.is_creator,
+            }
+          : 'null',
       );
 
       if (!participant) {
@@ -293,10 +308,42 @@ export class RoomGrpcController {
     data: any,
   ): Promise<GetParticipantBySocketIdResponse> {
     try {
-      const participant = this.roomService.getParticipantBySocketId(
-        data.socket_id,
+      console.log(
+        `[RoomController] Getting participant by socket ID: ${data.socket_id}`,
       );
-      return { participant };
+
+      const result = this.roomService.getParticipantBySocketId(data.socket_id);
+
+      if (!result) {
+        console.log(
+          `[RoomController] No participant found for socket ID: ${data.socket_id}`,
+        );
+        return { participant: null };
+      }
+
+      console.log(
+        `[RoomController] Found participant for socket ID ${data.socket_id}:`,
+        {
+          peer_id: result.participant.peer_id,
+          room_id: result.roomId,
+        },
+      );
+
+      // Return participant with room_id included
+      const response = {
+        peer_id: result.participant.peer_id,
+        socket_id: result.participant.socket_id,
+        is_creator: result.participant.is_creator,
+        time_arrive: result.participant.time_arrive,
+        room_id: result.roomId, // Include room_id in response
+        rtp_capabilities: result.participant.rtp_capabilities
+          ? typeof result.participant.rtp_capabilities === 'string'
+            ? result.participant.rtp_capabilities
+            : JSON.stringify(result.participant.rtp_capabilities)
+          : '',
+      };
+
+      return { participant: response };
     } catch (error) {
       console.error(
         `Error getting participant by socket ID ${data.socket_id}:`,

@@ -53,32 +53,8 @@ export class SfuController {
         throw new RpcException('Failed to create media room');
       }
 
-      // Log router RTP capabilities for debugging
-      console.log(
-        `🔍 [SFU Controller] Router RTP capabilities for room ${data.room_id}:`,
-      );
-      console.log(
-        'Codecs:',
-        JSON.stringify(router.rtpCapabilities.codecs, null, 2),
-      );
-
       // Log specific payload types
       const codecs = router.rtpCapabilities.codecs;
-      if (codecs && codecs.length > 0) {
-        const opusCodec = codecs.find((c) => c.mimeType === 'audio/opus');
-        const vp8Codec = codecs.find((c) => c.mimeType === 'video/VP8');
-        const h264Codec = codecs.find((c) => c.mimeType === 'video/H264');
-
-        console.log(
-          `🎵 [SFU Controller] Opus payload type: ${opusCodec?.preferredPayloadType || 'not found'}`,
-        );
-        console.log(
-          `📹 [SFU Controller] VP8 payload type: ${vp8Codec?.preferredPayloadType || 'not found'}`,
-        );
-        console.log(
-          `📹 [SFU Controller] H264 payload type: ${h264Codec?.preferredPayloadType || 'not found'}`,
-        );
-      }
 
       const routerData = {
         id: router.id,
@@ -126,7 +102,7 @@ export class SfuController {
       // Get transport from SFU service registry
       const transport = this.sfuService.getTransport(transport_id);
       if (!transport) {
-        console.error(`❌ Transport ${transport_id} not found`);
+        console.error(`Transport ${transport_id} not found`);
         throw new RpcException(`Transport ${transport_id} not found`);
       }
 
@@ -150,7 +126,7 @@ export class SfuController {
         transport: JSON.stringify(transport),
       };
     } catch (error) {
-      console.error('❌ Error connecting transport:', error);
+      console.error('Error connecting transport:', error);
       throw new RpcException('Failed to connect transport');
     }
   }
@@ -221,25 +197,15 @@ export class SfuController {
     stream: Stream;
     room_id: string;
   }): Promise<{ success: boolean; message: string }> {
-    console.log('🎬 [SFU CONTROLLER] Saving stream:', {
-      streamId: data.stream.streamId,
-      publisherId: data.stream.publisherId,
-      producerId: data.stream.producerId,
-      roomId: data.room_id,
-    });
 
     const result = this.sfuService.saveStream(data.stream);
     if (!result) {
       console.error(
-        '❌ [SFU CONTROLLER] Failed to save stream:',
+        '[SFU CONTROLLER] Failed to save stream:',
         data.stream.streamId,
       );
       throw new RpcException('Failed to save stream');
     }
-    console.log(
-      '✅ [SFU CONTROLLER] Stream saved successfully:',
-      data.stream.streamId,
-    );
     return { success: true, message: 'Stream saved successfully' };
   }
 
@@ -313,12 +279,40 @@ export class SfuController {
     participant_data: string;
   }): Promise<{ status: string; consumer_data: string }> {
     try {
-      console.log(
-        `🎯 [SFU] CreateConsumer request - Transport ID: ${data.transport_id}, Stream ID: ${data.stream_id}, Room ID: ${data.room_id}`,
-      );
+      if (!data.stream_id || data.stream_id === 'undefined') {
+        console.error(`[SFU] Invalid streamId: ${data.stream_id}`);
+        throw new RpcException(
+          `Invalid streamId: ${data.stream_id}. StreamId cannot be undefined or null.`,
+        );
+      }
 
-      const rtpCapabilities = JSON.parse(data.rtp_capabilities);
-      const participant = JSON.parse(data.participant_data);
+      if (!data.transport_id) {
+        console.error(`[SFU] Invalid transportId: ${data.transport_id}`);
+        throw new RpcException(`Invalid transportId: ${data.transport_id}`);
+      }
+
+      if (!data.room_id) {
+        console.error(`[SFU] Invalid roomId: ${data.room_id}`);
+        throw new RpcException(`Invalid roomId: ${data.room_id}`);
+      }
+
+      // Parse RTP capabilities, handle empty case
+      let rtpCapabilities = {};
+      try {
+        rtpCapabilities = JSON.parse(data.rtp_capabilities || '{}');
+      } catch (error) {
+        console.warn('[SFU] Invalid RTP capabilities, using empty object');
+        rtpCapabilities = {};
+      }
+
+      // Parse participant data
+      let participant = {};
+      try {
+        participant = JSON.parse(data.participant_data || '{}');
+      } catch (error) {
+        console.warn('[SFU] Invalid participant data, using empty object');
+        participant = {};
+      }
 
       // Ensure Maps are properly initialized before passing to SFU service
       this.ensureParticipantMaps(participant);
@@ -346,10 +340,13 @@ export class SfuController {
     room_id: string;
   }): Promise<{ status: string; router_data: string }> {
     try {
-      const mediaRouter = await this.sfuService.getMediaRouter(data.room_id);
+      const router = await this.sfuService.createMediaRoom(data.room_id);
+      if (!router) {
+        throw new RpcException('Failed to get media router');
+      }
       return {
         status: 'success',
-        router_data: JSON.stringify({ router: mediaRouter }),
+        router_data: JSON.stringify(router.rtpCapabilities),
       };
     } catch (error) {
       console.error('Error getting media router:', error);
@@ -435,18 +432,9 @@ export class SfuController {
     participant_id: string;
   }): Promise<{ status: string; removed_streams: string[] }> {
     try {
-      console.log(
-        `[SFU Controller] RemoveParticipantMedia called for participant ${data.participant_id} in room ${data.room_id}`,
-      );
-
       const removedStreams = this.sfuService.removeParticipantMedia(
         data.room_id,
         data.participant_id,
-      );
-
-      console.log(
-        `[SFU Controller] Successfully removed participant media. Removed streams:`,
-        removedStreams,
       );
 
       return {
@@ -484,13 +472,6 @@ export class SfuController {
     peer_id: string;
     metadata: string;
   }): Promise<{ status: string; presence_data: string }> {
-    console.log('[SFU Controller] HandlePresence called with:', {
-      room_id: data.room_id,
-      peer_id: data.peer_id,
-      metadata: data.metadata,
-      metadata_type: typeof data.metadata,
-    });
-
     // Parse metadata properly, ensuring we don't double-parse
     let parsedMetadata;
     try {
@@ -553,15 +534,6 @@ export class SfuController {
     producer_data?: string;
   }> {
     try {
-      console.log('🎬 [SFU Controller] CreateProducer request:', {
-        room_id: data.room_id,
-        transport_id: data.transport_id,
-        kind: data.kind,
-        rtp_parameters_length: data.rtp_parameters?.length || 0,
-        metadata: data.metadata,
-        participant_data: data.participant_data,
-      });
-
       // Validate and parse inputs
       if (!data.rtp_parameters) {
         throw new Error('RTP parameters are required');
@@ -576,13 +548,6 @@ export class SfuController {
       const rtpParameters = JSON.parse(data.rtp_parameters);
       const metadata = JSON.parse(data.metadata);
       const participant = JSON.parse(data.participant_data);
-
-      console.log('🎬 [SFU Controller] Parsed data:', {
-        rtpParameters: !!rtpParameters,
-        metadata,
-        participant,
-      });
-
       // Ensure Maps are properly initialized before passing to SFU service
       this.ensureParticipantMaps(participant);
 
@@ -595,8 +560,18 @@ export class SfuController {
         participant,
       });
 
+      // Get participant name/id from various possible fields
+      const participantId =
+        participant.peerId ||
+        participant.peer_id ||
+        participant.participantId ||
+        participant.id ||
+        'unknown';
+      const participantName =
+        participant.name || participant.username || participantId;
+
       console.log(
-        `📊 [SFU] Producer created in room ${data.room_id}: ${result.producerId} (${data.kind}) by ${participant.peerId || 'unknown'}`,
+        `📊 [SFU] Producer created in room ${data.room_id}: ${result.producerId} (${data.kind}) by ${participantName}`,
       );
 
       // Log current stream count

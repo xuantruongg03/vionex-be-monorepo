@@ -17,6 +17,11 @@ message ChatMessage {
   string sender_name = 4;
   string text = 5;
   string timestamp = 6;
+  optional string fileUrl = 7;
+  optional string fileName = 8;
+  optional string fileType = 9;
+  optional int64 fileSize = 10;
+  optional bool isImage = 11;
 }
 
 // SendMessage
@@ -25,6 +30,11 @@ message SendMessageRequest {
   string sender = 2;
   string sender_name = 3;
   string text = 4;
+  optional string fileUrl = 5;
+  optional string fileName = 6;
+  optional string fileType = 7;
+  optional int64 fileSize = 8;
+  optional bool isImage = 9;
 }
 
 message SendMessageResponse {

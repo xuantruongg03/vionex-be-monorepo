@@ -142,16 +142,47 @@ export class RoomService {
       participant.time_arrive = new Date();
     }
 
-    console.log(`👤 [Room] Adding participant to room ${roomId}:`, {
-      peer_id: participant.peer_id,
-      socket_id: participant.socket_id,
-      is_creator: participant.is_creator,
-    });
+    // Check if participant already exists (for socket_id updates)
+    const existingParticipant = room.get(participant.peer_id);
+    if (existingParticipant) {
+      console.log(
+        `👤 [Room] Updating existing participant in room ${roomId}:`,
+        {
+          peer_id: participant.peer_id,
+          old_socket_id: existingParticipant.socket_id,
+          new_socket_id: participant.socket_id,
+          is_creator: participant.is_creator,
+        },
+      );
 
-    room.set(participant.peer_id, participant);
+      // Update existing participant with new data (especially socket_id)
+      existingParticipant.socket_id = participant.socket_id;
+      existingParticipant.is_creator = participant.is_creator;
+
+      // Keep existing Maps if they exist, otherwise use new ones
+      if (!existingParticipant.transports)
+        existingParticipant.transports = participant.transports;
+      if (!existingParticipant.producers)
+        existingParticipant.producers = participant.producers;
+      if (!existingParticipant.consumers)
+        existingParticipant.consumers = participant.consumers;
+
+      // Update RTP capabilities if provided
+      if (participant.rtp_capabilities) {
+        existingParticipant.rtp_capabilities = participant.rtp_capabilities;
+      }
+    } else {
+      console.log(`👤 [Room] Adding new participant to room ${roomId}:`, {
+        peer_id: participant.peer_id,
+        socket_id: participant.socket_id,
+        is_creator: participant.is_creator,
+      });
+
+      room.set(participant.peer_id, participant);
+    }
 
     console.log(
-      `👤 [Room] Room ${roomId} participants after add:`,
+      `👤 [Room] Room ${roomId} participants after add/update:`,
       Array.from(room.keys()),
     );
 
@@ -173,14 +204,35 @@ export class RoomService {
     return room.get(peerId) || null;
   }
 
-  getParticipantBySocketId(socketId: string): Participant | null {
-    for (const [_, room] of this.rooms) {
-      for (const [_, participant] of room) {
+  getParticipantBySocketId(
+    socketId: string,
+  ): { participant: Participant; roomId: string } | null {
+    console.log(
+      `[RoomService] Searching for participant with socket ID: ${socketId}`,
+    );
+
+    for (const [roomId, room] of this.rooms) {
+      console.log(
+        `[RoomService] Checking room ${roomId} with ${room.size} participants`,
+      );
+
+      for (const [peerId, participant] of room) {
+        console.log(
+          `[RoomService] Checking participant ${peerId} with socket_id: ${participant.socket_id}`,
+        );
+
         if (participant.socket_id === socketId) {
-          return participant;
+          console.log(
+            `[RoomService] Found participant ${peerId} in room ${roomId} with matching socket_id`,
+          );
+          return { participant, roomId };
         }
       }
     }
+
+    console.log(
+      `[RoomService] No participant found with socket ID: ${socketId}`,
+    );
     return null;
   }
 

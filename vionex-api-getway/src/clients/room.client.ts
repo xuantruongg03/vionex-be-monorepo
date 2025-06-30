@@ -162,6 +162,42 @@ export class RoomClientService implements OnModuleInit {
     }
   }
 
+  async getParticipantByPeerId(roomId: string, peerId: string) {
+    try {
+      const response: any = await firstValueFrom(
+        this.roomService.getParticipantByPeerId({
+          room_id: roomId,
+          peer_id: peerId,
+        }),
+      );
+
+      if (!response || !response.participant) {
+        return null;
+      }
+
+      // Convert the participant data to the expected format
+      const participant = response.participant;
+      return {
+        socket_id: participant.socket_id,
+        peer_id: participant.peer_id,
+        transports: new Map(),
+        producers: new Map(),
+        consumers: new Map(),
+        is_creator: participant.is_creator,
+        time_arrive: new Date(participant.time_arrive),
+        rtp_capabilities: this.safeParseRtpCapabilities(
+          participant.rtp_capabilities,
+        ),
+      };
+    } catch (error) {
+      console.error(
+        `Error getting participant ${peerId} from room ${roomId}:`,
+        error,
+      );
+      return null;
+    }
+  }
+
   async removeParticipant(roomId: string, peerId: string) {
     try {
       await firstValueFrom(
@@ -251,103 +287,45 @@ export class RoomClientService implements OnModuleInit {
       throw new Error('Failed to remove producer from participant');
     }
   }
-  async getParticipantByPeerId(
-    roomId: string,
-    peerId: string,
-  ): Promise<Participant | null> {
-    try {
-      const response: any = await firstValueFrom(
-        this.roomService.getParticipantByPeerId({
-          peer_id: peerId,
-          room_id: roomId,
-        }),
-      );
-      console.log(
-        `[RoomClient] Raw participant response:`,
-        JSON.stringify(response, null, 2),
-      );
-
-      // Handle different response formats
-      if (!response) {
-        console.log(
-          `[RoomClient] No response received for participant ${peerId}`,
-        );
-        return null;
-      }
-
-      // If response is empty object, also return null
-      if (Object.keys(response).length === 0) {
-        console.log(
-          `[RoomClient] Empty response received for participant ${peerId}`,
-        );
-        return null;
-      }
-
-      // Try to extract participant data from response
-      let participant: any = null;
-      if (response.participant) {
-        participant = response.participant;
-      } else if (response.peer_id || response.peerId) {
-        participant = response;
-      } else {
-        console.log(
-          `[RoomClient] Invalid response format for participant ${peerId}:`,
-          response,
-        );
-        return null;
-      }
-
-      // Convert to our Participant format
-      const result: Participant = {
-        socket_id: participant.socket_id || participant.socketId || '',
-        peer_id: participant.peer_id || participant.peerId || peerId,
-        transports: participant.transports
-          ? new Map(Object.entries(participant.transports))
-          : new Map(),
-        producers: participant.producers
-          ? new Map(Object.entries(participant.producers))
-          : new Map(),
-        consumers: participant.consumers
-          ? new Map(Object.entries(participant.consumers))
-          : new Map(),
-        is_creator: participant.is_creator || participant.isCreator || false,
-        time_arrive: participant.time_arrive
-          ? typeof participant.time_arrive === 'number'
-            ? new Date(participant.time_arrive)
-            : participant.time_arrive.low !== undefined
-              ? new Date(
-                  participant.time_arrive.low +
-                    participant.time_arrive.high * Math.pow(2, 32),
-                )
-              : new Date(participant.time_arrive)
-          : new Date(),
-        rtp_capabilities: this.safeParseRtpCapabilities(
-          participant.rtp_capabilities || participant.rtpCapabilities,
-        ),
-      };
-
-      console.log(`[RoomClient] Converted participant:`, {
-        peer_id: result.peer_id,
-        socket_id: result.socket_id,
-        is_creator: result.is_creator,
-      });
-
-      return result;
-    } catch (error) {
-      console.error(`[RoomClient] Error getting participant ${peerId}:`, error);
-      throw new Error(`Failed to get participant ${peerId}`);
-    }
-  }
 
   // Find participant by socket ID across all rooms (for disconnect handling)
-  async findParticipantBySocketId(socketId: string): Promise<{ peerId: string; roomId: string } | null> {
+  async findParticipantBySocketId(
+    socketId: string,
+  ): Promise<{ peerId: string; roomId: string } | null> {
     try {
-      // This method needs to be implemented in the Room service
-      // For now, we'll return null and let the Gateway handle it with fallback logic
-      console.log(`[RoomClient] findParticipantBySocketId not implemented in Room service, returning null`);
+      console.log(`[RoomClient] Finding participant by socket ID: ${socketId}`);
+
+      const response = await firstValueFrom(
+        this.roomService.getParticipantBySocketId({
+          socket_id: socketId,
+        }),
+      );
+
+      if (response && response.participant) {
+        const participant = response.participant;
+        console.log(
+          `[RoomClient] Found participant by socket ID ${socketId}:`,
+          {
+            peer_id: participant.peer_id,
+            room_id: participant.room_id,
+          },
+        );
+
+        return {
+          peerId: participant.peer_id,
+          roomId: participant.room_id,
+        };
+      }
+
+      console.log(
+        `[RoomClient] No participant found for socket ID: ${socketId}`,
+      );
       return null;
     } catch (error) {
-      console.error(`[RoomClient] Error finding participant by socket ID ${socketId}:`, error);
+      console.error(
+        `[RoomClient] Error finding participant by socket ID ${socketId}:`,
+        error,
+      );
       return null;
     }
   }

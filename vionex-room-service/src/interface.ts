@@ -120,6 +120,15 @@ interface GetParticipantBySocketIdResponse {
   participant: any;
 }
 
+interface GetParticipantByPeerIdRequest {
+  peer_id: string;
+  room_id: string;
+}
+
+interface GetParticipantByPeerIdResponse {
+  participant: Participant | null;
+}
+
 interface RemoveParticipantRequest {
   room_id: string;
   peer_id: string;
@@ -171,10 +180,6 @@ interface RemoveProducerFromParticipantResponse {
   message: string;
 }
 
-export interface GetParticipantByPeerIdResponse {
-  participant: Participant | null;
-}
-
 export {
   IsRoomExistsRequest,
   IsRoomExistsResponse,
@@ -196,6 +201,8 @@ export {
   GetParticipantsResponse,
   GetParticipantBySocketIdRequest,
   GetParticipantBySocketIdResponse,
+  GetParticipantByPeerIdRequest,
+  GetParticipantByPeerIdResponse,
   RemoveParticipantRequest,
   RemoveParticipantResponse,
   SetTransportRequest,

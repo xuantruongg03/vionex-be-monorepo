@@ -11,6 +11,11 @@ export class ChatService {
     sender: string,
     sender_name: string,
     text: string,
+    fileUrl?: string,
+    fileName?: string,
+    fileType?: string,
+    fileSize?: number,
+    isImage?: boolean,
   ): Promise<ChatMessage | null> {
     try {
       const newMessage: ChatMessage = {
@@ -20,6 +25,11 @@ export class ChatService {
         sender_name,
         text,
         timestamp: new Date().toISOString(),
+        fileUrl,
+        fileName,
+        fileType,
+        fileSize,
+        isImage,
       };
 
       if (this.roomMessages.has(room_id)) {
@@ -29,10 +39,10 @@ export class ChatService {
       }
 
       // Giới hạn kích thước lịch sử (chỉ lưu 100 tin nhắn gần nhất)
-      // const messages = this.roomMessages.get(room_id);
-      // if (messages && messages.length > 100) {
-      //     this.roomMessages.set(room_id, messages.slice(-100));
-      // }
+      const messages = this.roomMessages.get(room_id);
+      if (messages && messages.length > 100) {
+        this.roomMessages.set(room_id, messages.slice(-100));
+      }
 
       return newMessage;
     } catch (error) {

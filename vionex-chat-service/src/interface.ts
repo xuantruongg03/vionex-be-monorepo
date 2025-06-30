@@ -7,6 +7,11 @@ export interface ChatMessage {
   sender_name: string;
   text: string;
   timestamp: string;
+  fileUrl?: string;
+  fileName?: string;
+  fileType?: string;
+  fileSize?: number;
+  isImage?: boolean;
 }
 
 export interface ChatGRPCService {
@@ -15,6 +20,11 @@ export interface ChatGRPCService {
     sender: string;
     sender_name: string;
     text: string;
+    fileUrl?: string;
+    fileName?: string;
+    fileType?: string;
+    fileSize?: number;
+    isImage?: boolean;
   }): Observable<ChatMessageResponse | null>;
 
   getMessages(data: {

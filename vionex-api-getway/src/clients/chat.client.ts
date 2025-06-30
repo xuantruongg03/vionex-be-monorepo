@@ -20,6 +20,11 @@ export class ChatClientService implements OnModuleInit {
     sender: string;
     sender_name: string;
     text: string;
+    fileUrl?: string;
+    fileName?: string;
+    fileType?: string;
+    fileSize?: number;
+    isImage?: boolean;
   }) {
     return this.circuitBreaker.execute(async () => {
       return RetryUtil.withRetry(

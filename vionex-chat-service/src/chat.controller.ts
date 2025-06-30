@@ -8,12 +8,27 @@ export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
   @GrpcMethod('ChatService', 'SendMessage')
-  async sendMessage(data: ChatMessage): Promise<ChatMessageResponse> {
+  async sendMessage(data: {
+    room_id: string;
+    sender: string;
+    sender_name: string;
+    text: string;
+    fileUrl?: string;
+    fileName?: string;
+    fileType?: string;
+    fileSize?: number;
+    isImage?: boolean;
+  }): Promise<ChatMessageResponse> {
     const rs = await this.chatService.saveMessage(
       data.room_id,
       data.sender,
       data.sender_name,
       data.text,
+      data.fileUrl,
+      data.fileName,
+      data.fileType,
+      data.fileSize,
+      data.isImage,
     );
     if (!rs) {
       return {

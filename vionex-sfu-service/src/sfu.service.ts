@@ -86,10 +86,6 @@ export class SfuService {
       });
 
       console.log('🎯 [SFU] Router created successfully');
-      console.log(
-        '🎯 [SFU] Router RTP capabilities:',
-        JSON.stringify(router.rtpCapabilities, null, 2),
-      );
 
       // Log specific payload types assigned by mediasoup
       const routerCodecs = router.rtpCapabilities.codecs;
@@ -255,7 +251,10 @@ export class SfuService {
       mediaRoom.consumers.set(streamId, []);
     }
 
-    mediaRoom.consumers.get(streamId)?.push(consumer);
+    const consumers = mediaRoom.consumers.get(streamId);
+    if (consumers) {
+      consumers.push(consumer);
+    }
   }
 
   async removeProducer(roomId: string, streamId: string): Promise<void> {
@@ -404,119 +403,127 @@ export class SfuService {
     roomId: string,
     streamId: string,
     transportId: string,
-    rtpCapabilities: mediasoupTypes.RtpCapabilities,
+    rtpCapabilities: any,
     participant: any,
-  ): Promise<{
-    consumerId: string;
-    consumer: mediasoupTypes.Consumer;
-    kind: mediasoupTypes.MediaKind;
-    producerId: string;
-    rtpParameters: mediasoupTypes.RtpParameters;
-  }> {
-    // Đảm bảo room tồn tại
-    let mediaRoom = this.mediaRooms.get(roomId);
-    if (!mediaRoom) {
-      await this.createMediaRoom(roomId);
-      mediaRoom = this.mediaRooms.get(roomId);
-      if (!mediaRoom) {
-        throw new Error(`Failed to create room ${roomId}`);
-      }
-    }
-
-    // Get stream
-    const stream = this.getStream(streamId);
-    if (!stream) {
-      throw new Error(`Stream ${streamId} not found`);
-    }
-
-    // Get transport from global transports registry
-    console.log(
-      `🔍 [SFU] Looking for transport ${transportId} in global registry. Available transports:`,
-      Array.from(this.transports.keys()),
-    );
-    const transport = this.transports.get(transportId);
-    if (!transport) {
-      console.error(
-        `❌ [SFU] Transport ${transportId} not found in global registry`,
+  ) {
+    try {
+      console.log(
+        `🎯 [SFU] Creating consumer - Room: ${roomId}, Stream: ${streamId}, Transport: ${transportId}`,
       );
-      throw new Error(`Transport ${transportId} not found`);
-    }
-    console.log(`✅ [SFU] Found transport ${transportId} in global registry`);
+      console.log(
+        `🎯 [SFU] RTP capabilities provided:`,
+        rtpCapabilities ? 'YES' : 'NO',
+      );
+      console.log(`🎯 [SFU] Participant data:`, participant);
 
-    // Check if can consume
-    console.log(
-      `🔍 [SFU] Checking if router can consume. Producer ID: ${stream.producerId}, RTP capabilities available: ${!!rtpCapabilities}`,
-    );
-    const canConsume = mediaRoom.router.canConsume({
-      producerId: stream.producerId,
-      rtpCapabilities: rtpCapabilities,
-    });
-    console.log(`🔍 [SFU] Router canConsume result: ${canConsume}`);
+      // Get the media room
+      const mediaRoom = this.mediaRooms.get(roomId);
+      if (!mediaRoom) {
+        throw new Error(`Media room ${roomId} not found`);
+      }
 
-    if (!canConsume) {
-      throw new Error('Cannot consume this stream');
-    }
+      // Get the transport
+      const transport = this.transports.get(transportId);
+      if (!transport) {
+        throw new Error(`Transport ${transportId} not found`);
+      }
 
-    console.log(
-      `🔍 [SFU] About to call transport.consume with producer ID: ${stream.producerId}`,
-    );
-    console.log(
-      `🔍 [SFU] Consumer RTP capabilities:`,
-      JSON.stringify(rtpCapabilities.codecs, null, 2),
-    );
+      // Get the stream to find the producer
+      const stream = this.streams.get(streamId);
+      if (!stream) {
+        throw new Error(`Stream ${streamId} not found`);
+      }
 
-    // Log participant info for debugging cross-device issues
-    console.log(
-      `🔍 [SFU] Participant consuming: ${participant?.peer_id || 'unknown'}`,
-    );
-    console.log(`🔍 [SFU] Stream from publisher: ${stream.publisherId}`);
-
-    // Create consumer
-    const consumer = await transport.consume({
-      producerId: stream.producerId,
-      rtpCapabilities: rtpCapabilities,
-      paused: true,
-    });
-    console.log(
-      `✅ [SFU] Consumer created successfully with ID: ${consumer.id}`,
-    );
-    console.log(
-      `🔍 [SFU] Consumer RTP parameters:`,
-      JSON.stringify(consumer.rtpParameters, null, 2),
-    );
-
-    // Log specific payload types for debugging
-    const consumerCodecs = consumer.rtpParameters.codecs;
-    if (consumerCodecs && consumerCodecs.length > 0) {
-      consumerCodecs.forEach((codec) => {
-        console.log(
-          `🎯 [SFU] Consumer codec: ${codec.mimeType}, payloadType: ${codec.payloadType}`,
-        );
-      });
-    }
-
-    // Save consumer
-    this.saveConsumer(roomId, streamId, consumer);
-
-    // Handle consumer close event
-    consumer.on('producerclose', () => {
-      // Remove consumer from storage
-      const consumers = mediaRoom.consumers.get(streamId);
-      if (consumers) {
-        const index = consumers.indexOf(consumer);
-        if (index > -1) {
-          consumers.splice(index, 1);
+      // Get the producer by its producerId (not streamId)
+      let producer: mediasoupTypes.Producer | undefined;
+      for (const [, p] of mediaRoom.producers.entries()) {
+        if (p.id === stream.producerId) {
+          producer = p;
+          break;
         }
       }
-    });
 
-    return {
-      consumerId: consumer.id,
-      consumer: consumer,
-      producerId: stream.producerId,
-      kind: consumer.kind,
-      rtpParameters: consumer.rtpParameters,
-    };
+      if (!producer) {
+        throw new Error(
+          `Producer ${stream.producerId} for stream ${streamId} not found in media room`,
+        );
+      }
+
+      // If no RTP capabilities provided, use router capabilities as fallback
+      let finalRtpCapabilities = rtpCapabilities;
+      if (!rtpCapabilities || Object.keys(rtpCapabilities).length === 0) {
+        console.log(
+          `🎯 [SFU] No RTP capabilities provided, using router capabilities`,
+        );
+        finalRtpCapabilities = mediaRoom.router.rtpCapabilities;
+      }
+
+      // Check if router can consume this producer with the given capabilities
+      if (
+        !mediaRoom.router.canConsume({
+          producerId: producer.id,
+          rtpCapabilities: finalRtpCapabilities,
+        })
+      ) {
+        console.warn(
+          `🚫 [SFU] Router cannot consume producer ${producer.id} with given capabilities`,
+        );
+        console.warn(
+          `🚫 [SFU] Producer kind: ${producer.kind}, mimeType: ${producer.rtpParameters.codecs[0]?.mimeType}`,
+        );
+        throw new Error(
+          'Router cannot consume this producer with given RTP capabilities',
+        );
+      }
+
+      // Create consumer
+      const consumer = await transport.consume({
+        producerId: producer.id,
+        rtpCapabilities: finalRtpCapabilities,
+        paused: true, // Start paused
+      });
+
+      console.log(
+        `✅ [SFU] Consumer created: ${consumer.id}, kind: ${consumer.kind}`,
+      );
+
+      // Store consumer in media room - use streamId as key and store array of consumers
+      if (!mediaRoom.consumers.has(streamId)) {
+        mediaRoom.consumers.set(streamId, []);
+      }
+      const consumers = mediaRoom.consumers.get(streamId);
+      if (consumers) {
+        consumers.push(consumer);
+      }
+
+      // Handle consumer close event
+      consumer.on('transportclose', () => {
+        console.log(`Consumer ${consumer.id} closed because transport closed`);
+        // Remove consumer from the array
+        const consumers = mediaRoom.consumers.get(streamId);
+        if (consumers) {
+          const index = consumers.findIndex((c) => c.id === consumer.id);
+          if (index !== -1) {
+            consumers.splice(index, 1);
+          }
+          // If no consumers left, remove the key
+          if (consumers.length === 0) {
+            mediaRoom.consumers.delete(streamId);
+          }
+        }
+      });
+
+      return {
+        consumerId: consumer.id,
+        producerId: producer.id,
+        kind: consumer.kind,
+        rtpParameters: consumer.rtpParameters,
+        consumer,
+      };
+    } catch (error) {
+      console.error('Error creating consumer:', error);
+      throw error;
+    }
   }
 
   async resumeConsumer(
@@ -524,30 +531,38 @@ export class SfuService {
     consumerId: string,
     participantId: string,
   ): Promise<void> {
-    const mediaRoom = this.mediaRooms.get(roomId);
-    if (!mediaRoom) {
-      throw new Error(`Room ${roomId} not found 430`);
-    }
+    try {
+      console.log(
+        `🎯 [SFU] Resuming consumer: ${consumerId} in room: ${roomId}`,
+      );
 
-    // Find consumer across all streams in the room
-    let foundConsumer: mediasoupTypes.Consumer | null = null;
-
-    for (const [streamId, consumers] of mediaRoom.consumers.entries()) {
-      const consumer = consumers.find((c) => c.id === consumerId);
-      if (consumer) {
-        foundConsumer = consumer;
-        break;
+      const mediaRoom = this.mediaRooms.get(roomId);
+      if (!mediaRoom) {
+        throw new Error(`Room ${roomId} not found`);
       }
+
+      // Find the consumer by ID across all streams in the room
+      let foundConsumer: mediasoupTypes.Consumer | null = null;
+      for (const [streamId, consumers] of mediaRoom.consumers.entries()) {
+        const consumer = consumers.find((c) => c.id === consumerId);
+        if (consumer) {
+          foundConsumer = consumer;
+          break;
+        }
+      }
+
+      if (!foundConsumer) {
+        throw new Error(`Consumer ${consumerId} not found in room ${roomId}`);
+      }
+
+      // Resume the consumer
+      await foundConsumer.resume();
+
+      console.log(`✅ [SFU] Consumer resumed: ${consumerId}`);
+    } catch (error) {
+      console.error('Error resuming consumer:', error);
+      throw error;
     }
-
-    if (!foundConsumer) {
-      throw new Error(`Consumer ${consumerId} not found in room ${roomId}`);
-    }
-
-    // Resume the consumer
-    await foundConsumer.resume();
-
-    console.log(`Consumer ${consumerId} resumed in room ${roomId}`);
   }
 
   async unpublishStream(
@@ -815,11 +830,19 @@ export class SfuService {
         this.producerToStream.delete(producer.id);
       });
 
-      // Create stream object
-      const streamId = `${data.participant.peerId || 'unknown'}-${data.kind}-${Date.now()}`;
+      // Create stream object - handle both peerId and peer_id
+      const participantId =
+        data.participant.peerId ||
+        data.participant.peer_id ||
+        data.participant.participantId ||
+        data.participant.id ||
+        'unknown';
+      const participantName =
+        data.participant.name || data.participant.username || participantId;
+      const streamId = `${participantId}-${data.kind}-${Date.now()}`;
       const stream: Stream = {
         streamId,
-        publisherId: data.participant.peerId || 'unknown',
+        publisherId: participantId,
         producerId: producer.id,
         metadata: data.metadata,
         rtpParameters: producer.rtpParameters,
@@ -836,7 +859,7 @@ export class SfuService {
       this.saveProducer(data.roomId, streamId, producer);
 
       console.log(
-        `Producer created: ${producer.id}, kind: ${producer.kind}, streamId: ${streamId}`,
+        `🎬 [SFU Service] Producer created: ${producer.id}, kind: ${producer.kind}, streamId: ${streamId}, participant: ${participantName}`,
       );
 
       return {

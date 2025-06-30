@@ -382,12 +382,20 @@ export class GatewayController {
       let streamsArray: any[] = [];
       if (Array.isArray(streamsResponse)) {
         streamsArray = streamsResponse;
-      } else if ((streamsResponse as any).streams && Array.isArray((streamsResponse as any).streams)) {
+      } else if (
+        (streamsResponse as any).streams &&
+        Array.isArray((streamsResponse as any).streams)
+      ) {
         streamsArray = (streamsResponse as any).streams;
-      } else if ((streamsResponse as any).data && Array.isArray((streamsResponse as any).data)) {
+      } else if (
+        (streamsResponse as any).data &&
+        Array.isArray((streamsResponse as any).data)
+      ) {
         streamsArray = (streamsResponse as any).data;
       } else {
-        console.log('SFU getStreams returned non-array response, returning empty array');
+        console.log(
+          'SFU getStreams returned non-array response, returning empty array',
+        );
         return { success: true, streams: [] };
       }
 
@@ -395,14 +403,22 @@ export class GatewayController {
         return { success: true, streams: [] };
       }
 
-      // Return complete stream data including metadata
+      // Return complete stream data including metadata with proper field mapping
       const availableStreams = streamsArray.map((stream: any) => ({
-        streamId: stream.streamId,
-        publisherId: stream.publisherId,
-        producerId: stream.producerId,
-        metadata: stream.metadata || {},
-        rtpParameters: stream.rtpParameters || {},
-        roomId: stream.roomId,
+        streamId: stream.streamId || stream.stream_id,
+        publisherId: stream.publisherId || stream.publisher_id,
+        producerId: stream.producerId || stream.producer_id,
+        metadata: stream.metadata
+          ? typeof stream.metadata === 'string'
+            ? JSON.parse(stream.metadata)
+            : stream.metadata
+          : {},
+        rtpParameters: stream.rtpParameters
+          ? typeof stream.rtpParameters === 'string'
+            ? JSON.parse(stream.rtpParameters)
+            : stream.rtpParameters
+          : {},
+        roomId: stream.roomId || stream.room_id,
       }));
 
       return {
@@ -428,14 +444,41 @@ export class GatewayController {
     try {
       const participant = await this.getParticipantFromHeader(authorization);
 
-      // For now, we'll just return success since SFU doesn't have updateStream
-      // Call sfu service to update stream metadata (if supported)
-      // const result = await this.sfuClient.updateStream({
-      //   streamId: streamId,
-      //   participantId: participant.peer_id,
-      //   metadata: data.metadata,
-      //   roomId: data.roomId,
-      // });
+      // Try to get roomId from the request, or look it up
+      let roomId: string | undefined = data.roomId;
+      if (!roomId) {
+        const participantRoom = await this.roomClient.getParticipantRoom(
+          participant.peer_id,
+        );
+        roomId = participantRoom || undefined;
+      }
+
+      if (!roomId) {
+        throw new HttpException(
+          'Room ID is required and could not be determined',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // Call SFU service to update stream metadata
+      const result = await this.sfuClient.updateStream({
+        stream_id: streamId,
+        participant_id: participant.peer_id,
+        metadata: JSON.stringify(data.metadata),
+        room_id: roomId,
+      });
+
+      // Broadcast the metadata update to all clients in the room
+      this.broadcastService.broadcastToRoom(
+        roomId,
+        'sfu:stream-metadata-updated',
+        {
+          streamId: streamId,
+          publisherId: participant.peer_id,
+          metadata: data.metadata,
+          roomId: roomId,
+        },
+      );
 
       return {
         success: true,
@@ -650,7 +693,10 @@ export class GatewayController {
         // Direct streamId field
         streamId = (result as any).streamId;
         console.log('Using streamId from direct field:', streamId);
-      } else if ((result as any).producer && (result as any).producer.streamId) {
+      } else if (
+        (result as any).producer &&
+        (result as any).producer.streamId
+      ) {
         // StreamId in producer object
         streamId = (result as any).producer.streamId;
         console.log('Using streamId from producer object:', streamId);
@@ -736,6 +782,16 @@ export class GatewayController {
       console.log('Transport ID:', transportId);
       console.log('Stream ID:', data.streamId);
       console.log('Room ID from request body:', data.roomId);
+      console.log('Full request data:', JSON.stringify(data, null, 2));
+
+      // Validate streamId before proceeding
+      if (!data.streamId || data.streamId === 'undefined') {
+        console.error('❌ Invalid streamId in consume request:', data.streamId);
+        throw new HttpException(
+          `Invalid streamId: ${data.streamId}. StreamId cannot be undefined or null.`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
 
       const participant = await this.getParticipantFromHeader(authorization);
 
@@ -815,7 +871,10 @@ export class GatewayController {
         participant.peer_id,
       );
 
-      console.log('Consumer created successfully:', (result as any).data?.consumerId);
+      console.log(
+        'Consumer created successfully:',
+        (result as any).data?.consumerId,
+      );
 
       // Broadcast consumer-created event to the requesting client via WebSocket
       const consumerInfo = {
@@ -999,8 +1058,7 @@ export class GatewayController {
 
       return {
         success: false,
-        message:
-          'Producer resume feature not implemented',
+        message: 'Producer resume feature not implemented',
       };
     } catch (error) {
       console.error('Error resuming producer:', error);
