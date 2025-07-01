@@ -14,6 +14,10 @@ import { SfuClientService } from './clients/sfu.client';
 import { Participant } from './interfaces/interface';
 import { HttpBroadcastService } from './services/http-broadcast.service';
 import { WebSocketEventService } from './services/websocket-event.service';
+import { InteractionClientService } from './clients/interaction.client';
+import { ClearWhiteboardResponse, GetPermissionsResponse, GetWhiteboardDataResponse, UpdatePermissionsResponse, UpdateUserPointerResponse } from './interfaces/whiteboard';
+
+
 
 @WebSocketGateway({
   transports: ['websocket'],
@@ -35,9 +39,19 @@ export class GatewayGateway
     private readonly httpBroadcastService: HttpBroadcastService,
     private readonly sfuClient: SfuClientService,
     private readonly chatClient: ChatClientService,
+    private readonly interactionClient: InteractionClientService,
   ) {}
   handleConnection(client: Socket) {
+    console.log('[Gateway] New client connected:', client.id);
     this.httpBroadcastService.setSocketServer(this.io);
+
+    // Debug: Log all incoming events
+    client.onAny((eventName, ...args) => {
+      console.log(
+        `[Gateway] Received event '${eventName}' from client ${client.id}:`,
+        args,
+      );
+    });
   }
 
   async handleDisconnect(client: Socket) {
@@ -238,12 +252,27 @@ export class GatewayGateway
         );
         return;
       }
-      // Lấy lại room data sau khi tạo
       room = await this.roomClient.getRoom(data.roomId);
     }
 
-    const isCreator =
-      !room.data?.participants || room.data.participants.length === 0;
+    let hasExistingCreator = false;
+    let isRoomEmpty = false;
+
+    if (room.data?.participants && room.data.participants.length > 0) {
+      const otherParticipants = room.data.participants.filter((p) => {
+        const participantId = p.peerId || p.peer_id;
+        return participantId !== data.peerId;
+      });
+      hasExistingCreator = otherParticipants.some((p) => p.is_creator === true);
+
+      // Room trống nếu không có participant nào khác
+      isRoomEmpty = otherParticipants.length === 0;
+    } else {
+      // Room không có participants nào
+      isRoomEmpty = true;
+    }
+
+    const isCreator = !hasExistingCreator && isRoomEmpty;
 
     // Check if this is a legitimate participant trying to connect via WebSocket
     // (participant exists from HTTP join but needs socket_id update)
@@ -438,9 +467,6 @@ export class GatewayGateway
                 }
               }
             } else {
-              console.log(
-                `[Gateway] No consumable streams from other users found for existing client (all streams are from ${data.peerId})`,
-              );
               // Send empty streams array
               this.eventService.emitToClient(client, 'sfu:streams', []);
             }
@@ -486,6 +512,19 @@ export class GatewayGateway
 
       // Track the connection mapping for disconnect cleanup - IMPORTANT
       this.storeParticipantMapping(client.id, data.peerId, data.roomId);
+
+      // Initialize whiteboard permissions if this is the creator
+      if (participant.is_creator) {
+        try {
+          await this.interactionClient.initializeRoomPermissions(
+            data.roomId,
+            data.peerId,
+          );
+        } catch (error) {
+          console.error('Failed to initialize whiteboard permissions:', error);
+          // Don't fail the join process for whiteboard initialization failure
+        }
+      }
 
       // Emit join success immediately after participant is added
       this.eventService.emitToClient(client, 'sfu:join-success', {
@@ -555,7 +594,6 @@ export class GatewayGateway
 
     // Send existing streams to the new client
     try {
-      console.log(`[Gateway] Getting existing streams for room ${data.roomId}`);
       const existingStreamsResponse = await this.sfuClient.getStreams(
         data.roomId,
       );
@@ -579,15 +617,6 @@ export class GatewayGateway
         });
 
         if (otherUserStreams.length > 0) {
-          console.log(
-            `[Gateway] Sending ${otherUserStreams.length} consumable streams to new client:`,
-            otherUserStreams.map((s) => ({
-              streamId: s.stream_id,
-              publisherId: s.publisher_id,
-              type: s.metadata ? JSON.parse(s.metadata).type : 'unknown',
-            })),
-          );
-
           // Send bulk streams to new client
           this.eventService.emitToClient(
             client,
@@ -664,8 +693,6 @@ export class GatewayGateway
       }
     } catch (error) {
       console.error('Failed to get existing streams for new client:', error);
-      // Don't fail the join process, just log the error
-      // Send empty streams array as fallback
       this.eventService.emitToClient(client, 'sfu:streams', []);
     }
   }
@@ -899,7 +926,6 @@ export class GatewayGateway
       try {
         if (consumerInfo && (consumerInfo as any).consumer_data) {
           consumerData = JSON.parse((consumerInfo as any).consumer_data);
-          console.log('[Gateway] Parsed consumer data:', consumerData);
         } else {
           console.error(
             '[Gateway] No consumer_data in response:',
@@ -1182,9 +1208,883 @@ export class GatewayGateway
     console.log(`User left chat room: ${data.roomId}`);
   }
 
+  // ======================================================WHITEBOARD======================================================
+  @SubscribeMessage('whiteboard:update')
+  async handleWhiteboardUpdate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string; elements: any; state: any },
+  ) {
+    const roomId = data.roomId;
+    const peerId = this.getParticipantBySocketId(client.id);
+
+    if (!peerId) {
+      console.log('[Gateway] User not found for socket:', client.id);
+      client.emit('whiteboard:error', {
+        message: 'User not found',
+        code: 'USER_NOT_FOUND',
+      });
+      return;
+    }
+
+    try {
+      // Check if user has permission to draw
+      const permissionResult = await this.interactionClient.checkUserPermission(
+        roomId,
+        peerId,
+      );
+      if (!permissionResult.success || !permissionResult.can_draw) {
+        client.emit('whiteboard:error', {
+          message: 'No permission to edit whiteboard',
+          code: 'NO_PERMISSION',
+        });
+        return;
+      }
+      // Update whiteboard data via interaction service
+      const result = (await this.interactionClient.updateWhiteboard(
+        roomId,
+        data.elements,
+        JSON.stringify(data.state || {}),
+      )) as { success: boolean; whiteboard_data?: any };
+
+      console.log('🎨 [Gateway] Update whiteboard result:', result);
+
+      if (result.success) {
+        // Broadcast update to all clients in the room
+        this.io.to(roomId).emit('whiteboard:update', {
+          elements: data.elements,
+          state: data.state,
+        });
+      } else {
+        console.log('[Gateway] Update failed');
+        client.emit('whiteboard:error', {
+          message: 'Failed to update whiteboard',
+          code: 'UPDATE_ERROR',
+        });
+      }
+    } catch (error) {
+      console.error('Error handling whiteboard update:', error);
+      client.emit('whiteboard:error', {
+        message: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+      });
+    }
+  }
+
+  @SubscribeMessage('whiteboard:get-data')
+  async handleGetWhiteboardData(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string },
+  ) {
+    try {
+      const result = (await this.interactionClient.getWhiteboardData(
+        data.roomId,
+      )) as GetWhiteboardDataResponse;
+
+      if (result.success) {
+        const dataToEmit = {
+          elements: result.whiteboard_data?.elements || [],
+          state: result.whiteboard_data?.state
+            ? JSON.parse(result.whiteboard_data.state)
+            : {},
+        };
+
+        client.emit('whiteboard:data', dataToEmit);
+      } else {
+        console.log('[Gateway] No whiteboard data found, emitting empty data');
+        client.emit('whiteboard:data', {
+          elements: [],
+          state: {},
+        });
+      }
+    } catch (error) {
+      console.error('[Gateway] Error getting whiteboard data:', error);
+      client.emit('whiteboard:data', {
+        elements: [],
+        state: {},
+      });
+    }
+  }
+
+  @SubscribeMessage('whiteboard:clear')
+  async handleClearWhiteboard(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string },
+  ) {
+    try {
+      const result = (await this.interactionClient.clearWhiteboard(
+        data.roomId,
+      )) as ClearWhiteboardResponse;
+
+      if (result.success) {
+        // Broadcast clear to all clients in the room
+        this.io.to(data.roomId).emit('whiteboard:cleared');
+      }
+    } catch (error) {
+      console.error('Error clearing whiteboard:', error);
+    }
+  }
+
+  @SubscribeMessage('whiteboard:update-permissions')
+  async handleWhiteboardPermissions(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string; allowed: string[] },
+  ) {
+    try {
+      const result = (await this.interactionClient.updatePermissions(
+        data.roomId,
+        data.allowed,
+      )) as UpdatePermissionsResponse;
+      if (result.success) {
+        // Broadcast permission update to all clients in the room
+        this.io.to(data.roomId).emit('whiteboard:permissions-updated', {
+          allowed: result.allowed_users,
+        });
+      }
+    } catch (error) {
+      console.error('Error updating whiteboard permissions:', error);
+    }
+  }
+
+  @SubscribeMessage('whiteboard:get-permissions')
+  async handleGetWhiteboardPermissions(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string },
+  ) {
+    try {
+      const result = (await this.interactionClient.getPermissions(
+        data.roomId,
+      )) as GetPermissionsResponse;
+
+      client.emit('whiteboard:permissions', {
+        allowed: result.allowed_users || [],
+      });
+    } catch (error) {
+      console.error('Error getting whiteboard permissions:', error);
+      client.emit('whiteboard:permissions', {
+        allowed: [],
+      });
+    }
+  }
+
+  @SubscribeMessage('whiteboard:pointer')
+  async handleWhiteboardPointer(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: { roomId: string; position: { x: number; y: number; tool: string } },
+  ) {
+    const peerId = this.getParticipantBySocketId(client.id);
+    if (!peerId) return;
+
+    try {
+      const result = (await this.interactionClient.updateUserPointer(
+        data.roomId,
+        peerId,
+        data.position,
+      )) as UpdateUserPointerResponse;
+
+      if (result.success) {
+        // Broadcast pointer position to other clients in the room
+        client.to(data.roomId).emit('whiteboard:pointer-update', {
+          peerId,
+          position: data.position,
+        });
+      }
+    } catch (error) {
+      console.error('Error updating whiteboard pointer:', error);
+    }
+  }
+
+  @SubscribeMessage('whiteboard:pointer-leave')
+  async handleWhiteboardPointerLeave(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string },
+  ) {
+    const peerId = this.getParticipantBySocketId(client.id);
+    if (!peerId) return;
+
+    try {
+      await this.interactionClient.removeUserPointer(data.roomId, peerId);
+
+      // Broadcast pointer removal to other clients in the room
+      client.to(data.roomId).emit('whiteboard:pointer-remove', {
+        peerId,
+      });
+    } catch (error) {
+      console.error('Error removing whiteboard pointer:', error);
+    }
+  }
+
+  // ======================================================VOTING======================================================
+  @SubscribeMessage('sfu:create-vote')
+  async handleCreateVote(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomId: string;
+      question: string;
+      options: { id: string; text: string }[];
+      creatorId: string;
+    },
+  ) {
+    try {
+      const result = await this.interactionClient.createVote(
+        data.roomId,
+        data.question,
+        data.options,
+        data.creatorId,
+      );
+      if ((result as any).success) {
+        // Broadcast new vote to all clients in the room
+        this.io
+          .to(data.roomId)
+          .emit('sfu:vote-created', (result as any).vote_session);
+      } else {
+        console.error('[Gateway] Create vote failed:', (result as any).error);
+        client.emit('sfu:vote-error', {
+          message: (result as any).error || 'Failed to create vote',
+          code: 'CREATE_ERROR',
+        });
+      }
+    } catch (error) {
+      console.error('[Gateway] Error creating vote:', error);
+      client.emit('sfu:vote-error', {
+        message: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+      });
+    }
+  }
+
+  @SubscribeMessage('sfu:submit-vote')
+  async handleSubmitVote(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomId: string;
+      voteId: string;
+      optionId: string;
+      voterId: string;
+    },
+  ) {
+    try {
+      const result = await this.interactionClient.submitVote(
+        data.roomId,
+        data.voteId,
+        data.optionId,
+        data.voterId,
+      );
+
+      if ((result as any).success) {
+        // Broadcast updated vote results to all clients in the room
+        this.io
+          .to(data.roomId)
+          .emit('sfu:vote-updated', (result as any).vote_session);
+      } else {
+        console.error('[Gateway] Submit vote failed:', (result as any).error);
+        client.emit('sfu:vote-error', {
+          message: (result as any).error || 'Failed to submit vote',
+          code: 'SUBMIT_ERROR',
+        });
+      }
+    } catch (error) {
+      console.error('[Gateway] Error submitting vote:', error);
+      client.emit('sfu:vote-error', {
+        message: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+      });
+    }
+  }
+
+  @SubscribeMessage('sfu:get-vote-results')
+  async handleGetVoteResults(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomId: string;
+      voteId: string;
+    },
+  ) {
+    try {
+      const result = await this.interactionClient.getVoteResults(
+        data.roomId,
+        data.voteId,
+      );
+
+      if ((result as any).success) {
+        client.emit('sfu:vote-results', (result as any).vote_session);
+      } else {
+        console.error(
+          '[Gateway] Get vote results failed:',
+          (result as any).error,
+        );
+        client.emit('sfu:vote-error', {
+          message: (result as any).error || 'Vote not found',
+          code: 'NOT_FOUND',
+        });
+      }
+    } catch (error) {
+      console.error('[Gateway] Error getting vote results:', error);
+      client.emit('sfu:vote-error', {
+        message: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+      });
+    }
+  }
+
+  @SubscribeMessage('sfu:end-vote')
+  async handleEndVote(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomId: string;
+      voteId: string;
+      creatorId: string;
+    },
+  ) {
+    try {
+      const result = await this.interactionClient.endVote(
+        data.roomId,
+        data.voteId,
+        data.creatorId,
+      );
+
+      if ((result as any).success) {
+        // Broadcast vote end to all clients in the room
+        this.io
+          .to(data.roomId)
+          .emit('sfu:vote-ended', (result as any).vote_session);
+      } else {
+        console.error('[Gateway] End vote failed:', (result as any).error);
+        client.emit('sfu:vote-error', {
+          message: (result as any).error || 'Failed to end vote',
+          code: 'END_ERROR',
+        });
+      }
+    } catch (error) {
+      console.error('[Gateway] Error ending vote:', error);
+      client.emit('sfu:vote-error', {
+        message: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+      });
+    }
+  }
+
+  @SubscribeMessage('sfu:get-active-vote')
+  async handleGetActiveVote(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomId: string;
+    },
+  ) {
+    try {
+      const result = await this.interactionClient.getActiveVote(data.roomId);
+      if ((result as any).success && (result as any).vote_session) {
+        client.emit('sfu:active-vote', (result as any).vote_session);
+      } else {
+        client.emit('sfu:active-vote', null);
+      }
+    } catch (error) {
+      console.error('[Gateway] Error getting active vote:', error);
+      client.emit('sfu:active-vote', null);
+    }
+  }
+
+  // ======================================================QUIZ======================================================
+  @SubscribeMessage('quiz:create')
+  async handleCreateQuiz(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomId: string;
+      title: string;
+      questions: any[];
+      creatorId: string;
+    },
+  ) {
+    try {
+      // Type assertion for safety
+      const typedData = data as {
+        roomId: string;
+        title: string;
+        questions: any[];
+        creatorId: string;
+      };
+
+      if (
+        !typedData.roomId ||
+        !typedData.title ||
+        !typedData.questions ||
+        !typedData.creatorId
+      ) {
+        client.emit('quiz:error', {
+          message: 'Missing required quiz data',
+          code: 'INVALID_DATA',
+        });
+        return;
+      }
+
+      const result = await this.interactionClient.createQuiz(
+        typedData.roomId,
+        typedData.title,
+        typedData.questions,
+        typedData.creatorId,
+      );
+
+      if ((result as any)?.success) {
+        // Broadcast new quiz to all clients in the room
+        this.io
+          .to(typedData.roomId)
+          .emit('quiz:created', (result as any).quiz_session);
+      } else {
+        console.error(
+          '[Gateway] Quiz creation failed:',
+          (result as any)?.error,
+        );
+        client.emit('quiz:error', {
+          message: (result as any)?.error || 'Failed to create quiz',
+          code: 'CREATE_ERROR',
+        });
+      }
+    } catch (error) {
+      console.error('[Gateway] Error creating quiz:', error);
+      client.emit('quiz:error', {
+        message: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+      });
+    }
+  }
+
+  @SubscribeMessage('quiz:submit')
+  async handleSubmitQuiz(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomId: string;
+      quizId: string;
+      participantId: string;
+      answers: Array<{
+        questionId: string;
+        selectedOptions: string[];
+        essayAnswer: string;
+      }>;
+    },
+  ) {
+    try {
+      // Type assertion for safety
+      const typedData = data as {
+        roomId: string;
+        quizId: string;
+        participantId: string;
+        answers: Array<{
+          questionId: string;
+          selectedOptions: string[];
+          essayAnswer: string;
+        }>;
+      };
+
+      if (
+        !typedData.roomId ||
+        !typedData.quizId ||
+        !typedData.participantId ||
+        !Array.isArray(typedData.answers)
+      ) {
+        console.error('[Gateway] Invalid quiz submission data:', data);
+        client.emit('quiz:error', {
+          message: 'Missing required quiz submission data',
+          code: 'INVALID_DATA',
+        });
+        return;
+      }
+
+      const result = await this.interactionClient.submitQuiz(
+        typedData.roomId,
+        typedData.quizId,
+        typedData.participantId,
+        typedData.answers,
+      );
+      if ((result as any)?.success) {
+        // Send result to the participant
+        client.emit('quiz:result', {
+          totalScore: (result as any).total_score,
+          totalPossibleScore: (result as any).total_possible_score,
+          questionResults: (result as any).question_results,
+        });
+
+        // Create detailed results data for the creator
+        const detailedResults = {
+          quizId: typedData.quizId,
+          score: (result as any).total_score,
+          totalPossibleScore: (result as any).total_possible_score,
+          startedAt: new Date(),
+          finishedAt: new Date(),
+          questionResults: (result as any).question_results || [], // Use snake_case from gRPC
+          submittedAnswers: typedData.answers, // Include the original answers submitted
+        };
+
+        // Notify all users in the room that someone submitted
+        // Include detailed results for the creator
+        client.to(typedData.roomId).emit('quiz:submission', {
+          participantId: typedData.participantId,
+          totalScore: (result as any).total_score,
+          totalPossibleScore: (result as any).total_possible_score, // Add this field
+          results: detailedResults, // Add detailed results for creator
+        });
+      } else {
+        console.error(
+          '[Gateway] Quiz submission failed:',
+          (result as any)?.error,
+        );
+        client.emit('quiz:error', {
+          message: (result as any)?.error || 'Failed to submit quiz',
+          code: 'SUBMIT_ERROR',
+        });
+      }
+    } catch (error) {
+      console.error('[Gateway] Error submitting quiz:', error);
+      client.emit('quiz:error', {
+        message: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+      });
+    }
+  }
+
+  @SubscribeMessage('quiz:get-results')
+  async handleGetQuizResults(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomId: string;
+      quizId: string;
+    },
+  ) {
+    try {
+      // Type assertion for safety
+      const typedData = data as {
+        roomId: string;
+        quizId: string;
+      };
+
+      if (!typedData.roomId || !typedData.quizId) {
+        console.error('[Gateway] Invalid quiz results request data:', data);
+        client.emit('quiz:error', {
+          message: 'Missing required quiz data',
+          code: 'INVALID_DATA',
+        });
+        return;
+      }
+
+      const result = await this.interactionClient.getQuizResults(
+        typedData.roomId,
+        typedData.quizId,
+      );
+
+      if ((result as any)?.success) {
+        client.emit('quiz:results', (result as any).quiz_session);
+      } else {
+        console.error(
+          '[Gateway] Quiz results request failed:',
+          (result as any)?.error,
+        );
+        client.emit('quiz:error', {
+          message: (result as any)?.error || 'Quiz not found',
+          code: 'NOT_FOUND',
+        });
+      }
+    } catch (error) {
+      console.error('[Gateway] Error getting quiz results:', error);
+      client.emit('quiz:error', {
+        message: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+      });
+    }
+  }
+
+  @SubscribeMessage('quiz:end')
+  async handleEndQuiz(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomId: string;
+      quizId: string;
+      creatorId: string;
+    },
+  ) {
+    try {
+      // Type assertion for safety
+      const typedData = data as {
+        roomId: string;
+        quizId: string;
+        creatorId: string;
+      };
+
+      if (!typedData.roomId || !typedData.quizId || !typedData.creatorId) {
+        console.error('[Gateway] Invalid quiz end data:', data);
+        client.emit('quiz:error', {
+          message: 'Missing required quiz data',
+          code: 'INVALID_DATA',
+        });
+        return;
+      }
+
+      const result = await this.interactionClient.endQuiz(
+        typedData.roomId,
+        typedData.quizId,
+        typedData.creatorId,
+      );
+      if ((result as any)?.success) {
+        // Broadcast quiz end to all clients in the room
+        this.io
+          .to(typedData.roomId)
+          .emit('quiz:ended', (result as any).quiz_session);
+      } else {
+        console.error('[Gateway] Quiz end failed:', (result as any)?.error);
+        client.emit('quiz:error', {
+          message: (result as any)?.error || 'Failed to end quiz',
+          code: 'END_ERROR',
+        });
+      }
+    } catch (error) {
+      console.error('[Gateway] Error ending quiz:', error);
+      client.emit('quiz:error', {
+        message: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+      });
+    }
+  }
+
+  @SubscribeMessage('quiz:get-active')
+  async handleGetActiveQuiz(client: Socket, data: any): Promise<void> {
+    try {
+      const typedData = data as { roomId: string };
+
+      if (!typedData.roomId) {
+        client.emit('quiz:error', {
+          message: 'Room ID is required',
+          code: 'VALIDATION_ERROR',
+        });
+        return;
+      }
+
+      const result = await this.interactionClient.getActiveQuiz(
+        typedData.roomId,
+      );
+
+      if ((result as any)?.quiz_session) {
+        client.emit('quiz:active', result as any);
+      } else {
+        console.log('[Gateway] No active quiz found for room');
+        client.emit('quiz:active', { quiz_session: null });
+      }
+    } catch (error) {
+      console.error('[Gateway] Error getting active quiz:', error);
+      client.emit('quiz:error', {
+        message: 'Failed to get active quiz',
+        code: 'INTERNAL_ERROR',
+      });
+    }
+  }
+
+  // ===================== BEHAVIOR MONITORING METHODS =====================
+  @SubscribeMessage('sfu:toggle-behavior-monitor')
+  async handleToggleBehaviorMonitor(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string; peerId: string; isActive: boolean },
+  ) {
+    try {
+      const roomId = data.roomId;
+      const peerId = data.peerId;
+
+      // Check if user is creator
+      const isCreator = await this.checkIfUserIsCreator(peerId, roomId);
+      if (!isCreator) {
+        this.eventService.emitError(
+          client,
+          'Only room creator can toggle behavior monitoring',
+          'NOT_ROOM_CREATOR',
+        );
+        return;
+      }
+
+      // Set behavior monitor state
+      await this.interactionClient.setBehaviorMonitorState(
+        roomId,
+        data.isActive,
+      );
+
+      // Broadcast to all clients in the room
+      this.io.to(roomId).emit('sfu:behavior-monitor-state', {
+        isActive: data.isActive,
+      });
+
+      return { success: true };
+    } catch (error) {
+      console.error('[Gateway] Error toggling behavior monitor:', error);
+      this.eventService.emitError(
+        client,
+        'Failed to toggle behavior monitoring',
+        'BEHAVIOR_MONITOR_ERROR',
+      );
+      return { success: false };
+    }
+  }
+
+  @SubscribeMessage('sfu:send-behavior-logs')
+  async handleSendBehaviorLogs(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: { peerId: string; roomId: string; behaviorLogs: any[] },
+  ) {
+    try {
+      if (!data.peerId) {
+        return { success: false, error: 'Participant not found' };
+      }
+
+      if (!data.behaviorLogs || data.behaviorLogs.length === 0) {
+        return { success: false, error: 'No data to save' };
+      }
+
+      // Convert events to the format expected by the service
+      const events = data.behaviorLogs.map((event) => ({
+        type: event.type,
+        value: String(event.value),
+        time:
+          event.time instanceof Date
+            ? event.time.toISOString()
+            : String(event.time),
+      }));
+
+      await this.interactionClient.saveUserBehavior(
+        data.peerId,
+        data.roomId,
+        events,
+      );
+
+      return { success: true };
+    } catch (error) {
+      console.error('[Gateway] Error saving behavior logs:', error);
+      return { success: false, error: 'Failed to save behavior logs' };
+    }
+  }
+
+  @SubscribeMessage('sfu:download-room-log')
+  async handleDownloadRoomLog(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string; peerId: string },
+  ) {
+    try {
+      const roomId = data.roomId;
+      const peerId = data.peerId;
+
+      // Check if user is creator
+      const isCreator = await this.checkIfUserIsCreator(peerId, roomId);
+      if (!isCreator) {
+        return {
+          success: false,
+          error: 'Only room creator can download log file',
+        };
+      }
+
+      // Turn off monitoring
+      this.io.to(roomId).emit('sfu:behavior-monitor-state', {
+        isActive: false,
+      });
+
+      // Wait a bit for logs to be sent
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+      // Generate Excel file
+      const result = (await this.interactionClient.generateRoomLogExcel(
+        roomId,
+      )) as any;
+
+      if (result.success && result.excel_data) {
+        return {
+          success: true,
+          file: Buffer.from(result.excel_data).toString('base64'),
+        };
+      } else {
+        return {
+          success: false,
+          error: result.error || 'Failed to generate log file',
+        };
+      }
+    } catch (error) {
+      console.error('[Gateway] Error generating room log:', error);
+      return { success: false, error: 'Failed to generate log file' };
+    }
+  }
+
+  @SubscribeMessage('sfu:download-user-log')
+  async handleDownloadUserLog(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string; peerId: string; creatorId: string },
+  ) {
+    try {
+      const roomId = data.roomId;
+      const peerId = data.peerId;
+      const creatorId = data.creatorId;
+
+      // Check if requester is creator
+      const isCreator = await this.checkIfUserIsCreator(creatorId, roomId);
+      if (!isCreator) {
+        return {
+          success: false,
+          error: 'Only room creator can download log file',
+        };
+      }
+
+      // Request user log from client
+      this.io.to(roomId).emit('sfu:request-user-log', {
+        peerId: peerId,
+      });
+
+      // Wait for logs to be sent
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+      // Generate Excel file
+      const result = (await this.interactionClient.generateUserLogExcel(
+        roomId,
+        peerId,
+      )) as any;
+
+      if (result.success && result.excel_data) {
+        return {
+          success: true,
+          file: Buffer.from(result.excel_data).toString('base64'),
+        };
+      } else {
+        return {
+          success: false,
+          error: result.error || 'Failed to generate log file',
+        };
+      }
+    } catch (error) {
+      console.error('[Gateway] Error generating user log:', error);
+      return { success: false, error: 'Failed to generate log file' };
+    }
+  }
+
+  // Helper method to check if a user is the creator of a room
+  private async checkIfUserIsCreator(
+    peerId: string,
+    roomId: string,
+  ): Promise<boolean> {
+    try {
+      const participant = await this.roomClient.getParticipantByPeerId(
+        roomId,
+        peerId,
+      );
+      return participant?.is_creator === true;
+    } catch (error) {
+      console.error('[Gateway] Error checking if user is creator:', error);
+      return false;
+    }
+  }
+
   // Helper methods
   private getParticipantBySocketId(socketId: string): string {
-    return this.connectionMap.get(socketId) || '';
+    const peerId = this.connectionMap.get(socketId) || '';
+    return peerId;
   }
 
   private async getRoomIdBySocketId(socketId: string): Promise<string> {
@@ -1237,9 +2137,6 @@ export class GatewayGateway
     peerId: string,
     roomId: string,
   ) {
-    console.log(
-      `[Gateway] Storing participant mapping: socketId=${socketId}, peerId=${peerId}, roomId=${roomId}`,
-    );
     this.connectionMap.set(socketId, peerId);
     this.participantSocketMap.set(peerId, socketId);
     this.roomParticipantMap.set(peerId, roomId);
@@ -1248,16 +2145,10 @@ export class GatewayGateway
   // Clean up mapping when participant leaves
   private cleanupParticipantMapping(socketId: string) {
     const peerId = this.connectionMap.get(socketId);
-    console.log(
-      `[Gateway] Cleaning up participant mapping: socketId=${socketId}, peerId=${peerId}`,
-    );
     if (peerId) {
       this.connectionMap.delete(socketId);
       this.participantSocketMap.delete(peerId);
       this.roomParticipantMap.delete(peerId);
-      console.log(
-        `[Gateway] Mapping cleaned up successfully for peerId=${peerId}`,
-      );
     } else {
       console.log(
         `[Gateway] No peerId found for socketId=${socketId} during cleanup`,

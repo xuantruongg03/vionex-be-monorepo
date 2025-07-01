@@ -1,98 +1,98 @@
 <p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
+  <img src="https://res.cloudinary.com/dcweof28t/image/upload/v1750399380/image_products/favicon_vo2jtz.png" alt="Vionex Logo" width="200"/>
 </p>
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
-
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
+<p align="center">
+  <img src="https://img.shields.io/badge/NestJS-e0234e?style=for-the-badge&logo=nestjs&logoColor=white" alt="NestJS"/>
+  <img src="https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript"/>
+  <img src="https://img.shields.io/badge/gRPC-4285f4?style=for-the-badge&logo=grpc&logoColor=white" alt="gRPC"/>
+  <img src="https://img.shields.io/badge/Swagger-85EA2D?style=for-the-badge&logo=swagger&logoColor=black" alt="Swagger"/>
+  <img src="https://img.shields.io/badge/Mediasoup-FF6B35?style=for-the-badge&logo=webrtc&logoColor=white" alt="Mediasoup"/>
 </p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
 
-## Description
+# 🏠 Vionex Room Service
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+A microservice that manages meeting rooms within the Vionex system. This service handles room creation, management, and monitoring, including participant management and room state tracking.
 
-## Project setup
+## ✨ Key Features
 
-```bash
-$ npm install
+- **Room Management**: Create, delete and manage meeting rooms
+- **Participant Management**: Handle room participants and permissions
+- **Access Control**: Room access control and security
+- **Room Analytics**: Room statistics and reporting
+- **Real-time Status**: Monitor room status in real-time
+- **Session Management**: Handle meeting sessions
+- **Room Settings**: Configure room-specific settings
+
+## 🛠️ Technologies
+
+- **Framework**: NestJS v11
+- **Language**: TypeScript
+- **Communication**: gRPC (@grpc/grpc-js)
+- **Documentation**: Swagger/OpenAPI
+- **Media**: Mediasoup v3.16
+- **Configuration**: @nestjs/config
+- **API Documentation**: swagger-ui-express
+- **Runtime**: Node.js
+
+## 📁 Project Structure
+
+```
+src/
+├── room/
+│   ├── room.controller.ts     # gRPC controller
+│   ├── room.service.ts        # Business logic
+│   ├── room.gateway.ts        # WebSocket gateway
+│   └── dto/                   # Data transfer objects
+├── participant/
+│   ├── participant.service.ts # Participant management
+│   └── participant.model.ts   # Participant entity
+├── shared/
+│   ├── interfaces/            # TypeScript interfaces
+│   ├── guards/               # Authentication guards
+│   └── decorators/           # Custom decorators
+├── app.module.ts              # Root module
+└── main.ts                   # Application entry point
 ```
 
-## Compile and run the project
+## Environment Variables
 
 ```bash
-# development
-$ npm run start
+# Service Configuration
+PORT=50052
+NODE_ENV=development
 
-# watch mode
-$ npm run start:dev
+# gRPC Configuration
+GRPC_HOST=0.0.0.0
+GRPC_PORT=50052
 
-# production mode
-$ npm run start:prod
+# Mediasoup Configuration
+MEDIASOUP_LISTEN_IP=0.0.0.0
+MEDIASOUP_ANNOUNCED_IP=127.0.0.1
+
+# Room Configuration
+MAX_PARTICIPANTS_PER_ROOM=50
+ROOM_TIMEOUT_MINUTES=30
+
+# Database Configuration
+DATABASE_URL=mongodb://localhost:27017/vionex-rooms
 ```
 
-## Run tests
+## 🏗️ Architecture
 
-```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
 ```
-
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+┌─────────────────┐    gRPC    ┌──────────────────┐
+│   API Gateway   │◄─────────►│   Room Service   │
+└─────────────────┘            └──────────────────┘
+                                        │
+                                        ▼
+                                ┌──────────────────┐
+                                │   Room Manager   │
+                                │   (In-Memory)    │
+                                └──────────────────┘
+                                        │
+                                        ▼
+                                ┌──────────────────┐
+                                │  Mediasoup SFU   │
+                                └──────────────────┘
 ```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).

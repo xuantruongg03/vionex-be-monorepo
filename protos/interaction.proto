@@ -1,0 +1,400 @@
+syntax = "proto3";
+
+package interaction;
+
+// ===================== WHITEBOARD SERVICES =====================
+service WhiteboardService {
+  rpc UpdateWhiteboard(UpdateWhiteboardRequest) returns (UpdateWhiteboardResponse);
+  rpc GetWhiteboardData(GetWhiteboardDataRequest) returns (GetWhiteboardDataResponse);
+  rpc ClearWhiteboard(ClearWhiteboardRequest) returns (ClearWhiteboardResponse);
+  rpc UpdatePermissions(UpdatePermissionsRequest) returns (UpdatePermissionsResponse);
+  rpc GetPermissions(GetPermissionsRequest) returns (GetPermissionsResponse);
+  rpc CheckUserPermission(CheckUserPermissionRequest) returns (CheckUserPermissionResponse);
+  rpc InitializeRoomPermissions(InitializeRoomPermissionsRequest) returns (InitializeRoomPermissionsResponse);
+  rpc UpdateUserPointer(UpdateUserPointerRequest) returns (UpdateUserPointerResponse);
+  rpc GetPointers(GetPointersRequest) returns (GetPointersResponse);
+  rpc RemoveUserPointer(RemoveUserPointerRequest) returns (RemoveUserPointerResponse);
+}
+
+// ===================== VOTING SERVICES =====================
+service VotingService {
+  rpc CreateVote(CreateVoteRequest) returns (CreateVoteResponse);
+  rpc SubmitVote(SubmitVoteRequest) returns (SubmitVoteResponse);
+  rpc GetVoteResults(GetVoteResultsRequest) returns (GetVoteResultsResponse);
+  rpc EndVote(EndVoteRequest) returns (EndVoteResponse);
+  rpc GetActiveVote(GetActiveVoteRequest) returns (GetActiveVoteResponse);
+}
+
+// ===================== QUIZ SERVICES =====================
+service QuizService {
+  rpc CreateQuiz(CreateQuizRequest) returns (CreateQuizResponse);
+  rpc SubmitQuiz(SubmitQuizRequest) returns (SubmitQuizResponse);
+  rpc GetQuizResults(GetQuizResultsRequest) returns (GetQuizResultsResponse);
+  rpc EndQuiz(EndQuizRequest) returns (EndQuizResponse);
+  rpc GetActiveQuiz(GetActiveQuizRequest) returns (GetActiveQuizResponse);
+}
+
+// ===================== BEHAVIOR MONITORING SERVICES =====================
+service BehaviorService {
+  rpc SaveUserBehavior(SaveUserBehaviorRequest) returns (SaveUserBehaviorResponse);
+  rpc SetBehaviorMonitorState(SetBehaviorMonitorStateRequest) returns (SetBehaviorMonitorStateResponse);
+  rpc GetBehaviorMonitorState(GetBehaviorMonitorStateRequest) returns (GetBehaviorMonitorStateResponse);
+  rpc GenerateUserLogExcel(GenerateUserLogExcelRequest) returns (GenerateUserLogExcelResponse);
+  rpc GenerateRoomLogExcel(GenerateRoomLogExcelRequest) returns (GenerateRoomLogExcelResponse);
+  rpc ClearRoomLogs(ClearRoomLogsRequest) returns (ClearRoomLogsResponse);
+}
+
+// ===================== WHITEBOARD MESSAGES =====================
+message PositionMouse {
+  double x = 1;
+  double y = 2;
+  string tool = 3;
+}
+
+message MouseUser {
+  PositionMouse position = 1;
+  string peer_id = 2;
+}
+
+message WhiteboardElement {
+  string id = 1;
+  string type = 2;
+  double x = 3;
+  double y = 4;
+  string data = 5; // JSON string containing element-specific data
+}
+
+message WhiteboardState {
+  string room_id = 1;
+  repeated WhiteboardElement elements = 2;
+  string state = 3; // JSON string containing additional state data
+  repeated string allowed_users = 4;
+  string updated_at = 5;
+}
+
+// Whiteboard Requests/Responses
+message UpdateWhiteboardRequest {
+  string room_id = 1;
+  repeated WhiteboardElement elements = 2;
+  string state = 3; // JSON string
+}
+
+message UpdateWhiteboardResponse {
+  bool success = 1;
+  optional string error = 2;
+  WhiteboardState whiteboard_data = 3;
+}
+
+message GetWhiteboardDataRequest {
+  string room_id = 1;
+}
+
+message GetWhiteboardDataResponse {
+  bool success = 1;
+  WhiteboardState whiteboard_data = 2;
+}
+
+message ClearWhiteboardRequest {
+  string room_id = 1;
+}
+
+message ClearWhiteboardResponse {
+  bool success = 1;
+}
+
+message UpdatePermissionsRequest {
+  string room_id = 1;
+  repeated string allowed_users = 2;
+}
+
+message UpdatePermissionsResponse {
+  bool success = 1;
+  repeated string allowed_users = 2;
+}
+
+message GetPermissionsRequest {
+  string room_id = 1;
+}
+
+message GetPermissionsResponse {
+  bool success = 1;
+  repeated string allowed_users = 2;
+}
+
+message CheckUserPermissionRequest {
+  string room_id = 1;
+  string peer_id = 2;
+}
+
+message CheckUserPermissionResponse {
+  bool success = 1;
+  bool can_draw = 2;
+}
+
+message InitializeRoomPermissionsRequest {
+  string room_id = 1;
+  string creator_peer_id = 2;
+}
+
+message InitializeRoomPermissionsResponse {
+  bool success = 1;
+}
+
+message UpdateUserPointerRequest {
+  string room_id = 1;
+  string peer_id = 2;
+  PositionMouse position = 3;
+}
+
+message UpdateUserPointerResponse {
+  bool success = 1;
+  repeated MouseUser pointers = 2;
+}
+
+message GetPointersRequest {
+  string room_id = 1;
+}
+
+message GetPointersResponse {
+  bool success = 1;
+  repeated MouseUser pointers = 2;
+}
+
+message RemoveUserPointerRequest {
+  string room_id = 1;
+  string peer_id = 2;
+}
+
+message RemoveUserPointerResponse {
+  bool success = 1;
+  repeated MouseUser pointers = 2;
+}
+
+// ===================== VOTING MESSAGES =====================
+message VoteOption {
+  string id = 1;
+  string text = 2;
+  int32 votes = 3;
+}
+
+message VoteSession {
+  string id = 1;
+  string room_id = 2;
+  string question = 3;
+  repeated VoteOption options = 4;
+  string creator_id = 5;
+  bool is_active = 6;
+  string created_at = 7;
+  string ended_at = 8;
+  repeated string voters = 9; // List of peer IDs who have voted
+}
+
+message CreateVoteRequest {
+  string room_id = 1;
+  string question = 2;
+  repeated VoteOption options = 3;
+  string creator_id = 4;
+}
+
+message CreateVoteResponse {
+  bool success = 1;
+  VoteSession vote_session = 2;
+  optional string error = 3;
+}
+
+message SubmitVoteRequest {
+  string room_id = 1;
+  string vote_id = 2;
+  string option_id = 3;
+  string voter_id = 4;
+}
+
+message SubmitVoteResponse {
+  bool success = 1;
+  VoteSession vote_session = 2;
+  optional string error = 3;
+}
+
+message GetVoteResultsRequest {
+  string room_id = 1;
+  string vote_id = 2;
+}
+
+message GetVoteResultsResponse {
+  bool success = 1;
+  VoteSession vote_session = 2;
+}
+
+message EndVoteRequest {
+  string room_id = 1;
+  string vote_id = 2;
+  string creator_id = 3;
+}
+
+message EndVoteResponse {
+  bool success = 1;
+  VoteSession vote_session = 2;
+}
+
+message GetActiveVoteRequest {
+  string room_id = 1;
+}
+
+message GetActiveVoteResponse {
+  bool success = 1;
+  VoteSession vote_session = 2;
+}
+
+// ===================== QUIZ MESSAGES =====================
+message QuizOption {
+  string id = 1;
+  string text = 2;
+  bool is_correct = 3;
+}
+
+message QuizQuestion {
+  string id = 1;
+  string text = 2;
+  string type = 3; // "multiple-choice", "essay", "one-choice"
+  repeated QuizOption options = 4;
+  repeated string correct_answers = 5;
+  string answer = 6; // For essay questions
+}
+
+message QuizSession {
+  string id = 1;
+  string room_id = 2;
+  string title = 3;
+  repeated QuizQuestion questions = 4;
+  string creator_id = 5;
+  bool is_active = 6;
+  string created_at = 7;
+  string ended_at = 8;
+  map<string, int32> participant_scores = 9; // peer_id -> score
+}
+
+message CreateQuizRequest {
+  string room_id = 1;
+  string title = 2;
+  repeated QuizQuestion questions = 3;
+  string creator_id = 4;
+}
+
+message CreateQuizResponse {
+  bool success = 1;
+  QuizSession quiz_session = 2;
+  optional string error = 3;
+}
+
+message QuizAnswer {
+  string question_id = 1;
+  repeated string selected_options = 2; // For multiple-choice questions
+  string essay_answer = 3; // For essay questions
+}
+
+message SubmitQuizRequest {
+  string room_id = 1;
+  string quiz_id = 2;
+  string participant_id = 3;
+  repeated QuizAnswer answers = 4;
+}
+
+message SubmitQuizResponse {
+  bool success = 1;
+  int32 total_score = 2;
+  int32 total_possible_score = 3;
+  repeated QuizQuestionResult question_results = 4;
+  optional string error = 5;
+}
+
+message QuizQuestionResult {
+  string question_id = 1;
+  bool is_correct = 2;
+  int32 points_earned = 3;
+  repeated string correct_answers = 4;
+}
+
+message GetQuizResultsRequest {
+  string room_id = 1;
+  string quiz_id = 2;
+}
+
+message GetQuizResultsResponse {
+  bool success = 1;
+  QuizSession quiz_session = 2;
+}
+
+message EndQuizRequest {
+  string room_id = 1;
+  string quiz_id = 2;
+  string creator_id = 3;
+}
+
+message EndQuizResponse {
+  bool success = 1;
+  QuizSession quiz_session = 2;
+}
+
+// ===================== BEHAVIOR MONITORING MESSAGES =====================
+message UserEvent {
+  string type = 1;
+  string value = 2;  // Using string to handle boolean, string, number
+  string time = 3;   // ISO string format
+}
+
+message SaveUserBehaviorRequest {
+  string user_id = 1;
+  string room_id = 2;
+  repeated UserEvent events = 3;
+}
+
+message SaveUserBehaviorResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message SetBehaviorMonitorStateRequest {
+  string room_id = 1;
+  bool is_active = 2;
+}
+
+message SetBehaviorMonitorStateResponse {
+  bool success = 1;
+}
+
+message GetBehaviorMonitorStateRequest {
+  string room_id = 1;
+}
+
+message GetBehaviorMonitorStateResponse {
+  bool is_active = 1;
+}
+
+message GenerateUserLogExcelRequest {
+  string room_id = 1;
+  string user_id = 2;
+}
+
+message GenerateUserLogExcelResponse {
+  bool success = 1;
+  bytes excel_data = 2;
+  string error = 3;
+}
+
+message GenerateRoomLogExcelRequest {
+  string room_id = 1;
+}
+
+message GenerateRoomLogExcelResponse {
+  bool success = 1;
+  bytes excel_data = 2;
+  string error = 3;
+}
+
+message ClearRoomLogsRequest {
+  string room_id = 1;
+}
+
+message ClearRoomLogsResponse {
+  bool success = 1;
+}

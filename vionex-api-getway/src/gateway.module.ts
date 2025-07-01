@@ -6,13 +6,11 @@ import { GatewayGateway } from './gateway.gateway';
 import { ChatService } from './services/chat.service';
 import { WebSocketEventService } from './services/websocket-event.service';
 import { RoomClientService } from './clients/room.client';
-
 import { ChatClientService } from './clients/chat.client';
-import { WhiteboardClientService } from './clients/whiteboard.client';
+import { InteractionClientService } from './clients/interaction.client';
 import { GatewayController } from './gateway.controller';
 import { RoomHttpController } from './room-http.controller';
 import { ChatHttpController } from './chat-http.controller';
-import { WhiteboardHttpController } from './whiteboard-http.controller';
 import { HttpBroadcastService } from './services/http-broadcast.service';
 import { SfuClientService } from './clients/sfu.client';
 
@@ -53,22 +51,6 @@ import { SfuClientService } from './clients/sfu.client';
         inject: [ConfigService],
       },
       {
-        name: 'WHITEBOARD_SERVICE',
-        imports: [ConfigModule],
-        useFactory: (configService: ConfigService) => ({
-          transport: Transport.GRPC,
-          options: {
-            package: 'whiteboard',
-            protoPath: protoPaths.whiteboard,
-            url: `${configService.get('WHITEBOARD_SERVICE_HOST') || 'localhost'}:${configService.get('WHITEBOARD_SERVICE_GRPC_PORT') || 50055}`,
-            loader: {
-              keepCase: true,
-            },
-          },
-        }),
-        inject: [ConfigService],
-      },
-      {
         name: 'SFU_SERVICE',
         imports: [ConfigModule],
         useFactory: (configService: ConfigService) => ({
@@ -84,23 +66,34 @@ import { SfuClientService } from './clients/sfu.client';
         }),
         inject: [ConfigService],
       },
+      {
+        name: 'INTERACTION_SERVICE',
+        imports: [ConfigModule],
+        useFactory: (configService: ConfigService) => ({
+          transport: Transport.GRPC,
+          options: {
+            package: 'interaction',
+            protoPath: protoPaths.interaction,
+            url: `${configService.get('INTERACTION_SERVICE_HOST') || 'localhost'}:${configService.get('INTERACTION_SERVICE_GRPC_PORT') || 50055}`,
+            loader: {
+              keepCase: true,
+            },
+          },
+        }),
+        inject: [ConfigService],
+      },
     ]),
   ],
-  controllers: [
-    GatewayController,
-    RoomHttpController,
-    ChatHttpController,
-    WhiteboardHttpController,
-  ],
+  controllers: [GatewayController, RoomHttpController, ChatHttpController],
   providers: [
     GatewayGateway,
     ChatService,
     WebSocketEventService,
     RoomClientService,
     ChatClientService,
-    WhiteboardClientService,
     HttpBroadcastService,
     SfuClientService,
+    InteractionClientService,
   ],
 })
 export class GatewayModule {}

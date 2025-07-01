@@ -85,19 +85,6 @@ export class SfuService {
         ],
       });
 
-      console.log('🎯 [SFU] Router created successfully');
-
-      // Log specific payload types assigned by mediasoup
-      const routerCodecs = router.rtpCapabilities.codecs;
-      if (routerCodecs && routerCodecs.length > 0) {
-        console.log('🎯 [SFU] Router codec payload types:');
-        routerCodecs.forEach((codec: any) => {
-          console.log(
-            `   - ${codec.mimeType}: ${codec.preferredPayloadType || 'auto'}`,
-          );
-        });
-      }
-
       this.mediaRooms.set(roomId, {
         router,
         producers: new Map(),
