@@ -15,9 +15,13 @@ import { Participant } from './interfaces/interface';
 import { HttpBroadcastService } from './services/http-broadcast.service';
 import { WebSocketEventService } from './services/websocket-event.service';
 import { InteractionClientService } from './clients/interaction.client';
-import { ClearWhiteboardResponse, GetPermissionsResponse, GetWhiteboardDataResponse, UpdatePermissionsResponse, UpdateUserPointerResponse } from './interfaces/whiteboard';
-
-
+import {
+  ClearWhiteboardResponse,
+  GetPermissionsResponse,
+  GetWhiteboardDataResponse,
+  UpdatePermissionsResponse,
+  UpdateUserPointerResponse,
+} from './interfaces/whiteboard';
 
 @WebSocketGateway({
   transports: ['websocket'],
@@ -45,12 +49,11 @@ export class GatewayGateway
     console.log('[Gateway] New client connected:', client.id);
     this.httpBroadcastService.setSocketServer(this.io);
 
-    // Debug: Log all incoming events
-    client.onAny((eventName, ...args) => {
-      console.log(
-        `[Gateway] Received event '${eventName}' from client ${client.id}:`,
-        args,
-      );
+    // Add listener for all events to debug
+    client.onAny((event, ...args) => {
+      if (event.includes('lock') || event.includes('unlock')) {
+        console.log(`🔍 [Gateway] Received event: ${event}`, args);
+      }
     });
   }
 
@@ -834,6 +837,14 @@ export class GatewayGateway
       const producerId = producerData.producer_id || producerData.producerId;
       const streamId = producerData.streamId || producerData.stream_id;
 
+      // Check if this is a screen share stream
+      const isScreenShare =
+        (safeMetadata &&
+          (safeMetadata.isScreenShare === true ||
+            safeMetadata.type === 'screen' ||
+            safeMetadata.type === 'screen_audio')) ||
+        streamId.includes('_screen');
+
       client.emit('sfu:producer-created', {
         producerId: producerId,
         streamId: streamId,
@@ -841,12 +852,21 @@ export class GatewayGateway
         appData: safeMetadata,
       });
 
-      client.to(roomId).emit('sfu:stream-added', {
+      // Emit stream-added to all users in room (including sender)
+      this.io.to(roomId).emit('sfu:stream-added', {
         streamId: streamId,
         publisherId: peerId,
         metadata: safeMetadata,
         rtpParameters: data.rtpParameters,
       });
+
+      // If this is a screen share, emit special screen share event
+      if (isScreenShare && data.kind === 'video') {
+        this.io.to(roomId).emit('sfu:screen-share-started', {
+          peerId: peerId,
+          streamId: streamId,
+        });
+      }
 
       return { success: true };
     } catch (error) {
@@ -935,7 +955,17 @@ export class GatewayGateway
         }
       } catch (parseError) {
         console.error('[Gateway] Failed to parse consumer data:', parseError);
+        console.error('[Gateway] Raw consumer info:', consumerInfo);
         throw new Error('Failed to parse consumer response');
+      }
+
+      // Check if this is a non-priority stream (no consumer created)
+      if (!consumerData.consumerId && consumerData.message) {
+        client.emit('sfu:consumer-skipped', {
+          streamId: data.streamId,
+          message: consumerData.message,
+        });
+        return { success: true, skipped: true };
       }
 
       const consumerPayload = {
@@ -958,6 +988,11 @@ export class GatewayGateway
       );
 
       if (missingFields.length > 0) {
+        console.error('[Gateway] Missing fields in consumer payload:', {
+          missingFields,
+          consumerPayload,
+          originalData: consumerData,
+        });
         throw new Error(
           `Missing required consumer fields: ${missingFields.join(', ')}`,
         );
@@ -1075,6 +1110,478 @@ export class GatewayGateway
       console.error('[API Gateway] Error getting streams:', error);
       client.emit('sfu:error', { message: error.message });
       return { success: false, error: error.message };
+    }
+  }
+
+  @SubscribeMessage('sfu:pin-user')
+  async handlePinUser(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomId: string;
+      peerId: string; // user to pin
+      transportId?: string;
+    },
+  ) {
+    try {
+      console.log(`📌 [Gateway] Pin user request:`, data);
+
+      const pinnerPeerId = this.connectionMap.get(client.id);
+      const roomId =
+        data.roomId || this.roomParticipantMap.get(pinnerPeerId || '');
+
+      if (!pinnerPeerId || !roomId) {
+        client.emit('sfu:pin-error', {
+          message: 'Invalid pinner or room information',
+        });
+        return { success: false };
+      }
+
+      if (!data.peerId) {
+        client.emit('sfu:pin-error', {
+          message: 'Missing peerId to pin',
+        });
+        return { success: false };
+      }
+
+      // Get transport ID - need receive transport for consuming
+      let transportId = data.transportId;
+      if (!transportId) {
+        // Try to get participant's receive transport
+        try {
+          const participant = await this.roomClient.getParticipantByPeerId(
+            roomId,
+            pinnerPeerId,
+          );
+          // You might need to track transport IDs in participant data
+          // For now, we'll require transportId to be provided
+          if (!transportId) {
+            client.emit('sfu:pin-error', {
+              message: 'Transport ID required for pin operation',
+            });
+            return { success: false };
+          }
+        } catch (error) {
+          client.emit('sfu:pin-error', {
+            message: 'Failed to get participant information',
+          });
+          return { success: false };
+        }
+      }
+
+      // Get minimal RTP capabilities (will be handled by SFU service)
+      const rtpCapabilities = {};
+
+      const result = await this.sfuClient.pinUser(
+        roomId,
+        pinnerPeerId,
+        data.peerId,
+        transportId,
+        rtpCapabilities,
+      );
+
+      if (result && (result as any).status === 'success') {
+        const pinData = JSON.parse((result as any).pin_data);
+
+        // Emit success to the pinner
+        client.emit('sfu:pin-success', {
+          pinnedPeerId: data.peerId,
+          consumersCreated: pinData.consumersCreated || [],
+          alreadyPriority: pinData.alreadyPriority || false,
+        });
+
+        // If consumers were created, emit consumer-created events
+        if (pinData.consumersCreated && pinData.consumersCreated.length > 0) {
+          for (const consumer of pinData.consumersCreated) {
+            client.emit('sfu:consumer-created', {
+              consumerId: consumer.consumerId,
+              producerId: consumer.producerId,
+              kind: consumer.kind,
+              rtpParameters: consumer.rtpParameters,
+              streamId: consumer.streamId,
+              isPinConsumer: true,
+            });
+          }
+        }
+
+        console.log(
+          `📌 [Gateway] Pin successful: ${pinnerPeerId} pinned ${data.peerId}`,
+        );
+        return { success: true };
+      } else {
+        const errorMessage = result
+          ? JSON.parse((result as any).pin_data).message
+          : 'Unknown error';
+        client.emit('sfu:pin-error', {
+          message: errorMessage,
+        });
+        return { success: false };
+      }
+    } catch (error) {
+      console.error('[Gateway] Error in handlePinUser:', error);
+      client.emit('sfu:pin-error', {
+        message: error.message || 'Failed to pin user',
+      });
+      return { success: false };
+    }
+  }
+
+  @SubscribeMessage('sfu:unpin-user')
+  async handleUnpinUser(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomId: string;
+      peerId: string; // user to unpin
+    },
+  ) {
+    try {
+      console.log(`📌 [Gateway] Unpin user request:`, data);
+
+      const unpinnerPeerId = this.connectionMap.get(client.id);
+      const roomId =
+        data.roomId || this.roomParticipantMap.get(unpinnerPeerId || '');
+
+      if (!unpinnerPeerId || !roomId) {
+        client.emit('sfu:unpin-error', {
+          message: 'Invalid unpinner or room information',
+        });
+        return { success: false };
+      }
+
+      if (!data.peerId) {
+        client.emit('sfu:unpin-error', {
+          message: 'Missing peerId to unpin',
+        });
+        return { success: false };
+      }
+
+      const result = await this.sfuClient.unpinUser(
+        roomId,
+        unpinnerPeerId,
+        data.peerId,
+      );
+
+      if (result && (result as any).status === 'success') {
+        const unpinData = JSON.parse((result as any).unpin_data);
+
+        // Emit success to the unpinner
+        client.emit('sfu:unpin-success', {
+          unpinnedPeerId: data.peerId,
+          consumersRemoved: unpinData.consumersRemoved || [],
+          stillInPriority: unpinData.stillInPriority || false,
+        });
+
+        // If consumers were removed, you might want to emit events to clean up
+        if (
+          unpinData.consumersRemoved &&
+          unpinData.consumersRemoved.length > 0
+        ) {
+          for (const consumerId of unpinData.consumersRemoved) {
+            client.emit('sfu:consumer-removed', {
+              consumerId: consumerId,
+              reason: 'unpinned',
+            });
+          }
+        }
+
+        console.log(
+          `📌 [Gateway] Unpin successful: ${unpinnerPeerId} unpinned ${data.peerId}`,
+        );
+        return { success: true };
+      } else {
+        const errorMessage = result
+          ? JSON.parse((result as any).unpin_data).message
+          : 'Unknown error';
+        client.emit('sfu:unpin-error', {
+          message: errorMessage,
+        });
+        return { success: false };
+      }
+    } catch (error) {
+      console.error('[Gateway] Error in handleUnpinUser:', error);
+      client.emit('sfu:unpin-error', {
+        message: error.message || 'Failed to unpin user',
+      });
+      return { success: false };
+    }
+  }
+
+  @SubscribeMessage('sfu:lock-room')
+  async handleLockRoom(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomId: string;
+      password: string;
+      creatorId: string;
+    },
+  ) {
+    console.log(
+      `🔒 [Gateway] =================== LOCK ROOM REQUEST RECEIVED ===================`,
+    );
+    console.log(`🔒 [Gateway] Client ID: ${client.id}`);
+    console.log(`🔒 [Gateway] Request data:`, JSON.stringify(data, null, 2));
+    console.log(
+      `🔒 [Gateway] Connection map:`,
+      Array.from(this.connectionMap.entries()),
+    );
+
+    try {
+      console.log(`🔒 [Gateway] Lock room request:`, data);
+
+      if (!data.roomId || !data.password || !data.creatorId) {
+        client.emit('sfu:lock-error', {
+          message: 'Missing required fields for lock room',
+        });
+        return { success: false };
+      }
+
+      // Verify the user is connected and is the creator
+      const participantId = this.connectionMap.get(client.id);
+      console.log(
+        `🔒 [Gateway] Lock room - participantId: ${participantId}, creatorId: ${data.creatorId}`,
+      );
+
+      if (!participantId) {
+        console.error(
+          `🔒 [Gateway] No participantId found for socketId: ${client.id}`,
+        );
+        client.emit('sfu:lock-error', {
+          message: 'User not properly connected to room',
+        });
+        return { success: false };
+      }
+
+      if (participantId !== data.creatorId) {
+        console.error(
+          `🔒 [Gateway] Permission denied - participantId: ${participantId} !== creatorId: ${data.creatorId}`,
+        );
+        client.emit('sfu:lock-error', {
+          message: 'Only room creator can lock the room',
+        });
+        return { success: false };
+      }
+
+      // Double-check with room service to ensure the user is actually the creator
+      try {
+        const participant = await this.roomClient.getParticipantByPeerId(
+          data.roomId,
+          participantId,
+        );
+
+        if (!participant || !participant.is_creator) {
+          console.error(
+            `🔒 [Gateway] User ${participantId} is not the room creator`,
+          );
+          client.emit('sfu:lock-error', {
+            message: 'Only room creator can lock the room',
+          });
+          return { success: false };
+        }
+      } catch (error) {
+        console.error(`🔒 [Gateway] Error verifying creator status:`, error);
+        client.emit('sfu:lock-error', {
+          message: 'Failed to verify creator permissions',
+        });
+        return { success: false };
+      }
+
+      try {
+        const result = (await this.roomClient.lockRoom(
+          data.roomId,
+          data.password,
+          data.creatorId,
+        )) as { status: string; message: string };
+
+        console.log(`🔒 [Gateway] Lock room result:`, result);
+
+        if (result && result.status === 'success') {
+          // Emit success to the creator
+          client.emit('sfu:lock-success', {
+            roomId: data.roomId,
+            message: 'Room locked successfully',
+          });
+
+          // Broadcast to all users in room that room is now locked
+          this.io.to(data.roomId).emit('sfu:room-locked', {
+            roomId: data.roomId,
+            lockedBy: data.creatorId,
+            message: 'Room has been locked by the creator',
+          });
+
+          console.log(`🔒 [Gateway] Room ${data.roomId} locked successfully`);
+          return { success: true };
+        } else {
+          const errorMessage = result?.message || 'Failed to lock room';
+          client.emit('sfu:lock-error', {
+            message: errorMessage,
+          });
+          return { success: false };
+        }
+      } catch (roomServiceError) {
+        console.error(`🔒 [Gateway] Room service error:`, roomServiceError);
+        let errorMessage = 'Failed to lock room';
+
+        if (roomServiceError.message) {
+          if (roomServiceError.message.includes('Only room creator')) {
+            errorMessage = 'Only room creator can lock the room';
+          } else if (roomServiceError.message.includes('Room not found')) {
+            errorMessage = 'Room not found';
+          } else {
+            errorMessage = roomServiceError.message;
+          }
+        }
+
+        client.emit('sfu:lock-error', {
+          message: errorMessage,
+        });
+        return { success: false };
+      }
+    } catch (error) {
+      console.error('[Gateway] Error in handleLockRoom:', error);
+      client.emit('sfu:lock-error', {
+        message: error.message || 'Failed to lock room',
+      });
+      return { success: false };
+    }
+  }
+
+  @SubscribeMessage('sfu:unlock-room')
+  async handleUnlockRoom(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomId: string;
+      creatorId?: string;
+    },
+  ) {
+    console.log(
+      `🔓 [Gateway] =================== UNLOCK ROOM REQUEST RECEIVED ===================`,
+    );
+    console.log(`🔓 [Gateway] Client ID: ${client.id}`);
+    console.log(`🔓 [Gateway] Request data:`, JSON.stringify(data, null, 2));
+    console.log(
+      `🔓 [Gateway] Connection map:`,
+      Array.from(this.connectionMap.entries()),
+    );
+
+    try {
+      console.log(`🔓 [Gateway] Unlock room request:`, data);
+
+      const participantId = this.connectionMap.get(client.id);
+      const creatorId = data.creatorId || participantId;
+
+      console.log(
+        `🔓 [Gateway] Unlock room - participantId: ${participantId}, creatorId: ${creatorId}`,
+      );
+
+      if (!data.roomId || !creatorId) {
+        client.emit('sfu:unlock-error', {
+          message: 'Missing required fields for unlock room',
+        });
+        return { success: false };
+      }
+
+      if (!participantId) {
+        console.error(
+          `🔓 [Gateway] No participantId found for socketId: ${client.id}`,
+        );
+        client.emit('sfu:unlock-error', {
+          message: 'User not properly connected to room',
+        });
+        return { success: false };
+      }
+
+      // Verify the user is connected and is the creator
+      if (participantId !== creatorId) {
+        console.error(
+          `🔓 [Gateway] Permission denied - participantId: ${participantId} !== creatorId: ${creatorId}`,
+        );
+        client.emit('sfu:unlock-error', {
+          message: 'Only room creator can unlock the room',
+        });
+        return { success: false };
+      }
+
+      // Double-check with room service to ensure the user is actually the creator
+      try {
+        const participant = await this.roomClient.getParticipantByPeerId(
+          data.roomId,
+          participantId,
+        );
+
+        if (!participant || !participant.is_creator) {
+          console.error(
+            `🔓 [Gateway] User ${participantId} is not the room creator`,
+          );
+          client.emit('sfu:unlock-error', {
+            message: 'Only room creator can unlock the room',
+          });
+          return { success: false };
+        }
+      } catch (error) {
+        console.error(`🔓 [Gateway] Error verifying creator status:`, error);
+        client.emit('sfu:unlock-error', {
+          message: 'Failed to verify creator permissions',
+        });
+        return { success: false };
+      }
+
+      try {
+        const result = (await this.roomClient.unlockRoom(
+          data.roomId,
+          creatorId,
+        )) as { status: string; message: string };
+
+        if (result && result.status === 'success') {
+          // Emit success to the creator
+          client.emit('sfu:unlock-success', {
+            roomId: data.roomId,
+            message: 'Room unlocked successfully',
+          });
+
+          // Broadcast to all users in room that room is now unlocked
+          this.io.to(data.roomId).emit('sfu:room-unlocked', {
+            roomId: data.roomId,
+            unlockedBy: creatorId,
+            message: 'Room has been unlocked by the creator',
+          });
+
+          console.log(`🔓 [Gateway] Room ${data.roomId} unlocked successfully`);
+          return { success: true };
+        } else {
+          const errorMessage = result?.message || 'Failed to unlock room';
+          client.emit('sfu:unlock-error', {
+            message: errorMessage,
+          });
+          return { success: false };
+        }
+      } catch (roomServiceError) {
+        console.error(`🔓 [Gateway] Room service error:`, roomServiceError);
+        let errorMessage = 'Failed to unlock room';
+
+        if (roomServiceError.message) {
+          if (roomServiceError.message.includes('Only room creator')) {
+            errorMessage = 'Only room creator can unlock the room';
+          } else if (roomServiceError.message.includes('Room not found')) {
+            errorMessage = 'Room not found';
+          } else {
+            errorMessage = roomServiceError.message;
+          }
+        }
+
+        client.emit('sfu:unlock-error', {
+          message: errorMessage,
+        });
+        return { success: false };
+      }
+    } catch (error) {
+      console.error('[Gateway] Error in handleUnlockRoom:', error);
+      client.emit('sfu:unlock-error', {
+        message: error.message || 'Failed to unlock room',
+      });
+      return { success: false };
     }
   }
 

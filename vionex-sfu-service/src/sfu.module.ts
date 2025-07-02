@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { SfuController } from './sfu.controller';
 import { SfuService } from './sfu.service';
-// Remove SfuGateway import since all WebSocket connections go through API Gateway
+import { WorkerPoolService } from './worker-pool/worker-pool.service';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { protoPaths } from './common/paths';
@@ -30,6 +30,6 @@ import { protoPaths } from './common/paths';
     ]),
   ],
   controllers: [SfuController],
-  providers: [SfuService, ConfigService],
+  providers: [SfuService, WorkerPoolService, ConfigService],
 })
 export class SfuModule {}

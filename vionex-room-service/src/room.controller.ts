@@ -1,38 +1,7 @@
 import { Controller } from '@nestjs/common';
-import { GrpcMethod } from '@nestjs/microservices';
+import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { isValidRoomId } from './common/validate';
-import {
-  CreateRoomRequest,
-  CreateRoomResponse,
-  GetParticipantByPeerIdResponse,
-  GetParticipantBySocketIdResponse,
-  GetParticipantRoomRequest,
-  GetParticipantRoomResponse,
-  GetParticipantsRequest,
-  GetParticipantsResponse,
-  GetRoomRequest,
-  GetRoomResponse,
-  IsRoomExistsRequest,
-  IsRoomExistsResponse,
-  IsRoomLockedRequest,
-  IsRoomLockedResponse,
-  JoinRoomRequest,
-  JoinRoomResponse,
-  LeaveRoomRequest,
-  LeaveRoomResponse,
-  RemoveParticipantRequest,
-  RemoveParticipantResponse,
-  RemoveProducerFromParticipantRequest,
-  RemoveProducerFromParticipantResponse,
-  SetParticipantRequest,
-  SetParticipantResponse,
-  SetProducerRequest,
-  SetProducerResponse,
-  SetTransportRequest,
-  SetTransportResponse,
-  VerifyRoomPasswordRequest,
-  VerifyRoomPasswordResponse,
-} from './interface';
+import * as I from './interface';
 import { RoomService } from './room.service';
 
 @Controller()
@@ -40,7 +9,7 @@ export class RoomGrpcController {
   constructor(private readonly roomService: RoomService) {}
 
   @GrpcMethod('RoomService', 'IsRoomExists')
-  async isRoomExists(data: IsRoomExistsRequest): Promise<IsRoomExistsResponse> {
+  async isRoomExists(data: I.IsRoomExistsRequest): Promise<I.IsRoomExistsResponse> {
     try {
       if (!data.room_id || !isValidRoomId(data.room_id)) {
         return { is_exists: false };
@@ -54,7 +23,7 @@ export class RoomGrpcController {
   }
 
   @GrpcMethod('RoomService', 'CreateRoom')
-  async createRoom(data: CreateRoomRequest): Promise<CreateRoomResponse> {
+  async createRoom(data: I.CreateRoomRequest): Promise<I.CreateRoomResponse> {
     try {
       const roomId = data.room_id;
       await this.roomService.createRoom(roomId);
@@ -73,7 +42,7 @@ export class RoomGrpcController {
   }
 
   @GrpcMethod('RoomService', 'JoinRoom')
-  async joinRoom(data: JoinRoomRequest): Promise<JoinRoomResponse> {
+  async joinRoom(data: I.JoinRoomRequest): Promise<I.JoinRoomResponse> {
     try {
       if (!data.room_id || !isValidRoomId(data.room_id)) {
         return {
@@ -137,7 +106,7 @@ export class RoomGrpcController {
   }
 
   @GrpcMethod('RoomService', 'IsRoomLocked')
-  async isRoomLocked(data: IsRoomLockedRequest): Promise<IsRoomLockedResponse> {
+  async isRoomLocked(data: I.IsRoomLockedRequest): Promise<I.IsRoomLockedResponse> {
     try {
       const room = this.roomService.getRoom(data.room_id);
       // For now, always return false as room doesn't have locked property
@@ -151,22 +120,79 @@ export class RoomGrpcController {
     }
   }
 
-  @GrpcMethod('RoomService', 'VerifyRoomPassword')
-  async verifyRoomPassword(
-    data: VerifyRoomPasswordRequest,
-  ): Promise<VerifyRoomPasswordResponse> {
+  @GrpcMethod('RoomService', 'LockRoom')
+  async lockRoom(data: I.LockRoomRequest): Promise<I.LockRoomResponse> {
     try {
-      // Implement password verification logic
-      // For now, return true as placeholder
-      return { valid: true };
+      if (!data.room_id || !data.password || !data.creator_id) {
+        return {
+          status: 'error',
+          message: 'Missing required fields for lock room',
+        };
+      }
+
+      const success = this.roomService.lockRoom(
+        data.room_id,
+        data.password,
+        data.creator_id,
+      );
+
+      if (success) {
+        return {
+          status: 'success',
+          message: 'Room locked successfully',
+        };
+      } else {
+        return {
+          status: 'error',
+          message: 'Failed to lock room',
+        };
+      }
     } catch (error) {
-      console.error(`Error verifying room password:`, error);
-      return { valid: false };
+      console.error(`Error locking room ${data.room_id}:`, error);
+      return {
+        status: 'error',
+        message: error.message || 'Failed to lock room',
+      };
+    }
+  }
+
+  @GrpcMethod('RoomService', 'UnlockRoom')
+  async unlockRoom(data: I.UnlockRoomRequest): Promise<I.UnlockRoomResponse> {
+    try {
+      if (!data.room_id || !data.creator_id) {
+        return {
+          status: 'error',
+          message: 'Missing required fields for unlock room',
+        };
+      }
+
+      const success = this.roomService.unlockRoom(
+        data.room_id,
+        data.creator_id,
+      );
+
+      if (success) {
+        return {
+          status: 'success',
+          message: 'Room unlocked successfully',
+        };
+      } else {
+        return {
+          status: 'error',
+          message: 'Failed to unlock room',
+        };
+      }
+    } catch (error) {
+      console.error(`Error unlocking room ${data.room_id}:`, error);
+      return {
+        status: 'error',
+        message: error.message || 'Failed to unlock room',
+      };
     }
   }
 
   @GrpcMethod('RoomService', 'GetRoom')
-  async getRoom(data: GetRoomRequest): Promise<GetRoomResponse> {
+  async getRoom(data: I.GetRoomRequest): Promise<I.GetRoomResponse> {
     try {
       const room = await this.roomService.getRoom(data.room_id);
       if (!room) {
@@ -208,8 +234,8 @@ export class RoomGrpcController {
 
   @GrpcMethod('RoomService', 'SetParticipant')
   async setParticipant(
-    data: SetParticipantRequest,
-  ): Promise<SetParticipantResponse> {
+    data: I.SetParticipantRequest,
+  ): Promise<I.SetParticipantResponse> {
     try {
       const result = await this.roomService.addParticipant(
         data.room_id,
@@ -233,8 +259,8 @@ export class RoomGrpcController {
 
   @GrpcMethod('RoomService', 'GetParticipants')
   async getParticipants(
-    data: GetParticipantsRequest,
-  ): Promise<GetParticipantsResponse> {
+    data: I.GetParticipantsRequest,
+  ): Promise<I.GetParticipantsResponse> {
     try {
       const room = await this.roomService.getRoom(data.room_id);
       return { participants: room?.participants || [] };
@@ -251,7 +277,7 @@ export class RoomGrpcController {
   async getParticipantByPeerId(data: {
     peer_id: string;
     room_id: string;
-  }): Promise<GetParticipantByPeerIdResponse> {
+  }): Promise<I.GetParticipantByPeerIdResponse> {
     try {
       console.log(
         `[RoomService] Looking for participant: roomId=${data.room_id}, peerId=${data.peer_id}`,
@@ -306,7 +332,7 @@ export class RoomGrpcController {
   @GrpcMethod('RoomService', 'GetParticipantBySocketId')
   async getParticipantBySocketId(
     data: any,
-  ): Promise<GetParticipantBySocketIdResponse> {
+  ): Promise<I.GetParticipantBySocketIdResponse> {
     try {
       console.log(
         `[RoomController] Getting participant by socket ID: ${data.socket_id}`,
@@ -355,8 +381,8 @@ export class RoomGrpcController {
 
   @GrpcMethod('RoomService', 'RemoveParticipant')
   async removeParticipant(
-    data: RemoveParticipantRequest,
-  ): Promise<RemoveParticipantResponse> {
+    data: I.RemoveParticipantRequest,
+  ): Promise<I.RemoveParticipantResponse> {
     try {
       const success = await this.roomService.removeParticipant(
         data.room_id,
@@ -378,7 +404,7 @@ export class RoomGrpcController {
   }
 
   @GrpcMethod('RoomService', 'SetTransport')
-  async setTransport(data: SetTransportRequest): Promise<SetTransportResponse> {
+  async setTransport(data: I.SetTransportRequest): Promise<I.SetTransportResponse> {
     try {
       if (
         !data.transport_data ||
@@ -414,7 +440,7 @@ export class RoomGrpcController {
   }
 
   @GrpcMethod('RoomService', 'SetProducer')
-  async setProducer(data: SetProducerRequest): Promise<SetProducerResponse> {
+  async setProducer(data: I.SetProducerRequest): Promise<I.SetProducerResponse> {
     try {
       // Parse producer data and set it
       const producerData = JSON.parse(data.producer_data);
@@ -440,8 +466,8 @@ export class RoomGrpcController {
 
   @GrpcMethod('RoomService', 'GetParticipantRoom')
   async getParticipantRoom(
-    data: GetParticipantRoomRequest,
-  ): Promise<GetParticipantRoomResponse> {
+    data: I.GetParticipantRoomRequest,
+  ): Promise<I.GetParticipantRoomResponse> {
     try {
       const roomId = await this.roomService.getParticipantRoom(data.peer_id);
       return { room_id: roomId || '' };
@@ -453,8 +479,8 @@ export class RoomGrpcController {
 
   @GrpcMethod('RoomService', 'RemoveProducerFromParticipant')
   async removeProducerFromParticipant(
-    data: RemoveProducerFromParticipantRequest,
-  ): Promise<RemoveProducerFromParticipantResponse> {
+    data: I.RemoveProducerFromParticipantRequest,
+  ): Promise<I.RemoveProducerFromParticipantResponse> {
     try {
       const success = await this.roomService.removeProducerFromParticipant(
         data.room_id,
@@ -477,7 +503,7 @@ export class RoomGrpcController {
   }
 
   @GrpcMethod('RoomService', 'LeaveRoom')
-  async leaveRoom(data: LeaveRoomRequest): Promise<LeaveRoomResponse> {
+  async leaveRoom(data: I.LeaveRoomRequest): Promise<I.LeaveRoomResponse> {
     try {
       const result = await this.roomService.leaveRoom(
         data.room_id,
@@ -531,6 +557,129 @@ export class RoomGrpcController {
         message: 'Failed to update RTP capabilities',
         error: error.message,
       };
+    }
+  }
+
+  @GrpcMethod('RoomService', 'LockRoom')
+  async handleLockRoom(data: {
+    room_id: string;
+    password: string;
+    creator_id: string;
+  }): Promise<{ status: string; message: string }> {
+    try {
+      if (!data.room_id || !data.password || !data.creator_id) {
+        throw new RpcException('Missing required fields for lock room');
+      }
+
+      // Verify that the creator_id is actually the creator of the room
+      const room = await this.roomService.getRoom(data.room_id);
+      if (!room) {
+        throw new RpcException('Room not found');
+      }
+
+      // Check if the user is the creator
+      const creator = room.participants.find(
+        (p) => p.peer_id === data.creator_id && p.is_creator,
+      );
+      if (!creator) {
+        throw new RpcException('Only room creator can lock the room');
+      }
+
+      const result = this.roomService.lockRoom(
+        data.room_id,
+        data.password,
+        data.creator_id,
+      );
+
+      if (result) {
+        console.log(
+          `[Room] Room ${data.room_id} locked by ${data.creator_id}`,
+        );
+        return {
+          status: 'success',
+          message: `Room ${data.room_id} has been locked`,
+        };
+      } else {
+        throw new RpcException('Failed to lock room');
+      }
+    } catch (error) {
+      console.error('Error locking room:', error);
+      throw new RpcException(error.message || 'Failed to lock room');
+    }
+  }
+
+  @GrpcMethod('RoomService', 'UnlockRoom')
+  async handleUnlockRoom(data: {
+    room_id: string;
+    creator_id: string;
+  }): Promise<{ status: string; message: string }> {
+    try {
+      console.log(`[Room Controller] Unlock room request:`, data);
+
+      if (!data.room_id || !data.creator_id) {
+        throw new RpcException('Missing required fields for unlock room');
+      }
+
+      // Verify that the creator_id is actually the creator of the room
+      const room = await this.roomService.getRoom(data.room_id);
+      if (!room) {
+        throw new RpcException('Room not found');
+      }
+
+      // Check if the user is the creator
+      const creator = room.participants.find(
+        (p) => p.peer_id === data.creator_id && p.is_creator,
+      );
+      if (!creator) {
+        throw new RpcException('Only room creator can unlock the room');
+      }
+
+      const result = this.roomService.unlockRoom(data.room_id, data.creator_id);
+
+      if (result) {
+        console.log(
+          `[Room] Room ${data.room_id} unlocked by ${data.creator_id}`,
+        );
+        return {
+          status: 'success',
+          message: `Room ${data.room_id} has been unlocked`,
+        };
+      } else {
+        throw new RpcException('Failed to unlock room or not authorized');
+      }
+    } catch (error) {
+      console.error('Error unlocking room:', error);
+      throw new RpcException(error.message || 'Failed to unlock room');
+    }
+  }
+
+  @GrpcMethod('RoomService', 'IsRoomLocked')
+  async handleIsRoomLocked(data: {
+    room_id: string;
+  }): Promise<{ is_locked: boolean }> {
+    try {
+      const isLocked = this.roomService.isRoomLocked(data.room_id);
+      return { is_locked: isLocked };
+    } catch (error) {
+      console.error('Error checking room lock status:', error);
+      return { is_locked: false };
+    }
+  }
+
+  @GrpcMethod('RoomService', 'VerifyRoomPassword')
+  async handleVerifyRoomPassword(data: {
+    room_id: string;
+    password: string;
+  }): Promise<{ is_valid: boolean }> {
+    try {
+      const isValid = this.roomService.verifyRoomPassword(
+        data.room_id,
+        data.password,
+      );
+      return { is_valid: isValid };
+    } catch (error) {
+      console.error('Error verifying room password:', error);
+      return { is_valid: false };
     }
   }
 }

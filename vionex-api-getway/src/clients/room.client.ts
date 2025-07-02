@@ -25,6 +25,44 @@ export class RoomClientService implements OnModuleInit {
     }
   }
 
+  async lockRoom(roomId: string, password: string, creatorId: string) {
+  return firstValueFrom(
+    this.roomService.lockRoom({
+      room_id: roomId,
+      password: password,
+      creator_id: creatorId,
+    }),
+  );
+}
+
+async unlockRoom(roomId: string, creatorId: string) {
+  return firstValueFrom(
+    this.roomService.unlockRoom({
+      room_id: roomId,
+      creator_id: creatorId,
+    }),
+  );
+}
+
+async isRoomLocked(roomId: string) {
+  const result = await firstValueFrom(
+    this.roomService.isRoomLocked({
+      room_id: roomId,
+    }),
+  );
+  return (result as { is_locked: boolean }).is_locked;
+}
+
+async verifyRoomPassword(roomId: string, password: string) {
+  const result = await firstValueFrom(
+    this.roomService.verifyRoomPassword({
+      room_id: roomId,
+      password: password,
+    }),
+  );
+  return (result as { is_valid: boolean }).is_valid;
+}
+
   async isUsernameAvailable(
     roomId: string,
     username: string,
@@ -56,29 +94,29 @@ export class RoomClientService implements OnModuleInit {
     return response;
   }
 
-  async isRoomLocked(roomId: string): Promise<boolean> {
-    try {
-      const response = await firstValueFrom(
-        this.roomService.isRoomLocked({ room_id: roomId }),
-      );
-      return response.locked;
-    } catch (error) {
-      console.error(`Error checking if room ${roomId} is locked:`, error);
-      throw new Error(`Failed to check if room ${roomId} is locked`);
-    }
-  }
+  // async isRoomLocked(roomId: string): Promise<boolean> {
+  //   try {
+  //     const response = await firstValueFrom(
+  //       this.roomService.isRoomLocked({ room_id: roomId }),
+  //     );
+  //     return response.locked;
+  //   } catch (error) {
+  //     console.error(`Error checking if room ${roomId} is locked:`, error);
+  //     throw new Error(`Failed to check if room ${roomId} is locked`);
+  //   }
+  // }
 
-  async verifyRoomPassword(roomId: string, password: string): Promise<boolean> {
-    try {
-      const response = await firstValueFrom(
-        this.roomService.verifyRoomPassword({ room_id: roomId, password }),
-      );
-      return response.valid;
-    } catch (error) {
-      console.error(`Error verifying password for room ${roomId}:`, error);
-      throw new Error(`Failed to verify password for room ${roomId}`);
-    }
-  }
+  // async verifyRoomPassword(roomId: string, password: string): Promise<boolean> {
+  //   try {
+  //     const response = await firstValueFrom(
+  //       this.roomService.verifyRoomPassword({ room_id: roomId, password }),
+  //     );
+  //     return response.valid;
+  //   } catch (error) {
+  //     console.error(`Error verifying password for room ${roomId}:`, error);
+  //     throw new Error(`Failed to verify password for room ${roomId}`);
+  //   }
+  // }
 
   async getRoom(roomId: string) {
     try {

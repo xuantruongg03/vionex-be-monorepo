@@ -24,8 +24,34 @@ service SfuService {
   rpc HandlePresence(HandlePresenceRequest) returns (HandlePresenceResponse);
   rpc CreateProducer(CreateProducerRequest) returns (CreateProducerResponse);
   rpc SaveProducer(SaveProducerRequest) returns (SaveProducerResponse);
+  rpc PinUser(PinUserRequest) returns (PinUserResponse);
+rpc UnpinUser(UnpinUserRequest) returns (UnpinUserResponse);
+
+}
+message PinUserRequest {
+  string room_id = 1;
+  string pinner_peer_id = 2;
+  string pinned_peer_id = 3;
+  string transport_id = 4;
+  string rtp_capabilities = 5;
 }
 
+message PinUserResponse {
+  string status = 1;
+  string pin_data = 2;
+}
+
+// Unpin User Request/Response
+message UnpinUserRequest {
+  string room_id = 1;
+  string unpinner_peer_id = 2;
+  string unpinned_peer_id = 3;
+}
+
+message UnpinUserResponse {
+  string status = 1;
+  string unpin_data = 2;
+}
 // Stream definition
 message Stream {
   string stream_id = 1;

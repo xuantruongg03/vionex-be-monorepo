@@ -21,8 +21,50 @@ service RoomService {
   rpc UpdateParticipantRtpCapabilities(UpdateParticipantRtpCapabilitiesRequest) returns (UpdateParticipantRtpCapabilitiesResponse){};
   rpc IsUsernameAvailable(IsUsernameAvailableRequest) returns (IsUsernameAvailableResponse){};
   rpc GetParticipantByPeerId(GetParticipantByPeerIdRequest) returns (GetParticipantByPeerIdResponse){};
+  rpc LockRoom(LockRoomRequest) returns (LockRoomResponse);
+  rpc UnlockRoom(UnlockRoomRequest) returns (UnlockRoomResponse);
+
+}
+message LockRoomRequest {
+  string room_id = 1;
+  string password = 2;
+  string creator_id = 3;
 }
 
+message LockRoomResponse {
+  string status = 1;
+  string message = 2;
+}
+
+// Unlock Room Request/Response
+message UnlockRoomRequest {
+  string room_id = 1;
+  string creator_id = 2;
+}
+
+message UnlockRoomResponse {
+  string status = 1;
+  string message = 2;
+}
+
+// Is Room Locked Request/Response
+message IsRoomLockedRequest {
+  string room_id = 1;
+}
+
+message IsRoomLockedResponse {
+  bool is_locked = 1;
+}
+
+// Verify Room Password Request/Response
+message VerifyRoomPasswordRequest {
+  string room_id = 1;
+  string password = 2;
+}
+
+message VerifyRoomPasswordResponse {
+  bool is_valid = 1;
+}
 message GetParticipantByPeerIdRequest {
   string peer_id = 1;
   string room_id = 2;
@@ -88,25 +130,6 @@ message LeaveRoomResponse {
   optional string new_creator = 4; // For backward compatibility, can be null
   bool is_room_empty = 5;
   string participant_id = 6;
-}
-
-// Messages for IsRoomLocked
-message IsRoomLockedRequest {
-  string room_id = 1;
-}
-
-message IsRoomLockedResponse {
-  bool locked = 1;
-}
-
-// Messages for VerifyRoomPassword
-message VerifyRoomPasswordRequest {
-  string room_id = 1;
-  string password = 2;
-}
-
-message VerifyRoomPasswordResponse {
-  bool valid = 1;
 }
 
 // Messages for GetRoom

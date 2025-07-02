@@ -310,10 +310,6 @@ export class GatewayController {
         },
         iceServers: iceServersResponse?.ice_servers || [],
       };
-
-      console.log('Final transport info:', transportInfo);
-      console.log('Transport created successfully');
-
       return {
         success: true,
         data: transportInfo,
@@ -334,8 +330,6 @@ export class GatewayController {
     @Headers('authorization') authorization?: string,
   ) {
     try {
-      const participant = await this.getParticipantFromHeader(authorization);
-
       const room = await this.roomClient.getRoom(roomId);
       if (!room || !room.data || !room.data.participants) {
         return { users: [] };
@@ -367,12 +361,7 @@ export class GatewayController {
     @Headers('authorization') authorization?: string,
   ) {
     try {
-      const participant = await this.getParticipantFromHeader(authorization);
-
       const streamsResponse = await this.sfuClient.getStreams(roomId);
-
-      console.log('SFU getStreams response:', streamsResponse);
-
       // Check if response is empty or not an array
       if (!streamsResponse) {
         return { success: true, streams: [] };
@@ -507,17 +496,6 @@ export class GatewayController {
   ) {
     try {
       const participant = await this.getParticipantFromHeader(authorization);
-
-      // Try to get roomId from participant or use provided roomId
-      const roomId =
-        data?.roomId ||
-        (await this.roomClient.getParticipantRoom(participant.peer_id));
-
-      // For now, just return success since we don't have removeStream in SFU client
-      // const result = await this.sfuClient.removeStream({
-      //   stream_id: streamId,
-      // });
-
       return {
         success: true,
         message: 'Stream unpublished successfully',
@@ -592,13 +570,7 @@ export class GatewayController {
     @Headers('authorization') authorization?: string,
   ) {
     try {
-      console.log('=== Get Router RTP Capabilities ===');
-      console.log('RoomId:', roomId);
-      const participant = await this.getParticipantFromHeader(authorization);
-
       const roomData = await this.sfuClient.createMediaRoom(roomId);
-      console.log('Router RTP capabilities retrieved successfully');
-
       return {
         success: true,
         data: (roomData as any).router?.rtpCapabilities || null,
@@ -620,11 +592,6 @@ export class GatewayController {
     @Headers('authorization') authorization?: string,
   ) {
     try {
-      console.log('=== Connect Transport ===');
-      console.log('Transport ID:', transportId);
-      console.log('DTLS Parameters:', data.dtlsParameters);
-      console.log('Room ID:', data.roomId);
-
       const participant = await this.getParticipantFromHeader(authorization);
 
       await this.sfuClient.connectTransport(
@@ -633,8 +600,6 @@ export class GatewayController {
         data.roomId,
         participant.peer_id,
       );
-
-      console.log('Transport connected successfully');
 
       return {
         success: true,
@@ -664,12 +629,6 @@ export class GatewayController {
     @Headers('authorization') authorization?: string,
   ) {
     try {
-      console.log('=== Produce Media ===');
-      console.log('Transport ID:', transportId);
-      console.log('Kind:', data.kind);
-      console.log('RTP Parameters:', data.rtpParameters);
-      console.log('Room ID:', data.roomId);
-
       const participant = await this.getParticipantFromHeader(authorization);
 
       const result = await this.sfuClient.createProducer(
@@ -680,9 +639,6 @@ export class GatewayController {
         data.roomId,
         data.participantId || participant.peer_id,
       );
-
-      console.log('Producer created successfully:', (result as any).producerId);
-      console.log('Full result from sfu service:', result);
 
       // Extract streamId from SFU service response
       const participantId = data.participantId || participant.peer_id;
@@ -699,7 +655,6 @@ export class GatewayController {
       ) {
         // StreamId in producer object
         streamId = (result as any).producer.streamId;
-        console.log('Using streamId from producer object:', streamId);
       } else {
         // Check for producer_data field (from proto)
         const resultWithProducerData = result as any;
@@ -741,10 +696,6 @@ export class GatewayController {
         'sfu:stream-added',
         streamInfo,
       );
-      console.log(
-        `🔊 Broadcasted sfu:stream-added to room ${data.roomId}:`,
-        streamInfo,
-      );
 
       return {
         success: true,
@@ -778,15 +729,9 @@ export class GatewayController {
     @Headers('authorization') authorization?: string,
   ) {
     try {
-      console.log('=== Consume Media ===');
-      console.log('Transport ID:', transportId);
-      console.log('Stream ID:', data.streamId);
-      console.log('Room ID from request body:', data.roomId);
-      console.log('Full request data:', JSON.stringify(data, null, 2));
-
       // Validate streamId before proceeding
       if (!data.streamId || data.streamId === 'undefined') {
-        console.error('❌ Invalid streamId in consume request:', data.streamId);
+        console.error('Invalid streamId in consume request:', data.streamId);
         throw new HttpException(
           `Invalid streamId: ${data.streamId}. StreamId cannot be undefined or null.`,
           HttpStatus.BAD_REQUEST,
@@ -798,34 +743,23 @@ export class GatewayController {
       // Ensure we have a valid roomId - try multiple sources
       let roomId: string | undefined = data.roomId;
       if (!roomId || roomId === 'undefined') {
-        console.log(
-          'Room ID missing from request, looking up participant room...',
-        );
         const participantRoom = await this.roomClient.getParticipantRoom(
           participant.peer_id,
         );
-        console.log('Found participant room:', participantRoom);
         roomId = participantRoom || undefined;
       }
 
       if (!roomId || roomId === 'undefined') {
-        console.error('No valid room ID found for consume request');
         throw new HttpException(
           'Room ID is required and could not be determined',
           HttpStatus.BAD_REQUEST,
         );
       }
 
-      console.log('Final Room ID for consume:', roomId);
-
       // Get participant's RTP capabilities from room service (previously set via setRtpCapabilities)
       const participantData = await this.roomClient.getParticipantByPeerId(
         roomId,
         participant.peer_id,
-      );
-      console.log(
-        '🔍 Retrieved participant data from room service:',
-        !!participantData,
       );
 
       let rtpCapabilities = data.rtpCapabilities; // Default to request data
@@ -840,40 +774,18 @@ export class GatewayController {
 
           if (storedRtpCapabilities && storedRtpCapabilities.codecs) {
             rtpCapabilities = storedRtpCapabilities;
-            console.log('✅ Using stored RTP capabilities from room service');
-            console.log('📊 Stored RTP capabilities summary:', {
-              codecs: storedRtpCapabilities.codecs?.length || 0,
-              headerExtensions:
-                storedRtpCapabilities.headerExtensions?.length || 0,
-            });
-          } else {
-            console.log(
-              '⚠️ Stored RTP capabilities invalid, using request data',
-            );
           }
         } catch (error) {
           console.error('Error parsing stored RTP capabilities:', error);
-          console.log('⚠️ Using RTP capabilities from request (fallback)');
+          console.log('Using RTP capabilities from request (fallback)');
         }
-      } else {
-        console.log('⚠️ No stored RTP capabilities found, using request data');
       }
-
-      console.log('📊 Final RTP capabilities summary:', {
-        codecs: rtpCapabilities?.codecs?.length || 0,
-        headerExtensions: rtpCapabilities?.headerExtensions?.length || 0,
-      });
 
       const result = await this.sfuClient.createConsumer(
         data.streamId,
         transportId,
         roomId, // Use the resolved roomId, not data.roomId
         participant.peer_id,
-      );
-
-      console.log(
-        'Consumer created successfully:',
-        (result as any).data?.consumerId,
       );
 
       // Broadcast consumer-created event to the requesting client via WebSocket
@@ -889,10 +801,6 @@ export class GatewayController {
       this.broadcastService.broadcastToUser(
         participant.socket_id,
         'sfu:consumer-created',
-        consumerInfo,
-      );
-      console.log(
-        `🔊 Sent sfu:consumer-created to client ${participant.socket_id}:`,
         consumerInfo,
       );
 

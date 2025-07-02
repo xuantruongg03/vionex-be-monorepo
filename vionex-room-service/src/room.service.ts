@@ -145,16 +145,6 @@ export class RoomService {
     // Check if participant already exists (for socket_id updates)
     const existingParticipant = room.get(participant.peer_id);
     if (existingParticipant) {
-      console.log(
-        `👤 [Room] Updating existing participant in room ${roomId}:`,
-        {
-          peer_id: participant.peer_id,
-          old_socket_id: existingParticipant.socket_id,
-          new_socket_id: participant.socket_id,
-          is_creator: participant.is_creator,
-        },
-      );
-
       // Update existing participant with new data (especially socket_id)
       existingParticipant.socket_id = participant.socket_id;
       existingParticipant.is_creator = participant.is_creator;
@@ -172,19 +162,8 @@ export class RoomService {
         existingParticipant.rtp_capabilities = participant.rtp_capabilities;
       }
     } else {
-      console.log(`👤 [Room] Adding new participant to room ${roomId}:`, {
-        peer_id: participant.peer_id,
-        socket_id: participant.socket_id,
-        is_creator: participant.is_creator,
-      });
-
       room.set(participant.peer_id, participant);
     }
-
-    console.log(
-      `👤 [Room] Room ${roomId} participants after add/update:`,
-      Array.from(room.keys()),
-    );
 
     return {
       status: 'success',
@@ -207,32 +186,13 @@ export class RoomService {
   getParticipantBySocketId(
     socketId: string,
   ): { participant: Participant; roomId: string } | null {
-    console.log(
-      `[RoomService] Searching for participant with socket ID: ${socketId}`,
-    );
-
     for (const [roomId, room] of this.rooms) {
-      console.log(
-        `[RoomService] Checking room ${roomId} with ${room.size} participants`,
-      );
-
       for (const [peerId, participant] of room) {
-        console.log(
-          `[RoomService] Checking participant ${peerId} with socket_id: ${participant.socket_id}`,
-        );
-
         if (participant.socket_id === socketId) {
-          console.log(
-            `[RoomService] Found participant ${peerId} in room ${roomId} with matching socket_id`,
-          );
           return { participant, roomId };
         }
       }
     }
-
-    console.log(
-      `[RoomService] No participant found with socket ID: ${socketId}`,
-    );
     return null;
   }
 
@@ -313,40 +273,22 @@ export class RoomService {
     isRoomEmpty: boolean;
     removedParticipant?: Participant;
   }> {
-    console.log(
-      `🚪 [Room] Attempting to remove participant: ${peerId} from room: ${roomId}`,
-    );
-
     const room = this.rooms.get(roomId);
     if (!room) {
-      console.log(`❌ [Room] Room ${roomId} not found`);
       return {
         success: false,
         isRoomEmpty: true,
       };
     }
 
-    console.log(
-      `🚪 [Room] Room ${roomId} current participants:`,
-      Array.from(room.keys()),
-    );
-    console.log(`🚪 [Room] Looking for participant with peerId: ${peerId}`);
-
     const participant = room.get(peerId);
     if (!participant) {
-      console.log(
-        `❌ [Room] Participant ${peerId} not found in room ${roomId}`,
-      );
-      console.log(`❌ [Room] Available participants:`, Array.from(room.keys()));
       return {
         success: false,
         isRoomEmpty: room.size === 0,
       };
     }
 
-    console.log(
-      `✅ [Room] Found participant ${peerId}, removing from room ${roomId}`,
-    );
     const wasCreator = participant.is_creator;
 
     // Close all transports for this participant
@@ -356,14 +298,6 @@ export class RoomService {
 
     // Remove participant from room
     room.delete(peerId);
-    console.log(
-      `✅ [Room] Successfully removed participant ${peerId} from room ${roomId}`,
-    );
-    console.log(
-      `📊 [Room] Room ${roomId} now has ${room.size} participants:`,
-      Array.from(room.keys()),
-    );
-
     let newCreator: Participant | undefined = undefined;
     const isRoomEmpty = room.size === 0;
 
@@ -385,14 +319,8 @@ export class RoomService {
 
     // If room is empty, clean up
     if (isRoomEmpty) {
-      console.log(`🧹 [Room] Room ${roomId} is now empty, cleaning up`);
       this.rooms.delete(roomId);
     }
-
-    console.log(
-      `🏁 [Room] leaveRoom completed for ${peerId}. Success: true, IsRoomEmpty: ${isRoomEmpty}, NewCreator: ${newCreator?.peer_id || 'none'}`,
-    );
-
     return {
       success: true,
       newCreator,
@@ -437,4 +365,81 @@ export class RoomService {
       };
     }
   }
+
+// Add these methods to RoomService class
+lockRoom(roomId: string, password: string, creatorId: string): boolean {
+  try {
+    // Store room password with metadata
+    this.roomPasswords.set(roomId, {
+      password: password,
+      creator_id: creatorId,
+    });
+
+    return true;
+  } catch (error) {
+    console.error(`[Room Service] Failed to lock room ${roomId}:`, error);
+    return false;
+  }
+}
+
+unlockRoom(roomId: string, creatorId: string): boolean {
+  try {
+    const roomPassword = this.roomPasswords.get(roomId);
+    
+    if (!roomPassword) {
+      return true;
+    }
+
+    // Verify the creator
+    if (roomPassword.creator_id !== creatorId) {
+      return false;
+    }
+
+    // Remove the password
+    this.roomPasswords.delete(roomId);
+    return true;
+  } catch (error) {
+    console.error(`[Room Service] Failed to unlock room ${roomId}:`, error);
+    return false;
+  }
+}
+
+isRoomLocked(roomId: string): boolean {
+  return this.roomPasswords.has(roomId);
+}
+
+verifyRoomPassword(roomId: string, password: string): boolean {
+  const roomPassword = this.roomPasswords.get(roomId);
+  
+  if (!roomPassword) {
+    // Room is not locked, so any password is valid (or no password needed)
+    return true;
+  }
+
+  return roomPassword.password === password;
+}
+
+getRoomPassword(roomId: string): { password: string; creator_id: string; } | null {
+  return this.roomPasswords.get(roomId) || null;
+}
+
+// Clean up room passwords when room is deleted
+private cleanupRoomPassword(roomId: string): void {
+  if (this.roomPasswords.has(roomId)) {
+    this.roomPasswords.delete(roomId);
+    console.log(`🧹 [Room Service] Cleaned up password for room ${roomId}`);
+  }
+}
+
+// Update existing removeRoom method to include password cleanup
+async removeRoom(roomId: string): Promise<boolean> {
+  try {
+    // Clean up room password
+    this.cleanupRoomPassword(roomId);
+    return true;
+  } catch (error) {
+    console.error(`Failed to remove room ${roomId}:`, error);
+    return false;
+  }
+}
 }

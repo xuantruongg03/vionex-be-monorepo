@@ -81,6 +81,27 @@ interface VerifyRoomPasswordResponse {
   valid: boolean;
 }
 
+interface LockRoomRequest {
+  room_id: string;
+  password: string;
+  creator_id: string;
+}
+
+interface LockRoomResponse {
+  status: string;
+  message: string;
+}
+
+interface UnlockRoomRequest {
+  room_id: string;
+  creator_id: string;
+}
+
+interface UnlockRoomResponse {
+  status: string;
+  message: string;
+}
+
 interface GetRoomRequest {
   room_id: string;
 }
@@ -193,6 +214,10 @@ export {
   IsRoomLockedResponse,
   VerifyRoomPasswordRequest,
   VerifyRoomPasswordResponse,
+  LockRoomRequest,
+  LockRoomResponse,
+  UnlockRoomRequest,
+  UnlockRoomResponse,
   GetRoomRequest,
   GetRoomResponse,
   SetParticipantRequest,

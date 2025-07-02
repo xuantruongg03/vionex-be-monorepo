@@ -46,6 +46,26 @@ export interface ProtoStream {
 }
 
 export interface RoomGrpcService {
+  
+  lockRoom(data: {
+    room_id: string;
+    password: string;
+    creator_id: string;
+  }): any;
+  
+  unlockRoom(data: {
+    room_id: string;
+    creator_id: string;
+  }): any;
+  
+  isRoomLocked(data: {
+    room_id: string;
+  }): any;
+  
+  verifyRoomPassword(data: {
+    room_id: string;
+    password: string;
+  }): any;
   getParticipantByPeerId(data: {
     peer_id: string;
     room_id: string;

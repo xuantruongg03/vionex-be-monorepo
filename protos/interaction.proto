@@ -335,6 +335,15 @@ message EndQuizResponse {
   QuizSession quiz_session = 2;
 }
 
+message GetActiveQuizRequest {
+  string room_id = 1;
+}
+
+message GetActiveQuizResponse {
+  bool success = 1;
+  QuizSession quiz_session = 2;
+}
+
 // ===================== BEHAVIOR MONITORING MESSAGES =====================
 message UserEvent {
   string type = 1;

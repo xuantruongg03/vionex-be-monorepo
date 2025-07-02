@@ -29,6 +29,6 @@ async function bootstrap() {
   // Start gRPC microservice only
   await app.listen();
 
-  console.log(`- gRPC port: ${configService.get('SFU_GRPC_PORT') || 50053}`);
+  console.log(`Started SFU - gRPC port: ${configService.get('SFU_GRPC_PORT') || 50053}`);
 }
 bootstrap();

@@ -70,6 +70,20 @@ export interface SfuGrpcService {
     peer_id: string;
     metadata: string;
   }): any;
+
+  pinUser(data: {
+    room_id: string;
+    pinner_peer_id: string;
+    pinned_peer_id: string;
+    transport_id: string;
+    rtp_capabilities: string;
+  }): any;
+  
+  unpinUser(data: {
+    room_id: string;
+    unpinner_peer_id: string;
+    unpinned_peer_id: string;
+  }): any;
 }
 
 @Injectable()
@@ -90,11 +104,9 @@ export class SfuClientService implements OnModuleInit {
     const result: any = await firstValueFrom(
       this.sfuService.getMediaRouter({ room_id: roomId }),
     );
-    console.log('[SfuClient] getRouterRtpCapabilities result:', result);
 
     if (result && result.router_data) {
       const capabilities = JSON.parse(result.router_data);
-      console.log('[SfuClient] Parsed router capabilities:', capabilities);
       return capabilities;
     }
 
@@ -263,4 +275,36 @@ export class SfuClientService implements OnModuleInit {
   async sendPresence(roomId: string, peerId: string, metadata: any) {
     return this.handlePresence(roomId, peerId, metadata);
   }
+
+  async pinUser(
+  roomId: string,
+  pinnerPeerId: string,
+  pinnedPeerId: string,
+  transportId: string,
+  rtpCapabilities?: any,
+) {
+  return firstValueFrom(
+    this.sfuService.pinUser({
+      room_id: roomId,
+      pinner_peer_id: pinnerPeerId,
+      pinned_peer_id: pinnedPeerId,
+      transport_id: transportId,
+      rtp_capabilities: JSON.stringify(rtpCapabilities || {}),
+    }),
+  );
+}
+
+async unpinUser(
+  roomId: string,
+  unpinnerPeerId: string,
+  unpinnedPeerId: string,
+) {
+  return firstValueFrom(
+    this.sfuService.unpinUser({
+      room_id: roomId,
+      unpinner_peer_id: unpinnerPeerId,
+      unpinned_peer_id: unpinnedPeerId,
+    }),
+  );
+}
 }

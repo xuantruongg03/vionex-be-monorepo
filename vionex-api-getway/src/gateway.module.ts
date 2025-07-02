@@ -10,7 +10,6 @@ import { ChatClientService } from './clients/chat.client';
 import { InteractionClientService } from './clients/interaction.client';
 import { GatewayController } from './gateway.controller';
 import { RoomHttpController } from './room-http.controller';
-import { ChatHttpController } from './chat-http.controller';
 import { HttpBroadcastService } from './services/http-broadcast.service';
 import { SfuClientService } from './clients/sfu.client';
 
@@ -84,7 +83,7 @@ import { SfuClientService } from './clients/sfu.client';
       },
     ]),
   ],
-  controllers: [GatewayController, RoomHttpController, ChatHttpController],
+  controllers: [GatewayController, RoomHttpController],
   providers: [
     GatewayGateway,
     ChatService,
