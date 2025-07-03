@@ -18,7 +18,7 @@ async function bootstrap() {
       options: {
         package: 'sfu',
         protoPath: protoPaths.sfu,
-        url: `0.0.0.0:${configService.get('SFU_GRPC_PORT') || 50053}`,
+        url: `0.0.0.0:${configService.get('SFU_GRPC_PORT') || 30004}`,
         loader: {
           keepCase: true,
         },
@@ -29,6 +29,8 @@ async function bootstrap() {
   // Start gRPC microservice only
   await app.listen();
 
-  console.log(`Started SFU - gRPC port: ${configService.get('SFU_GRPC_PORT') || 50053}`);
+  console.log(
+    `Started SFU - gRPC port: ${configService.get('SFU_GRPC_PORT') || 30004}`,
+  );
 }
 bootstrap();

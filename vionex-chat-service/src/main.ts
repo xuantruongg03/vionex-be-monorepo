@@ -17,7 +17,7 @@ async function bootstrap() {
       options: {
         package: 'chat',
         protoPath: protoPaths.chat,
-        url: `0.0.0.0:${configService.get('CHAT_GRPC_PORT') || 50054}`,
+        url: `0.0.0.0:${configService.get('CHAT_GRPC_PORT') || 30002}`,
         loader: {
           keepCase: true,
         },
@@ -26,7 +26,7 @@ async function bootstrap() {
   );
   await grpcApp.listen();
   console.log(
-    `Chat gRPC Service is running on port ${configService.get('CHAT_GRPC_PORT') || 50054}`,
+    `Chat gRPC Service is running on port ${configService.get('CHAT_GRPC_PORT') || 30002}`,
   );
 }
 bootstrap();

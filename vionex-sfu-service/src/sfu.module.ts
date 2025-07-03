@@ -30,6 +30,10 @@ import { protoPaths } from './common/paths';
     ]),
   ],
   controllers: [SfuController],
-  providers: [SfuService, WorkerPoolService, ConfigService],
+  providers: [
+    WorkerPoolService, // List WorkerPoolService first to ensure it's initialized before services that depend on it
+    SfuService,
+    ConfigService,
+  ],
 })
 export class SfuModule {}

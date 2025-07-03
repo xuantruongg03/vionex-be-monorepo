@@ -1,8 +1,7 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
-import * as mediasoup from 'mediasoup';
-import { types as mediasoupTypes } from 'mediasoup';
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { MediaRoom, Stream } from './interface';
+import mediasoupTypes from 'mediasoup/node/lib/types';
+import { Stream } from './interface';
 import { WorkerPoolService } from './worker-pool/worker-pool.service';
 
 interface RoomPassword {
@@ -18,13 +17,13 @@ interface MediaRoomInfo {
 }
 
 @Injectable()
-export class SfuService implements OnModuleDestroy {
+export class SfuService implements OnModuleInit, OnModuleDestroy {
   private rooms = new Map<string, Map<string, any>>();
-  private webRtcServer: mediasoupTypes.WebRtcServer;
-  private webRtcServerId: string;
+  private webRtcServer!: mediasoupTypes.WebRtcServer; // Using non-null assertion
+  private webRtcServerId!: string; // Using non-null assertion
   private roomPasswords = new Map<string, RoomPassword>();
 
-  private worker: mediasoupTypes.Worker;
+  private worker!: mediasoupTypes.Worker; // Using non-null assertion as it will be initialized in initializeMediasoup
   private mediaRooms = new Map<string, MediaRoomInfo>();
   private readonly mediaRouters = new Map<string, mediasoupTypes.Router>();
 
@@ -36,56 +35,36 @@ export class SfuService implements OnModuleDestroy {
     private configService: ConfigService,
     private readonly workerPool: WorkerPoolService,
   ) {
-    this.initializeMediasoup();
+  }
+  async onModuleInit() {
+    try {
+      await this.initializeMediasoup();
+    } catch (error) {
+      console.error('SfuService: Failed to initialize:', error);
+      throw error;
+    }
   }
 
   private async initializeMediasoup() {
     try {
-      const rtcMinPort = parseInt(
-        this.configService.get('MEDIASOUP_RTC_MIN_PORT') || '40000',
-        10,
-      );
-      const rtcMaxPort = parseInt(
-        this.configService.get('MEDIASOUP_RTC_MAX_PORT') || '49999',
-        10,
-      );
+      // Use the async method to get a worker, which will initialize workers if needed
+      // or wait for initialization to complete
+      this.worker = await this.workerPool.getWorkerAsync();
+      // Try to get a WebRTC server from the worker pool, prioritizing the worker-specific one
+      const webRtcServer =
+        this.workerPool.getWebRtcServerForWorker(this.worker.pid.toString()) ||
+        this.workerPool.getSharedWebRtcServer(this.worker.pid.toString());
 
-      // Tạo worker đầu tiên để host WebRTC server
-      this.worker = await mediasoup.createWorker({
-        logLevel: 'warn',
-        logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp'],
-        rtcMinPort,
-        rtcMaxPort,
-      });
+      if (!webRtcServer) {
+        throw new Error('No WebRTC server available from worker pool');
+      }
 
-      this.webRtcServer = await this.worker.createWebRtcServer({
-        listenInfos: [
-          {
-            protocol: 'udp',
-            ip: this.configService.get('MEDIASOUP_LISTEN_IP') || '0.0.0.0',
-            announcedIp: this.configService.get('MEDIASOUP_ANNOUNCED_IP'),
-            port:
-              parseInt(this.configService.get('MEDIASOUP_PORT') || '55555') +
-              5000,
-          },
-          {
-            protocol: 'tcp',
-            ip: this.configService.get('MEDIASOUP_LISTEN_IP') || '0.0.0.0',
-            announcedIp: this.configService.get('MEDIASOUP_ANNOUNCED_IP'),
-            port:
-              parseInt(this.configService.get('MEDIASOUP_PORT') || '55555') +
-              5000,
-          },
-        ],
-      });
+      this.webRtcServer = webRtcServer;
 
       this.webRtcServerId = this.webRtcServer.id;
-      this.workerPool.setSharedWebRtcServer(this.webRtcServer);
-
+      // Register error handler for the worker
       this.worker.on('died', () => {
-        console.error(
-          'Main mediasoup worker died (hosting WebRTC server), exiting in 2 seconds...',
-        );
+        console.error('Main mediasoup worker died, exiting in 2 seconds...');
         setTimeout(() => process.exit(1), 2000);
       });
     } catch (error) {
@@ -110,7 +89,7 @@ export class SfuService implements OnModuleDestroy {
     }
 
     // Lấy worker theo roomId để đảm bảo cùng một room luôn ở trên cùng một worker
-    const worker = this.workerPool.getWorkerByRoomId(roomId);
+    const worker = await this.workerPool.getWorkerByRoomIdAsync(roomId);
 
     // Lưu thông tin room
     this.mediaRooms.set(roomId, {
@@ -188,6 +167,7 @@ export class SfuService implements OnModuleDestroy {
       const webRtcServer = this.workerPool.getWebRtcServerForWorker(workerId);
 
       if (!webRtcServer) {
+        // When not using WebRTC server, create transport with dynamic port allocation
         const transportOptions: mediasoupTypes.WebRtcTransportOptions = {
           listenIps: [
             {
@@ -223,15 +203,7 @@ export class SfuService implements OnModuleDestroy {
         await mediaRoom.router.createWebRtcTransport(transportOptions);
 
       // Store transport for later access
-      console.log(
-        `[SFU] Created and storing transport with ID: ${transport.id}`,
-      );
       this.transports.set(transport.id, transport);
-      console.log(
-        `[SFU] Transport ${transport.id} stored. Total transports:`,
-        this.transports.size,
-      );
-
       // Set up cleanup when transport closes
       transport.on('routerclose', () => {
         this.transports.delete(transport.id);
@@ -529,19 +501,10 @@ export class SfuService implements OnModuleDestroy {
     roomStreams.forEach((stream) => {
       prioritizedUsers.add(stream.publisherId);
     });
-
-    console.log(
-      `🎯 [SFU] Room ${roomId} prioritized users:`,
-      Array.from(prioritizedUsers),
-    );
-    console.log(
-      `🎯 [SFU] Total streams in room: ${this.getStreamsByRoom(roomId).length}, Priority streams: ${roomStreams.length}`,
-    );
-
     return prioritizedUsers;
   }
 
-  // Additional method to get recent speakers (from old code)
+  //TODO: Additional method to get recent speakers (from old code)
   private getRecentSpeakers(roomId: string, limit: number): string[] {
     // Logic này có thể được mở rộng để track speaking activity
     // Hiện tại chỉ return empty array
@@ -550,9 +513,6 @@ export class SfuService implements OnModuleDestroy {
 
   // Method to notify user about stream changes (from old code)
   private notifyUserStreamChanges(roomId: string, userId: string): void {
-    console.log(
-      `📢 [SFU] Notifying user ${userId} about stream changes in room ${roomId}`,
-    );
     // Logic này có thể được mở rộng để notify qua WebSocket
   }
 
@@ -599,10 +559,6 @@ export class SfuService implements OnModuleDestroy {
     forcePinConsumer: boolean = false,
   ) {
     try {
-      console.log(
-        `🎯 [SFU] Creating consumer - Room: ${roomId}, Stream: ${streamId}, Transport: ${transportId}`,
-      );
-
       // Get the media room
       const mediaRoom = this.mediaRooms.get(roomId);
       if (!mediaRoom || !mediaRoom.router) {
@@ -630,10 +586,6 @@ export class SfuService implements OnModuleDestroy {
           stream.publisherId,
         )
       ) {
-        console.log(
-          `🚫 [SFU] User ${participant.peerId || participant.peer_id} will not receive stream ${streamId} - not in priority list (stream rank > 10)`,
-        );
-
         // Theo mã cũ: stream được tạo nhưng không được consume
         return {
           consumerId: null,
@@ -690,11 +642,6 @@ export class SfuService implements OnModuleDestroy {
         rtpCapabilities: finalRtpCapabilities,
         paused: true,
       });
-
-      console.log(
-        `[SFU] Consumer created: ${consumer.id}, kind: ${consumer.kind}`,
-      );
-
       // Store consumer in media room - use streamId as key and store array of consumers
       if (!mediaRoom.consumers.has(streamId)) {
         mediaRoom.consumers.set(streamId, []);
@@ -772,22 +719,14 @@ export class SfuService implements OnModuleDestroy {
     }
 
     await transport.connect({ dtlsParameters });
-    console.log(`✅ [SFU] Transport ${transportId} connected`);
+    console.log(`[SFU] Transport ${transportId} connected`);
   }
 
   // Stream retrieval method required by controller
   getStream(streamId: string): Stream | null {
-    console.log(
-      `🔍 [SFU] Looking for stream ${streamId}. Available streams:`,
-      Array.from(this.streams.keys()),
-    );
     const stream = this.streams.get(streamId) || null;
     if (!stream) {
-      console.error(
-        `❌ [SFU] Stream ${streamId} not found in streams registry`,
-      );
-    } else {
-      console.log(`✅ [SFU] Found stream ${streamId}`);
+      console.error(`[SFU] Stream ${streamId} not found in streams registry`);
     }
     return stream;
   }
@@ -802,10 +741,6 @@ export class SfuService implements OnModuleDestroy {
     participant: any;
   }) {
     try {
-      console.log(
-        `🎬 [SFU] Creating producer in room ${data.roomId}, transport ${data.transportId}`,
-      );
-
       // Get the media room
       const mediaRoom = this.mediaRooms.get(data.roomId);
       if (!mediaRoom || !mediaRoom.router) {
@@ -824,20 +759,25 @@ export class SfuService implements OnModuleDestroy {
         rtpParameters: data.rtpParameters,
       });
 
-      console.log(
-        `✅ [SFU] Producer created: ${producer.id}, kind: ${producer.kind}`,
-      );
-
-
       // --- PATCH: Detect screen share and set streamId accordingly ---
       // Check both metadata (for HTTP/gRPC) and producer.appData (for WebSocket)
       let isScreenShare = false;
       // Check metadata
-      if (data.metadata && (data.metadata.isScreenShare === true || data.metadata.type === 'screen' || data.metadata.type === 'screen_audio')) {
+      if (
+        data.metadata &&
+        (data.metadata.isScreenShare === true ||
+          data.metadata.type === 'screen' ||
+          data.metadata.type === 'screen_audio')
+      ) {
         isScreenShare = true;
       }
       // Check producer.appData (for WebSocket/mediasoup-client)
-      if (producer.appData && (producer.appData.isScreenShare === true || producer.appData.type === 'screen' || producer.appData.type === 'screen_audio')) {
+      if (
+        producer.appData &&
+        (producer.appData.isScreenShare === true ||
+          producer.appData.type === 'screen' ||
+          producer.appData.type === 'screen_audio')
+      ) {
         isScreenShare = true;
       }
 
@@ -863,14 +803,6 @@ export class SfuService implements OnModuleDestroy {
       // Log priority information (từ mã cũ)
       const totalStreams = this.getStreamsByRoom(data.roomId).length;
       const isInPriority = this.isStreamInPriority(data.roomId, streamId);
-
-      console.log(`📊 [SFU] Stream created: ${streamId}`);
-      console.log(
-        `📊 [SFU] Room ${data.roomId} stats: ${totalStreams} total streams`,
-      );
-      console.log(
-        `📊 [SFU] Stream ${streamId} priority status: ${isInPriority ? 'PRIORITY (will be consumed)' : 'NON-PRIORITY (will NOT be consumed)'}`,
-      );
 
       if (totalStreams > 10) {
         console.warn(

@@ -17,7 +17,7 @@ async function bootstrap() {
       options: {
         package: 'interaction',
         protoPath: protoPaths.interaction,
-        url: `0.0.0.0:${configService.get('INTERACTION_GRPC_PORT') || 50055}`,
+        url: `0.0.0.0:${configService.get('INTERACTION_GRPC_PORT') || 30003}`,
         loader: {
           keepCase: true,
         },
@@ -26,7 +26,7 @@ async function bootstrap() {
   );
   await grpcApp.listen();
   console.log(
-    `Interaction gRPC Service is running on port ${configService.get('INTERACTION_GRPC_PORT') || 50055}`,
+    `Interaction gRPC Service is running on port ${configService.get('INTERACTION_GRPC_PORT') || 30003}`,
   );
 }
 bootstrap();

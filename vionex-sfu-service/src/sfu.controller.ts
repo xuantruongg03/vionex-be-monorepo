@@ -337,14 +337,6 @@ export class SfuController {
       if (result.message) {
         consumerData.message = result.message;
       }
-
-      console.log(`[SFU Controller] Sending consumer data:`, {
-        consumerId: consumerData.consumerId,
-        streamId: consumerData.streamId,
-        kind: consumerData.kind,
-        hasRtpParameters: !!consumerData.rtpParameters,
-      });
-
       return {
         status: 'success',
         consumer_data: JSON.stringify(consumerData),
@@ -486,60 +478,6 @@ export class SfuController {
     }
   }
 
-  // @GrpcMethod('SfuService', 'HandlePresence')
-  // async handlePresence(data: {
-  //   room_id: string;
-  //   peer_id: string;
-  //   metadata: string;
-  // }): Promise<{ status: string; presence_data: string }> {
-  //   // Parse metadata properly, ensuring we don't double-parse
-  //   let parsedMetadata;
-  //   try {
-  //     if (typeof data.metadata === 'string') {
-  //       // Check if it's already a JSON string or raw metadata
-  //       const trimmed = data.metadata.trim();
-  //       if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-  //         parsedMetadata = JSON.parse(data.metadata);
-  //       } else {
-  //         // If it's not JSON format, treat as plain object
-  //         parsedMetadata = { raw: data.metadata };
-  //       }
-  //     } else if (typeof data.metadata === 'object' && data.metadata !== null) {
-  //       parsedMetadata = data.metadata;
-  //     } else {
-  //       parsedMetadata = {};
-  //     }
-  //     console.log('[SFU Controller] Parsed metadata:', parsedMetadata);
-  //   } catch (error) {
-  //     console.error('[SFU Controller] Failed to parse metadata:', error);
-  //     console.error('[SFU Controller] Raw metadata:', data.metadata);
-  //     parsedMetadata = {}; // Default to empty object
-  //   }
-
-  //   const payload = {
-  //     roomId: data.room_id,
-  //     peerId: data.peer_id,
-  //     metadata: parsedMetadata, // Pass parsed object instead of string
-  //   };
-
-  //   console.log('[SFU Controller] Calling SFU service with payload:', payload);
-
-  //   const rs = await this.sfuService.handlePresence(payload);
-  //   console.log('[SFU Controller] SFU service returned:', rs);
-
-  //   if (!rs) {
-  //     console.error('[SFU Controller] SFU service returned null/undefined');
-  //     throw new RpcException('Failed to handle presence');
-  //   }
-
-  //   const result = {
-  //     status: 'success',
-  //     presence_data: JSON.stringify(rs),
-  //   };
-
-  //   console.log('[SFU Controller] Final result:', result);
-  //   return result;
-  // }
   @GrpcMethod('SfuService', 'CreateProducer')
   async handleCreateProducer(data: {
     room_id: string;
@@ -589,17 +527,8 @@ export class SfuController {
         'unknown';
       const participantName =
         participant.name || participant.username || participantId;
-
-      console.log(
-        `📊 [SFU] Producer created in room ${data.room_id}: ${result.producerId} (${data.kind}) by ${participantName}`,
-      );
-
       // Log current stream count
       const allStreams = await this.sfuService.getStreamsByRoom(data.room_id);
-      console.log(
-        `📊 [SFU] Room ${data.room_id} now has ${allStreams.length} total streams`,
-      );
-
       const responseData = {
         producer_id: result.producerId,
         producer: {
@@ -611,19 +540,12 @@ export class SfuController {
         },
         streamId: result.streamId,
       };
-
-      console.log(
-        '🔧 [SFU Controller] Response data before stringify:',
-        responseData,
-      );
-
       const finalResponse = {
         status: 'success',
         message: 'Producer created successfully',
         producer_data: JSON.stringify(responseData),
       };
 
-      console.log('🔧 [SFU Controller] Final response:', finalResponse);
       return finalResponse;
     } catch (error) {
       console.error('Error creating producer:', error);
@@ -640,7 +562,7 @@ export class SfuController {
     rtp_capabilities: string;
   }): Promise<{ status: string; pin_data: string }> {
     try {
-      console.log(`📌 [SFU Controller] Pin user request:`, data);
+      console.log(`[SFU Controller] Pin user request:`, data);
 
       if (!data.room_id || !data.pinner_peer_id || !data.pinned_peer_id) {
         throw new RpcException('Missing required fields for pin user');
@@ -680,7 +602,7 @@ export class SfuController {
     unpinned_peer_id: string;
   }): Promise<{ status: string; unpin_data: string }> {
     try {
-      console.log(`📌 [SFU Controller] Unpin user request:`, data);
+      console.log(`[SFU Controller] Unpin user request:`, data);
 
       if (!data.room_id || !data.unpinner_peer_id || !data.unpinned_peer_id) {
         throw new RpcException('Missing required fields for unpin user');

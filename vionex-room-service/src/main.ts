@@ -19,7 +19,7 @@ async function bootstrap() {
       options: {
         package: 'room',
         protoPath: protoPaths.room,
-        url: `0.0.0.0:${configService.get('ROOM_GRPC_PORT') || 50051}`,
+        url: `0.0.0.0:${configService.get('ROOM_GRPC_PORT') || 30001}`,
         loader: {
           keepCase: true,
         },
@@ -30,7 +30,7 @@ async function bootstrap() {
   // Start both HTTP and gRPC services
   await grpcApp.listen();
   console.log(
-    `Room gRPC Service is running on port ${configService.get('ROOM_GRPC_PORT') || 50051}`,
+    `Room gRPC Service is running on port ${configService.get('ROOM_GRPC_PORT') || 30001}`,
   );
 }
 bootstrap();

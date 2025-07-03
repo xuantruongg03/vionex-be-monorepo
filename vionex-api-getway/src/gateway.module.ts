@@ -25,7 +25,7 @@ import { SfuClientService } from './clients/sfu.client';
           options: {
             package: 'room',
             protoPath: protoPaths.room,
-            url: `${configService.get('ROOM_SERVICE_HOST') || 'localhost'}:${configService.get('ROOM_SERVICE_GRPC_PORT') || 50051}`,
+            url: `${configService.get('ROOM_SERVICE_HOST') || 'localhost'}:${configService.get('ROOM_SERVICE_GRPC_PORT') || 30001}`,
             loader: {
               keepCase: true,
             },
@@ -41,7 +41,7 @@ import { SfuClientService } from './clients/sfu.client';
           options: {
             package: 'chat',
             protoPath: protoPaths.chat,
-            url: `${configService.get('CHAT_SERVICE_HOST') || 'localhost'}:${configService.get('CHAT_SERVICE_GRPC_PORT') || 50054}`,
+            url: `${configService.get('CHAT_SERVICE_HOST') || 'localhost'}:${configService.get('CHAT_SERVICE_GRPC_PORT') || 30002}`,
             loader: {
               keepCase: true,
             },
@@ -57,7 +57,7 @@ import { SfuClientService } from './clients/sfu.client';
           options: {
             package: 'sfu',
             protoPath: protoPaths.sfu,
-            url: `${configService.get('SFU_SERVICE_HOST') || 'localhost'}:${configService.get('SFU_SERVICE_GRPC_PORT') || 50053}`,
+            url: `${configService.get('SFU_SERVICE_HOST') || 'localhost'}:${configService.get('SFU_SERVICE_GRPC_PORT') || 30004}`,
             loader: {
               keepCase: true,
             },
@@ -73,7 +73,7 @@ import { SfuClientService } from './clients/sfu.client';
           options: {
             package: 'interaction',
             protoPath: protoPaths.interaction,
-            url: `${configService.get('INTERACTION_SERVICE_HOST') || 'localhost'}:${configService.get('INTERACTION_SERVICE_GRPC_PORT') || 50055}`,
+            url: `${configService.get('INTERACTION_SERVICE_HOST') || 'localhost'}:${configService.get('INTERACTION_SERVICE_GRPC_PORT') || 30003}`,
             loader: {
               keepCase: true,
             },
