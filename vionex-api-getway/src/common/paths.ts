@@ -5,4 +5,5 @@ export const protoPaths = {
   sfu: resolve(__dirname, '../../../protos/sfu.proto'),
   chat: resolve(__dirname, '../../../protos/chat.proto'),
   interaction: resolve(__dirname, '../../../protos/interaction.proto'),
+  audio: resolve(__dirname, '../../../protos/audio.proto'),
 };

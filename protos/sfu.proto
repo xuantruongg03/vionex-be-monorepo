@@ -25,8 +25,10 @@ service SfuService {
   rpc CreateProducer(CreateProducerRequest) returns (CreateProducerResponse);
   rpc SaveProducer(SaveProducerRequest) returns (SaveProducerResponse);
   rpc PinUser(PinUserRequest) returns (PinUserResponse);
-rpc UnpinUser(UnpinUserRequest) returns (UnpinUserResponse);
-
+  rpc UnpinUser(UnpinUserRequest) returns (UnpinUserResponse);
+  rpc HandleSpeaking(HandleSpeakingRequest) returns (HandleSpeakingResponse);
+  rpc HandleStopSpeaking(HandleStopSpeakingRequest) returns (HandleStopSpeakingResponse);
+  rpc GetActiveSpeakers(GetActiveSpeakersRequest) returns (GetActiveSpeakersResponse);
 }
 message PinUserRequest {
   string room_id = 1;
@@ -313,4 +315,39 @@ message SaveProducerRequest {
 message SaveProducerResponse {
   string status = 1;
   string message = 2;
+}
+
+// Speaking management messages
+message HandleSpeakingRequest {
+  string room_id = 1;
+  string peer_id = 2;
+  optional int32 port = 3; // Optional port for audio service
+}
+
+message HandleSpeakingResponse {
+  string status = 1;
+  string message = 2;
+}
+
+message HandleStopSpeakingRequest {
+  string room_id = 1;
+  string peer_id = 2;
+}
+
+message HandleStopSpeakingResponse {
+  string status = 1;
+  string message = 2;
+}
+
+message GetActiveSpeakersRequest {
+  string room_id = 1;
+}
+
+message GetActiveSpeakersResponse {
+  repeated ActiveSpeaker active_speakers = 1;
+}
+
+message ActiveSpeaker {
+  string peer_id = 1;
+  int64 last_speak_time = 2; // Unix timestamp
 }

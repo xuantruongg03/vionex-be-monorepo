@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package audio;
+
+service AudioService {
+  // Legacy methods (for backward compatibility)
+  rpc AllocatePort (PortRequest) returns (PortReply);
+  rpc ReleasePort (PortRequest) returns (Empty);
+  
+  // New audio buffer processing - SIMPLIFIED ARCHITECTURE
+  rpc ProcessAudioBuffer (ProcessAudioBufferRequest) returns (ProcessAudioBufferResponse);
+  
+  // Legacy audio chunk processing methods
+  rpc ProcessAudioChunk (ProcessAudioRequest) returns (ProcessAudioResponse);
+  rpc GetTranscripts (GetTranscriptsRequest) returns (GetTranscriptsResponse);
+  
+  // Service statistics
+  rpc GetServiceStats (Empty) returns (ServiceStatsResponse);
+}
+
+// Legacy messages
+message PortRequest {
+  string roomId = 1;
+  string userId = 2;
+}
+
+message PortReply {
+  bool success = 1;
+  int32 port = 2;
+  bool ready = 3;
+}
+
+message Empty {
+  bool success = 1;
+}
+
+// New audio buffer processing messages - SIMPLIFIED ARCHITECTURE
+message ProcessAudioBufferRequest {
+  string userId = 1;
+  string roomId = 2;
+  int64 timestamp = 3;
+  bytes buffer = 4;
+  double duration = 5;
+  int32 sampleRate = 6;
+  int32 channels = 7;
+}
+
+message ProcessAudioBufferResponse {
+  bool success = 1;
+  string transcript = 2;
+  double confidence = 3;
+  string message = 4;
+}
+
+// Legacy audio chunk processing messages
+message ProcessAudioRequest {
+  string roomId = 1;
+  string userId = 2;
+  int64 timestamp = 3;
+  bytes audioBuffer = 4;
+  double duration = 5;
+}
+
+message ProcessAudioResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message GetTranscriptsRequest {
+  string roomId = 1;
+  int64 fromTimestamp = 2;
+  int64 toTimestamp = 3;
+}
+
+message GetTranscriptsResponse {
+  bool success = 1;
+  string message = 2;
+  string transcripts = 3; // JSON array of transcripts
+}
+
+message ServiceStatsResponse {
+  bool success = 1;
+  string message = 2;
+  int32 totalProcessed = 3;
+  int32 successful = 4;
+  int32 failed = 5;
+  int32 tooShort = 6;
+  int32 noSpeech = 7;
+  double successRate = 8;
+  bool modelLoaded = 9;
+}

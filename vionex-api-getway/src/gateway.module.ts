@@ -12,6 +12,8 @@ import { GatewayController } from './gateway.controller';
 import { RoomHttpController } from './room-http.controller';
 import { HttpBroadcastService } from './services/http-broadcast.service';
 import { SfuClientService } from './clients/sfu.client';
+import { AudioClientService } from './clients/audio.client';
+import AudioCallbackController from './audio/audio-callback.controller';
 
 @Module({
   imports: [
@@ -81,18 +83,36 @@ import { SfuClientService } from './clients/sfu.client';
         }),
         inject: [ConfigService],
       },
+      {
+        name: 'AUDIO_SERVICE',
+        imports: [ConfigModule],
+        useFactory: (configService: ConfigService) => ({
+          transport: Transport.GRPC,
+          options: {
+            package: 'audio',
+            protoPath: protoPaths.audio,
+            url: `${configService.get('AUDIO_SERVICE_HOST') || 'localhost'}:${configService.get('AUDIO_SERVICE_GRPC_PORT') || 30005}`,
+            loader: {
+              keepCase: true,
+            },
+          },
+        }),
+        inject: [ConfigService],
+      },
     ]),
   ],
-  controllers: [GatewayController, RoomHttpController],
+  controllers: [GatewayController, RoomHttpController, AudioCallbackController],
   providers: [
     GatewayGateway,
     ChatService,
+    AudioClientService,
     WebSocketEventService,
     RoomClientService,
     ChatClientService,
     HttpBroadcastService,
     SfuClientService,
     InteractionClientService,
+    AudioCallbackController,
   ],
 })
 export class GatewayModule {}

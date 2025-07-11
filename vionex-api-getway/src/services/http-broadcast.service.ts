@@ -7,13 +7,11 @@ export class HttpBroadcastService {
 
   setSocketServer(io: Server) {
     this.io = io;
-    console.log('[HTTP Broadcast] Socket.IO server set successfully');
   }
 
   broadcastToUser(clientId: string, event: string, data: any) {
     if (this.io) {
       this.io.to(clientId).emit(event, data);
-      console.log(`[HTTP Broadcast] ${event} to user ${clientId}:`, data);
     } else {
       console.warn('[HTTP Broadcast] Socket.IO server not available');
     }
@@ -22,7 +20,6 @@ export class HttpBroadcastService {
   broadcastToRoom(roomId: string, event: string, data: any) {
     if (this.io) {
       this.io.to(roomId).emit(event, data);
-      console.log(`[HTTP Broadcast] ${event} to room ${roomId}:`, data);
     } else {
       console.warn('[HTTP Broadcast] Socket.IO server not available');
     }
@@ -35,10 +32,6 @@ export class HttpBroadcastService {
   ) {
     if (this.io) {
       this.io.to(roomId).except(excludeSocketId).emit(event, data);
-      console.log(
-        `[HTTP Broadcast] ${event} to room ${roomId} except ${excludeSocketId}:`,
-        data,
-      );
     } else {
       console.warn('[HTTP Broadcast] Socket.IO server not available');
     }
@@ -47,7 +40,6 @@ export class HttpBroadcastService {
   emitToAll(event: string, data: any) {
     if (this.io) {
       this.io.emit(event, data);
-      console.log(`[HTTP Broadcast] ${event} to all clients:`, data);
     } else {
       console.warn('[HTTP Broadcast] Socket.IO server not available');
     }

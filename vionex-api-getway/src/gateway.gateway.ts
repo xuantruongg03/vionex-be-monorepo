@@ -1,3 +1,15 @@
+/*!
+ * Copyright (c) 2025 xuantruongg003
+ *
+ * This software is licensed for non-commercial use only.
+ * You may use, study, and modify this code for educational and research purposes.
+ *
+ * Commercial use of this code, in whole or in part, is strictly prohibited
+ * without prior written permission from the author.
+ *
+ * Author Contact: lexuantruong098@gmail.com
+ */
+
 import {
   ConnectedSocket,
   MessageBody,
@@ -8,20 +20,15 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import AudioCallbackController from './audio/audio-callback.controller';
+import { AudioClientService } from './clients/audio.client';
 import { ChatClientService } from './clients/chat.client';
+import { InteractionClientService } from './clients/interaction.client';
 import { RoomClientService } from './clients/room.client';
 import { SfuClientService } from './clients/sfu.client';
 import { Participant } from './interfaces/interface';
 import { HttpBroadcastService } from './services/http-broadcast.service';
 import { WebSocketEventService } from './services/websocket-event.service';
-import { InteractionClientService } from './clients/interaction.client';
-import {
-  ClearWhiteboardResponse,
-  GetPermissionsResponse,
-  GetWhiteboardDataResponse,
-  UpdatePermissionsResponse,
-  UpdateUserPointerResponse,
-} from './interfaces/whiteboard';
 
 @WebSocketGateway({
   transports: ['websocket'],
@@ -36,6 +43,7 @@ export class GatewayGateway
   private connectionMap = new Map<string, string>(); // socketId -> peerId
   private participantSocketMap = new Map<string, string>(); // peerId -> socketId
   private roomParticipantMap = new Map<string, string>(); // peerId -> roomId
+  private participantCache = new Map<string, any>(); // peerId -> participant object
 
   constructor(
     private readonly eventService: WebSocketEventService,
@@ -44,17 +52,14 @@ export class GatewayGateway
     private readonly sfuClient: SfuClientService,
     private readonly chatClient: ChatClientService,
     private readonly interactionClient: InteractionClientService,
+    private readonly audioService: AudioClientService,
+    private readonly audioCallbackController: AudioCallbackController,
   ) {}
   handleConnection(client: Socket) {
-    console.log('[Gateway] New client connected:', client.id);
     this.httpBroadcastService.setSocketServer(this.io);
 
-    // Add listener for all events to debug
-    client.onAny((event, ...args) => {
-      if (event.includes('lock') || event.includes('unlock')) {
-        console.log(`🔍 [Gateway] Received event: ${event}`, args);
-      }
-    });
+    // Set WebSocket server reference for audio callback controller
+    this.audioCallbackController.setSocketServer(this.io);
   }
 
   async handleDisconnect(client: Socket) {
@@ -326,7 +331,12 @@ export class GatewayGateway
         await this.roomClient.setParticipant(data.roomId, existingParticipant);
 
         // Store the mapping for gateway routing - IMPORTANT for disconnect handling
-        this.storeParticipantMapping(client.id, data.peerId, data.roomId);
+        this.storeParticipantMapping(
+          client.id,
+          data.peerId,
+          data.roomId,
+          existingParticipant,
+        );
 
         // Emit join success with existing participant data
         this.eventService.emitToClient(client, 'sfu:join-success', {
@@ -474,9 +484,6 @@ export class GatewayGateway
               this.eventService.emitToClient(client, 'sfu:streams', []);
             }
           } else {
-            console.log(
-              `[Gateway] No existing streams found for existing client in room ${data.roomId}`,
-            );
             // Send empty streams array
             this.eventService.emitToClient(client, 'sfu:streams', []);
           }
@@ -514,7 +521,12 @@ export class GatewayGateway
       await this.roomClient.setParticipant(data.roomId, participant);
 
       // Track the connection mapping for disconnect cleanup - IMPORTANT
-      this.storeParticipantMapping(client.id, data.peerId, data.roomId);
+      this.storeParticipantMapping(
+        client.id,
+        data.peerId,
+        data.roomId,
+        participant,
+      );
 
       // Initialize whiteboard permissions if this is the creator
       if (participant.is_creator) {
@@ -681,16 +693,10 @@ export class GatewayGateway
             }
           }
         } else {
-          console.log(
-            `[Gateway] No consumable streams from other users found (all streams are from ${data.peerId})`,
-          );
           // Send empty streams array
           this.eventService.emitToClient(client, 'sfu:streams', []);
         }
       } else {
-        console.log(
-          `[Gateway] No existing streams found for room ${data.roomId}`,
-        );
         // Send empty streams array
         this.eventService.emitToClient(client, 'sfu:streams', []);
       }
@@ -710,6 +716,16 @@ export class GatewayGateway
       // Extract peerId from socket mapping
       const peerId = data.peerId || this.getParticipantBySocketId(client.id);
       const roomId = data.roomId || (await this.getRoomIdBySocketId(client.id));
+
+      if (!peerId || !roomId) {
+        client.emit('sfu:error', {
+          message: 'Invalid participant or room information',
+        });
+        return {
+          success: false,
+          error: 'Invalid participant or room information',
+        };
+      }
 
       await this.sfuClient.setRtpCapabilities(
         peerId,
@@ -733,6 +749,13 @@ export class GatewayGateway
   ) {
     try {
       const peerId = data.peerId || this.getParticipantBySocketId(client.id);
+
+      if (!peerId) {
+        client.emit('sfu:error', {
+          message: 'Invalid participant information',
+        });
+        return { success: false, error: 'Invalid participant information' };
+      }
 
       const transportInfo = await this.sfuClient.createTransport(
         data.roomId,
@@ -780,6 +803,16 @@ export class GatewayGateway
       const peerId = data.peerId || this.getParticipantBySocketId(client.id);
       const roomId = data.roomId || (await this.getRoomIdBySocketId(client.id));
 
+      if (!peerId || !roomId) {
+        client.emit('sfu:error', {
+          message: 'Invalid participant or room information',
+        });
+        return {
+          success: false,
+          error: 'Invalid participant or room information',
+        };
+      }
+
       await this.sfuClient.connectTransport(
         data.transportId,
         data.dtlsParameters,
@@ -811,6 +844,16 @@ export class GatewayGateway
     try {
       const peerId = data.peerId || this.getParticipantBySocketId(client.id);
       const roomId = data.roomId || (await this.getRoomIdBySocketId(client.id));
+
+      if (!peerId || !roomId) {
+        client.emit('sfu:error', {
+          message: 'Invalid participant or room information',
+        });
+        return {
+          success: false,
+          error: 'Invalid participant or room information',
+        };
+      }
 
       // Ensure metadata is not undefined
       const safeMetadata = data.metadata || {};
@@ -912,6 +955,11 @@ export class GatewayGateway
 
       const peerId = data.peerId || this.getParticipantBySocketId(client.id);
       const roomId = data.roomId || (await this.getRoomIdBySocketId(client.id));
+
+      if (!peerId || !roomId) {
+        console.error('[Gateway] Missing peerId or roomId for consume');
+        return { success: false, error: 'Missing peerId or roomId' };
+      }
 
       // Get participant data from room service
       let participant: any = null;
@@ -1019,6 +1067,12 @@ export class GatewayGateway
         data.participantId || this.getParticipantBySocketId(client.id);
       const roomId = data.roomId || (await this.getRoomIdBySocketId(client.id));
 
+      if (!peerId || !roomId) {
+        console.error('[Gateway] Missing peerId or roomId for resumeConsumer');
+        client.emit('sfu:error', { message: 'Missing peerId or roomId' });
+        return { success: false, error: 'Missing peerId or roomId' };
+      }
+
       await this.sfuClient.resumeConsumer(data.consumerId, roomId, peerId);
 
       client.emit('sfu:consumer-resumed', { consumerId: data.consumerId });
@@ -1113,1579 +1167,585 @@ export class GatewayGateway
     }
   }
 
-  @SubscribeMessage('sfu:pin-user')
-  async handlePinUser(
+  // Handle speaking users with 500ms buffer logic
+  @SubscribeMessage('sfu:my-speaking')
+  async handleMySpeaking(
     @ConnectedSocket() client: Socket,
     @MessageBody()
-    data: {
-      roomId: string;
-      peerId: string; // user to pin
-      transportId?: string;
-    },
+    data: { roomId: string; peerId: string; bufferedAudio?: any },
   ) {
-    try {
-      console.log(`📌 [Gateway] Pin user request:`, data);
+    console.log(`[Gateway] handleMySpeaking called with data:`, data);
 
-      const pinnerPeerId = this.connectionMap.get(client.id);
-      const roomId =
-        data.roomId || this.roomParticipantMap.get(pinnerPeerId || '');
-
-      if (!pinnerPeerId || !roomId) {
-        client.emit('sfu:pin-error', {
-          message: 'Invalid pinner or room information',
-        });
-        return { success: false };
-      }
-
-      if (!data.peerId) {
-        client.emit('sfu:pin-error', {
-          message: 'Missing peerId to pin',
-        });
-        return { success: false };
-      }
-
-      // Get transport ID - need receive transport for consuming
-      let transportId = data.transportId;
-      if (!transportId) {
-        // Try to get participant's receive transport
-        try {
-          const participant = await this.roomClient.getParticipantByPeerId(
-            roomId,
-            pinnerPeerId,
-          );
-          // You might need to track transport IDs in participant data
-          // For now, we'll require transportId to be provided
-          if (!transportId) {
-            client.emit('sfu:pin-error', {
-              message: 'Transport ID required for pin operation',
-            });
-            return { success: false };
-          }
-        } catch (error) {
-          client.emit('sfu:pin-error', {
-            message: 'Failed to get participant information',
-          });
-          return { success: false };
-        }
-      }
-
-      // Get minimal RTP capabilities (will be handled by SFU service)
-      const rtpCapabilities = {};
-
-      const result = await this.sfuClient.pinUser(
-        roomId,
-        pinnerPeerId,
-        data.peerId,
-        transportId,
-        rtpCapabilities,
-      );
-
-      if (result && (result as any).status === 'success') {
-        const pinData = JSON.parse((result as any).pin_data);
-
-        // Emit success to the pinner
-        client.emit('sfu:pin-success', {
-          pinnedPeerId: data.peerId,
-          consumersCreated: pinData.consumersCreated || [],
-          alreadyPriority: pinData.alreadyPriority || false,
-        });
-
-        // If consumers were created, emit consumer-created events
-        if (pinData.consumersCreated && pinData.consumersCreated.length > 0) {
-          for (const consumer of pinData.consumersCreated) {
-            client.emit('sfu:consumer-created', {
-              consumerId: consumer.consumerId,
-              producerId: consumer.producerId,
-              kind: consumer.kind,
-              rtpParameters: consumer.rtpParameters,
-              streamId: consumer.streamId,
-              isPinConsumer: true,
-            });
-          }
-        }
-
-        console.log(
-          `📌 [Gateway] Pin successful: ${pinnerPeerId} pinned ${data.peerId}`,
-        );
-        return { success: true };
-      } else {
-        const errorMessage = result
-          ? JSON.parse((result as any).pin_data).message
-          : 'Unknown error';
-        client.emit('sfu:pin-error', {
-          message: errorMessage,
-        });
-        return { success: false };
-      }
-    } catch (error) {
-      console.error('[Gateway] Error in handlePinUser:', error);
-      client.emit('sfu:pin-error', {
-        message: error.message || 'Failed to pin user',
-      });
-      return { success: false };
-    }
-  }
-
-  @SubscribeMessage('sfu:unpin-user')
-  async handleUnpinUser(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      roomId: string;
-      peerId: string; // user to unpin
-    },
-  ) {
-    try {
-      console.log(`📌 [Gateway] Unpin user request:`, data);
-
-      const unpinnerPeerId = this.connectionMap.get(client.id);
-      const roomId =
-        data.roomId || this.roomParticipantMap.get(unpinnerPeerId || '');
-
-      if (!unpinnerPeerId || !roomId) {
-        client.emit('sfu:unpin-error', {
-          message: 'Invalid unpinner or room information',
-        });
-        return { success: false };
-      }
-
-      if (!data.peerId) {
-        client.emit('sfu:unpin-error', {
-          message: 'Missing peerId to unpin',
-        });
-        return { success: false };
-      }
-
-      const result = await this.sfuClient.unpinUser(
-        roomId,
-        unpinnerPeerId,
-        data.peerId,
-      );
-
-      if (result && (result as any).status === 'success') {
-        const unpinData = JSON.parse((result as any).unpin_data);
-
-        // Emit success to the unpinner
-        client.emit('sfu:unpin-success', {
-          unpinnedPeerId: data.peerId,
-          consumersRemoved: unpinData.consumersRemoved || [],
-          stillInPriority: unpinData.stillInPriority || false,
-        });
-
-        // If consumers were removed, you might want to emit events to clean up
-        if (
-          unpinData.consumersRemoved &&
-          unpinData.consumersRemoved.length > 0
-        ) {
-          for (const consumerId of unpinData.consumersRemoved) {
-            client.emit('sfu:consumer-removed', {
-              consumerId: consumerId,
-              reason: 'unpinned',
-            });
-          }
-        }
-
-        console.log(
-          `📌 [Gateway] Unpin successful: ${unpinnerPeerId} unpinned ${data.peerId}`,
-        );
-        return { success: true };
-      } else {
-        const errorMessage = result
-          ? JSON.parse((result as any).unpin_data).message
-          : 'Unknown error';
-        client.emit('sfu:unpin-error', {
-          message: errorMessage,
-        });
-        return { success: false };
-      }
-    } catch (error) {
-      console.error('[Gateway] Error in handleUnpinUser:', error);
-      client.emit('sfu:unpin-error', {
-        message: error.message || 'Failed to unpin user',
-      });
-      return { success: false };
-    }
-  }
-
-  @SubscribeMessage('sfu:lock-room')
-  async handleLockRoom(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      roomId: string;
-      password: string;
-      creatorId: string;
-    },
-  ) {
-    console.log(
-      `🔒 [Gateway] =================== LOCK ROOM REQUEST RECEIVED ===================`,
-    );
-    console.log(`🔒 [Gateway] Client ID: ${client.id}`);
-    console.log(`🔒 [Gateway] Request data:`, JSON.stringify(data, null, 2));
-    console.log(
-      `🔒 [Gateway] Connection map:`,
-      Array.from(this.connectionMap.entries()),
-    );
-
-    try {
-      console.log(`🔒 [Gateway] Lock room request:`, data);
-
-      if (!data.roomId || !data.password || !data.creatorId) {
-        client.emit('sfu:lock-error', {
-          message: 'Missing required fields for lock room',
-        });
-        return { success: false };
-      }
-
-      // Verify the user is connected and is the creator
-      const participantId = this.connectionMap.get(client.id);
-      console.log(
-        `🔒 [Gateway] Lock room - participantId: ${participantId}, creatorId: ${data.creatorId}`,
-      );
-
-      if (!participantId) {
-        console.error(
-          `🔒 [Gateway] No participantId found for socketId: ${client.id}`,
-        );
-        client.emit('sfu:lock-error', {
-          message: 'User not properly connected to room',
-        });
-        return { success: false };
-      }
-
-      if (participantId !== data.creatorId) {
-        console.error(
-          `🔒 [Gateway] Permission denied - participantId: ${participantId} !== creatorId: ${data.creatorId}`,
-        );
-        client.emit('sfu:lock-error', {
-          message: 'Only room creator can lock the room',
-        });
-        return { success: false };
-      }
-
-      // Double-check with room service to ensure the user is actually the creator
-      try {
-        const participant = await this.roomClient.getParticipantByPeerId(
-          data.roomId,
-          participantId,
-        );
-
-        if (!participant || !participant.is_creator) {
-          console.error(
-            `🔒 [Gateway] User ${participantId} is not the room creator`,
-          );
-          client.emit('sfu:lock-error', {
-            message: 'Only room creator can lock the room',
-          });
-          return { success: false };
-        }
-      } catch (error) {
-        console.error(`🔒 [Gateway] Error verifying creator status:`, error);
-        client.emit('sfu:lock-error', {
-          message: 'Failed to verify creator permissions',
-        });
-        return { success: false };
-      }
-
-      try {
-        const result = (await this.roomClient.lockRoom(
-          data.roomId,
-          data.password,
-          data.creatorId,
-        )) as { status: string; message: string };
-
-        console.log(`🔒 [Gateway] Lock room result:`, result);
-
-        if (result && result.status === 'success') {
-          // Emit success to the creator
-          client.emit('sfu:lock-success', {
-            roomId: data.roomId,
-            message: 'Room locked successfully',
-          });
-
-          // Broadcast to all users in room that room is now locked
-          this.io.to(data.roomId).emit('sfu:room-locked', {
-            roomId: data.roomId,
-            lockedBy: data.creatorId,
-            message: 'Room has been locked by the creator',
-          });
-
-          console.log(`🔒 [Gateway] Room ${data.roomId} locked successfully`);
-          return { success: true };
-        } else {
-          const errorMessage = result?.message || 'Failed to lock room';
-          client.emit('sfu:lock-error', {
-            message: errorMessage,
-          });
-          return { success: false };
-        }
-      } catch (roomServiceError) {
-        console.error(`🔒 [Gateway] Room service error:`, roomServiceError);
-        let errorMessage = 'Failed to lock room';
-
-        if (roomServiceError.message) {
-          if (roomServiceError.message.includes('Only room creator')) {
-            errorMessage = 'Only room creator can lock the room';
-          } else if (roomServiceError.message.includes('Room not found')) {
-            errorMessage = 'Room not found';
-          } else {
-            errorMessage = roomServiceError.message;
-          }
-        }
-
-        client.emit('sfu:lock-error', {
-          message: errorMessage,
-        });
-        return { success: false };
-      }
-    } catch (error) {
-      console.error('[Gateway] Error in handleLockRoom:', error);
-      client.emit('sfu:lock-error', {
-        message: error.message || 'Failed to lock room',
-      });
-      return { success: false };
-    }
-  }
-
-  @SubscribeMessage('sfu:unlock-room')
-  async handleUnlockRoom(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      roomId: string;
-      creatorId?: string;
-    },
-  ) {
-    console.log(
-      `🔓 [Gateway] =================== UNLOCK ROOM REQUEST RECEIVED ===================`,
-    );
-    console.log(`🔓 [Gateway] Client ID: ${client.id}`);
-    console.log(`🔓 [Gateway] Request data:`, JSON.stringify(data, null, 2));
-    console.log(
-      `🔓 [Gateway] Connection map:`,
-      Array.from(this.connectionMap.entries()),
-    );
-
-    try {
-      console.log(`🔓 [Gateway] Unlock room request:`, data);
-
-      const participantId = this.connectionMap.get(client.id);
-      const creatorId = data.creatorId || participantId;
-
-      console.log(
-        `🔓 [Gateway] Unlock room - participantId: ${participantId}, creatorId: ${creatorId}`,
-      );
-
-      if (!data.roomId || !creatorId) {
-        client.emit('sfu:unlock-error', {
-          message: 'Missing required fields for unlock room',
-        });
-        return { success: false };
-      }
-
-      if (!participantId) {
-        console.error(
-          `🔓 [Gateway] No participantId found for socketId: ${client.id}`,
-        );
-        client.emit('sfu:unlock-error', {
-          message: 'User not properly connected to room',
-        });
-        return { success: false };
-      }
-
-      // Verify the user is connected and is the creator
-      if (participantId !== creatorId) {
-        console.error(
-          `🔓 [Gateway] Permission denied - participantId: ${participantId} !== creatorId: ${creatorId}`,
-        );
-        client.emit('sfu:unlock-error', {
-          message: 'Only room creator can unlock the room',
-        });
-        return { success: false };
-      }
-
-      // Double-check with room service to ensure the user is actually the creator
-      try {
-        const participant = await this.roomClient.getParticipantByPeerId(
-          data.roomId,
-          participantId,
-        );
-
-        if (!participant || !participant.is_creator) {
-          console.error(
-            `🔓 [Gateway] User ${participantId} is not the room creator`,
-          );
-          client.emit('sfu:unlock-error', {
-            message: 'Only room creator can unlock the room',
-          });
-          return { success: false };
-        }
-      } catch (error) {
-        console.error(`🔓 [Gateway] Error verifying creator status:`, error);
-        client.emit('sfu:unlock-error', {
-          message: 'Failed to verify creator permissions',
-        });
-        return { success: false };
-      }
-
-      try {
-        const result = (await this.roomClient.unlockRoom(
-          data.roomId,
-          creatorId,
-        )) as { status: string; message: string };
-
-        if (result && result.status === 'success') {
-          // Emit success to the creator
-          client.emit('sfu:unlock-success', {
-            roomId: data.roomId,
-            message: 'Room unlocked successfully',
-          });
-
-          // Broadcast to all users in room that room is now unlocked
-          this.io.to(data.roomId).emit('sfu:room-unlocked', {
-            roomId: data.roomId,
-            unlockedBy: creatorId,
-            message: 'Room has been unlocked by the creator',
-          });
-
-          console.log(`🔓 [Gateway] Room ${data.roomId} unlocked successfully`);
-          return { success: true };
-        } else {
-          const errorMessage = result?.message || 'Failed to unlock room';
-          client.emit('sfu:unlock-error', {
-            message: errorMessage,
-          });
-          return { success: false };
-        }
-      } catch (roomServiceError) {
-        console.error(`🔓 [Gateway] Room service error:`, roomServiceError);
-        let errorMessage = 'Failed to unlock room';
-
-        if (roomServiceError.message) {
-          if (roomServiceError.message.includes('Only room creator')) {
-            errorMessage = 'Only room creator can unlock the room';
-          } else if (roomServiceError.message.includes('Room not found')) {
-            errorMessage = 'Room not found';
-          } else {
-            errorMessage = roomServiceError.message;
-          }
-        }
-
-        client.emit('sfu:unlock-error', {
-          message: errorMessage,
-        });
-        return { success: false };
-      }
-    } catch (error) {
-      console.error('[Gateway] Error in handleUnlockRoom:', error);
-      client.emit('sfu:unlock-error', {
-        message: error.message || 'Failed to unlock room',
-      });
-      return { success: false };
-    }
-  }
-
-  // ======================================================CHAT======================================================
-  @SubscribeMessage('chat:join')
-  async handleChatJoin(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string; userName: string },
-  ) {
     const roomId = data.roomId;
+    const peerId = data.peerId;
 
-    try {
-      // Get chat history from chat service
-      const messages = await this.chatClient.getMessages({ room_id: roomId });
-
-      // Send history to client
-      if (messages.success) {
-        client.emit('chat:history', messages.messages);
-      } else {
-        client.emit('chat:history', []);
-      }
-    } catch (error) {
-      console.error('Error getting chat history:', error);
-      client.emit('chat:history', []);
+    // Verify participant exists
+    const participant = await this.getParticipantByPeerId(roomId, peerId);
+    if (!participant) {
+      console.error(
+        `[Gateway] Participant ${peerId} not found in room ${roomId}`,
+      );
+      return;
     }
-  }
 
-  @SubscribeMessage('chat:message')
-  async handleChatMessage(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      roomId: string;
-      message: {
-        sender: string;
-        senderName: string;
-        text: string;
-      };
-    },
-  ) {
-    const roomId = data.roomId;
-    console.log('data: ', data);
-
-    try {
-      // Send message to chat service
-      const result = await this.chatClient.sendMessage({
-        room_id: roomId,
-        sender: data.message.sender,
-        sender_name: data.message.senderName,
-        text: data.message.text,
-      });
-
-      if (result.success && result.message) {
-        // Broadcast message to all clients in the room
-        this.io.to(roomId).emit('chat:message', result.message);
-      } else {
-        // Send error to client if message couldn't be saved
-        client.emit('chat:error', {
-          message: 'Failed to save message',
-          code: 'SAVE_ERROR',
-        });
-      }
-    } catch (error) {
-      console.error('Error handling chat message:', error);
-      client.emit('chat:error', {
-        message: 'Internal server error',
-        code: 'INTERNAL_ERROR',
-      });
-    }
-  }
-
-  @SubscribeMessage('chat:file')
-  async handleChatFile(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      roomId: string;
-      message: {
-        sender: string;
-        senderName: string;
-        text: string;
-        fileUrl?: string;
-        fileName?: string;
-        fileType?: string;
-        fileSize?: number;
-        isImage?: boolean;
-      };
-    },
-  ) {
-    const roomId = data.roomId;
-
-    try {
-      // Send file message to chat service
-      const result = await this.chatClient.sendMessage({
-        room_id: roomId,
-        sender: data.message.sender,
-        sender_name: data.message.senderName,
-        text: data.message.text,
-        fileUrl: data.message.fileUrl,
-        fileName: data.message.fileName,
-        fileType: data.message.fileType,
-        fileSize: data.message.fileSize,
-        isImage: data.message.isImage,
-      });
-
-      if (result.success && result.message) {
-        // Broadcast file message to all clients in the room
-        this.io.to(roomId).emit('chat:message', result.message);
-      } else {
-        // Send error to client if file message couldn't be saved
-        client.emit('chat:error', {
-          message: 'Failed to send file',
-          code: 'FILE_ERROR',
-        });
-      }
-    } catch (error) {
-      console.error('Error handling chat file:', error);
-      client.emit('chat:error', {
-        message: 'Failed to send file',
-        code: 'FILE_ERROR',
-      });
-    }
-  }
-
-  @SubscribeMessage('chat:leave')
-  handleChatLeave(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string },
-  ) {
-    // No special handling needed, just acknowledge
-    console.log(`User left chat room: ${data.roomId}`);
-  }
-
-  // ======================================================WHITEBOARD======================================================
-  @SubscribeMessage('whiteboard:update')
-  async handleWhiteboardUpdate(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string; elements: any; state: any },
-  ) {
-    const roomId = data.roomId;
-    const peerId = this.getParticipantBySocketId(client.id);
-
-    if (!peerId) {
-      console.log('[Gateway] User not found for socket:', client.id);
-      client.emit('whiteboard:error', {
-        message: 'User not found',
-        code: 'USER_NOT_FOUND',
-      });
+    // Verify the room exists for this socket
+    const socketRoomId = await this.getRoomIdBySocketId(client.id);
+    if (!socketRoomId || socketRoomId !== roomId) {
+      console.error(
+        `[Gateway] Socket room mismatch. Expected: ${roomId}, Got: ${socketRoomId}`,
+      );
       return;
     }
 
     try {
-      // Check if user has permission to draw
-      const permissionResult = await this.interactionClient.checkUserPermission(
-        roomId,
-        peerId,
+      // Step 5: Emit to all clients in the room (excluding sender)
+      client.to(roomId).emit('sfu:user-speaking', { peerId });
+
+      console.log(
+        `[Gateway] User ${peerId} pipeline ready - waiting for buffered audio + live stream`,
       );
-      if (!permissionResult.success || !permissionResult.can_draw) {
-        client.emit('whiteboard:error', {
-          message: 'No permission to edit whiteboard',
-          code: 'NO_PERMISSION',
-        });
-        return;
-      }
-      // Update whiteboard data via interaction service
-      const result = (await this.interactionClient.updateWhiteboard(
-        roomId,
-        data.elements,
-        JSON.stringify(data.state || {}),
-      )) as { success: boolean; whiteboard_data?: any };
-
-      console.log('🎨 [Gateway] Update whiteboard result:', result);
-
-      if (result.success) {
-        // Broadcast update to all clients in the room
-        this.io.to(roomId).emit('whiteboard:update', {
-          elements: data.elements,
-          state: data.state,
-        });
-      } else {
-        console.log('[Gateway] Update failed');
-        client.emit('whiteboard:error', {
-          message: 'Failed to update whiteboard',
-          code: 'UPDATE_ERROR',
-        });
-      }
     } catch (error) {
-      console.error('Error handling whiteboard update:', error);
-      client.emit('whiteboard:error', {
-        message: 'Internal server error',
-        code: 'INTERNAL_ERROR',
-      });
-    }
-  }
+      console.error('[Gateway] Error handling speaking event:', error);
 
-  @SubscribeMessage('whiteboard:get-data')
-  async handleGetWhiteboardData(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string },
-  ) {
-    try {
-      const result = (await this.interactionClient.getWhiteboardData(
-        data.roomId,
-      )) as GetWhiteboardDataResponse;
-
-      if (result.success) {
-        const dataToEmit = {
-          elements: result.whiteboard_data?.elements || [],
-          state: result.whiteboard_data?.state
-            ? JSON.parse(result.whiteboard_data.state)
-            : {},
-        };
-
-        client.emit('whiteboard:data', dataToEmit);
-      } else {
-        console.log('[Gateway] No whiteboard data found, emitting empty data');
-        client.emit('whiteboard:data', {
-          elements: [],
-          state: {},
-        });
-      }
-    } catch (error) {
-      console.error('[Gateway] Error getting whiteboard data:', error);
-      client.emit('whiteboard:data', {
-        elements: [],
-        state: {},
-      });
-    }
-  }
-
-  @SubscribeMessage('whiteboard:clear')
-  async handleClearWhiteboard(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string },
-  ) {
-    try {
-      const result = (await this.interactionClient.clearWhiteboard(
-        data.roomId,
-      )) as ClearWhiteboardResponse;
-
-      if (result.success) {
-        // Broadcast clear to all clients in the room
-        this.io.to(data.roomId).emit('whiteboard:cleared');
-      }
-    } catch (error) {
-      console.error('Error clearing whiteboard:', error);
-    }
-  }
-
-  @SubscribeMessage('whiteboard:update-permissions')
-  async handleWhiteboardPermissions(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string; allowed: string[] },
-  ) {
-    try {
-      const result = (await this.interactionClient.updatePermissions(
-        data.roomId,
-        data.allowed,
-      )) as UpdatePermissionsResponse;
-      if (result.success) {
-        // Broadcast permission update to all clients in the room
-        this.io.to(data.roomId).emit('whiteboard:permissions-updated', {
-          allowed: result.allowed_users,
-        });
-      }
-    } catch (error) {
-      console.error('Error updating whiteboard permissions:', error);
-    }
-  }
-
-  @SubscribeMessage('whiteboard:get-permissions')
-  async handleGetWhiteboardPermissions(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string },
-  ) {
-    try {
-      const result = (await this.interactionClient.getPermissions(
-        data.roomId,
-      )) as GetPermissionsResponse;
-
-      client.emit('whiteboard:permissions', {
-        allowed: result.allowed_users || [],
-      });
-    } catch (error) {
-      console.error('Error getting whiteboard permissions:', error);
-      client.emit('whiteboard:permissions', {
-        allowed: [],
-      });
-    }
-  }
-
-  @SubscribeMessage('whiteboard:pointer')
-  async handleWhiteboardPointer(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: { roomId: string; position: { x: number; y: number; tool: string } },
-  ) {
-    const peerId = this.getParticipantBySocketId(client.id);
-    if (!peerId) return;
-
-    try {
-      const result = (await this.interactionClient.updateUserPointer(
-        data.roomId,
-        peerId,
-        data.position,
-      )) as UpdateUserPointerResponse;
-
-      if (result.success) {
-        // Broadcast pointer position to other clients in the room
-        client.to(data.roomId).emit('whiteboard:pointer-update', {
+      // Check if it's a gRPC connection error (audio service down)
+      if (
+        error.message &&
+        (error.message.includes('UNAVAILABLE') ||
+          error.message.includes('ECONNREFUSED') ||
+          error.message.includes('14 UNAVAILABLE'))
+      ) {
+        console.error('[Gateway] Audio service appears to be down');
+        client.emit('sfu:audio-service-unavailable', {
           peerId,
-          position: data.position,
+          roomId,
+          message: 'Audio transcription service is currently unavailable',
+        });
+      } else {
+        // Generic audio error
+        client.emit('sfu:audio-pipeline-failed', {
+          peerId,
+          roomId,
+          message: 'Failed to initialize audio pipeline',
         });
       }
-    } catch (error) {
-      console.error('Error updating whiteboard pointer:', error);
     }
   }
 
-  @SubscribeMessage('whiteboard:pointer-leave')
-  async handleWhiteboardPointerLeave(
+  // Handle user stop speaking
+  @SubscribeMessage('sfu:my-stop-speaking')
+  async handleMyStopSpeaking(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string },
+    @MessageBody()
+    data: { roomId: string; peerId: string },
   ) {
-    const peerId = this.getParticipantBySocketId(client.id);
-    if (!peerId) return;
+    console.log(`[Gateway] handleMyStopSpeaking called with data:`, data);
+
+    const roomId = data.roomId;
+    const peerId = data.peerId;
+
+    // Verify participant exists
+    const participant = await this.getParticipantByPeerId(roomId, peerId);
+    if (!participant) {
+      console.error(
+        `[Gateway] Participant ${peerId} not found in room ${roomId}`,
+      );
+      return;
+    }
+
+    // Verify the room exists for this socket
+    const socketRoomId = await this.getRoomIdBySocketId(client.id);
+    if (!socketRoomId || socketRoomId !== roomId) {
+      console.error(
+        `[Gateway] Socket room mismatch. Expected: ${roomId}, Got: ${socketRoomId}`,
+      );
+      return;
+    }
 
     try {
-      await this.interactionClient.removeUserPointer(data.roomId, peerId);
+      // Notify SFU service that user stopped speaking
+      // await this.sfuClient.handleStopSpeaking(roomId, peerId);
 
-      // Broadcast pointer removal to other clients in the room
-      client.to(data.roomId).emit('whiteboard:pointer-remove', {
-        peerId,
-      });
+      // Notify all clients in the room (excluding sender) that user stopped speaking
+      client.to(roomId).emit('sfu:user-stopped-speaking', { peerId });
+
+      console.log(
+        `[Gateway] User ${peerId} stopped speaking in room ${roomId}`,
+      );
     } catch (error) {
-      console.error('Error removing whiteboard pointer:', error);
+      console.error('[Gateway] Error handling stop speaking event:', error);
     }
   }
 
-  // ======================================================VOTING======================================================
-  @SubscribeMessage('sfu:create-vote')
-  async handleCreateVote(
+  // NEW AUDIO BUFFER PROCESSING
+  @SubscribeMessage('audio:buffer')
+  async handleAudioBuffer(
     @ConnectedSocket() client: Socket,
     @MessageBody()
     data: {
+      userId: string;
       roomId: string;
-      question: string;
-      options: { id: string; text: string }[];
-      creatorId: string;
+      timestamp: number;
+      buffer: number[];
+      duration: number;
+      sampleRate: number;
+      channels: number;
+      isFinal?: boolean; // Indicates if this is the final chunk or periodic chunk
     },
   ) {
-    try {
-      const result = await this.interactionClient.createVote(
-        data.roomId,
-        data.question,
-        data.options,
-        data.creatorId,
-      );
-      if ((result as any).success) {
-        // Broadcast new vote to all clients in the room
-        this.io
-          .to(data.roomId)
-          .emit('sfu:vote-created', (result as any).vote_session);
-      } else {
-        console.error('[Gateway] Create vote failed:', (result as any).error);
-        client.emit('sfu:vote-error', {
-          message: (result as any).error || 'Failed to create vote',
-          code: 'CREATE_ERROR',
-        });
-      }
-    } catch (error) {
-      console.error('[Gateway] Error creating vote:', error);
-      client.emit('sfu:vote-error', {
-        message: 'Internal server error',
-        code: 'INTERNAL_ERROR',
+    const isFinal = data.isFinal !== false; // Default to true for backward compatibility
+    const chunkType = isFinal ? 'final' : 'periodic';
+
+    console.log(
+      `[Gateway] Received ${chunkType} audio buffer from ${data.userId} - ${data.duration}ms, ${data.buffer.length} bytes`,
+    );
+
+    // Validate data
+    if (
+      !data.userId ||
+      !data.roomId ||
+      !data.buffer ||
+      data.buffer.length === 0
+    ) {
+      console.error('[Gateway] Invalid audio buffer data:', {
+        hasUserId: !!data.userId,
+        hasRoomId: !!data.roomId,
+        hasBuffer: !!data.buffer,
+        bufferLength: data.buffer?.length || 0,
       });
+      return;
     }
-  }
 
-  @SubscribeMessage('sfu:submit-vote')
-  async handleSubmitVote(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      roomId: string;
-      voteId: string;
-      optionId: string;
-      voterId: string;
-    },
-  ) {
-    try {
-      const result = await this.interactionClient.submitVote(
-        data.roomId,
-        data.voteId,
-        data.optionId,
-        data.voterId,
+    // Check buffer size limit to prevent memory issues
+    // 16kHz * 2 bytes/sample * 15 seconds = 480,000 bytes max
+    const MAX_BUFFER_SIZE = 480000; // ~15 seconds at 16kHz (match client limit)
+    if (data.buffer.length > MAX_BUFFER_SIZE) {
+      console.error(
+        `[Gateway] Audio buffer too large: ${data.buffer.length} bytes (max: ${MAX_BUFFER_SIZE})`,
       );
-
-      if ((result as any).success) {
-        // Broadcast updated vote results to all clients in the room
-        this.io
-          .to(data.roomId)
-          .emit('sfu:vote-updated', (result as any).vote_session);
-      } else {
-        console.error('[Gateway] Submit vote failed:', (result as any).error);
-        client.emit('sfu:vote-error', {
-          message: (result as any).error || 'Failed to submit vote',
-          code: 'SUBMIT_ERROR',
-        });
-      }
-    } catch (error) {
-      console.error('[Gateway] Error submitting vote:', error);
-      client.emit('sfu:vote-error', {
-        message: 'Internal server error',
-        code: 'INTERNAL_ERROR',
+      client.emit('audio:error', {
+        userId: data.userId,
+        roomId: data.roomId,
+        message: 'Audio buffer too large',
+        maxSize: MAX_BUFFER_SIZE,
+        receivedSize: data.buffer.length,
       });
+      return;
     }
-  }
 
-  @SubscribeMessage('sfu:get-vote-results')
-  async handleGetVoteResults(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      roomId: string;
-      voteId: string;
-    },
-  ) {
-    try {
-      const result = await this.interactionClient.getVoteResults(
-        data.roomId,
-        data.voteId,
+    console.log(
+      `[Gateway] Validating participant ${data.userId} in room ${data.roomId}`,
+    );
+
+    // Verify participant exists in room
+    let participant = await this.getParticipantByPeerId(
+      data.roomId,
+      data.userId,
+    );
+
+    // If room service fails, try to validate using local mappings
+    if (!participant) {
+      console.error(
+        `[Gateway] Participant ${data.userId} not found in room ${data.roomId}`,
       );
+      return;
+    } else {
+      console.log(
+        `[Gateway] Participant ${data.userId} found in room ${data.roomId} via room service`,
+      );
+    }
 
-      if ((result as any).success) {
-        client.emit('sfu:vote-results', (result as any).vote_session);
-      } else {
+    try {
+      // Convert array back to Uint8Array for audio service with safety check
+      let audioBuffer: Uint8Array;
+      try {
+        audioBuffer = new Uint8Array(data.buffer);
+      } catch (conversionError) {
         console.error(
-          '[Gateway] Get vote results failed:',
-          (result as any).error,
+          '[Gateway] Failed to convert buffer to Uint8Array:',
+          conversionError,
         );
-        client.emit('sfu:vote-error', {
-          message: (result as any).error || 'Vote not found',
-          code: 'NOT_FOUND',
-        });
-      }
-    } catch (error) {
-      console.error('[Gateway] Error getting vote results:', error);
-      client.emit('sfu:vote-error', {
-        message: 'Internal server error',
-        code: 'INTERNAL_ERROR',
-      });
-    }
-  }
-
-  @SubscribeMessage('sfu:end-vote')
-  async handleEndVote(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      roomId: string;
-      voteId: string;
-      creatorId: string;
-    },
-  ) {
-    try {
-      const result = await this.interactionClient.endVote(
-        data.roomId,
-        data.voteId,
-        data.creatorId,
-      );
-
-      if ((result as any).success) {
-        // Broadcast vote end to all clients in the room
-        this.io
-          .to(data.roomId)
-          .emit('sfu:vote-ended', (result as any).vote_session);
-      } else {
-        console.error('[Gateway] End vote failed:', (result as any).error);
-        client.emit('sfu:vote-error', {
-          message: (result as any).error || 'Failed to end vote',
-          code: 'END_ERROR',
-        });
-      }
-    } catch (error) {
-      console.error('[Gateway] Error ending vote:', error);
-      client.emit('sfu:vote-error', {
-        message: 'Internal server error',
-        code: 'INTERNAL_ERROR',
-      });
-    }
-  }
-
-  @SubscribeMessage('sfu:get-active-vote')
-  async handleGetActiveVote(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      roomId: string;
-    },
-  ) {
-    try {
-      const result = await this.interactionClient.getActiveVote(data.roomId);
-      if ((result as any).success && (result as any).vote_session) {
-        client.emit('sfu:active-vote', (result as any).vote_session);
-      } else {
-        client.emit('sfu:active-vote', null);
-      }
-    } catch (error) {
-      console.error('[Gateway] Error getting active vote:', error);
-      client.emit('sfu:active-vote', null);
-    }
-  }
-
-  // ======================================================QUIZ======================================================
-  @SubscribeMessage('quiz:create')
-  async handleCreateQuiz(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      roomId: string;
-      title: string;
-      questions: any[];
-      creatorId: string;
-    },
-  ) {
-    try {
-      // Type assertion for safety
-      const typedData = data as {
-        roomId: string;
-        title: string;
-        questions: any[];
-        creatorId: string;
-      };
-
-      if (
-        !typedData.roomId ||
-        !typedData.title ||
-        !typedData.questions ||
-        !typedData.creatorId
-      ) {
-        client.emit('quiz:error', {
-          message: 'Missing required quiz data',
-          code: 'INVALID_DATA',
+        client.emit('audio:error', {
+          userId: data.userId,
+          roomId: data.roomId,
+          message: 'Failed to process audio buffer format',
+          error: conversionError.message,
         });
         return;
       }
 
-      const result = await this.interactionClient.createQuiz(
-        typedData.roomId,
-        typedData.title,
-        typedData.questions,
-        typedData.creatorId,
+      console.log(
+        `[Gateway] Calling audio service processAudioBuffer for ${data.userId}`,
       );
 
-      if ((result as any)?.success) {
-        // Broadcast new quiz to all clients in the room
-        this.io
-          .to(typedData.roomId)
-          .emit('quiz:created', (result as any).quiz_session);
-      } else {
-        console.error(
-          '[Gateway] Quiz creation failed:',
-          (result as any)?.error,
-        );
-        client.emit('quiz:error', {
-          message: (result as any)?.error || 'Failed to create quiz',
-          code: 'CREATE_ERROR',
-        });
-      }
+      // Send to Audio Service for processing
+      const result = this.audioService.processAudioBuffer({
+        userId: data.userId,
+        roomId: data.roomId,
+        timestamp: data.timestamp,
+        buffer: audioBuffer,
+        duration: data.duration,
+        sampleRate: data.sampleRate || 16000,
+        channels: data.channels || 1,
+      });
+
+      console.log(
+        `[Gateway] Audio buffer processed for ${data.userId}`,
+        result,
+      );
     } catch (error) {
-      console.error('[Gateway] Error creating quiz:', error);
-      client.emit('quiz:error', {
-        message: 'Internal server error',
-        code: 'INTERNAL_ERROR',
+      console.error('[Gateway] Error processing audio buffer:', error);
+
+      // Notify client about the error
+      client.emit('audio:error', {
+        userId: data.userId,
+        roomId: data.roomId,
+        message: 'Failed to process audio buffer',
+        error: error.message,
       });
     }
   }
 
-  @SubscribeMessage('quiz:submit')
-  async handleSubmitQuiz(
+  @SubscribeMessage('audio:chunk')
+  async handleAudioChunk(
     @ConnectedSocket() client: Socket,
     @MessageBody()
     data: {
+      userId: string;
       roomId: string;
-      quizId: string;
-      participantId: string;
-      answers: Array<{
-        questionId: string;
-        selectedOptions: string[];
-        essayAnswer: string;
-      }>;
+      timestamp: number;
+      buffer: number[] | ArrayBuffer;
+      duration: number;
     },
   ) {
     try {
-      // Type assertion for safety
-      const typedData = data as {
-        roomId: string;
-        quizId: string;
-        participantId: string;
-        answers: Array<{
-          questionId: string;
-          selectedOptions: string[];
-          essayAnswer: string;
-        }>;
-      };
+      const { userId, roomId, timestamp, buffer, duration } = data;
 
-      if (
-        !typedData.roomId ||
-        !typedData.quizId ||
-        !typedData.participantId ||
-        !Array.isArray(typedData.answers)
-      ) {
-        console.error('[Gateway] Invalid quiz submission data:', data);
-        client.emit('quiz:error', {
-          message: 'Missing required quiz submission data',
-          code: 'INVALID_DATA',
-        });
+      // Validate audio chunk data
+      if (!this.validateAudioChunk(data)) {
+        console.error(`[Gateway] Invalid audio chunk from ${client.id}`);
+        client.emit('audio:error', { message: 'Invalid audio chunk data' });
         return;
       }
 
-      const result = await this.interactionClient.submitQuiz(
-        typedData.roomId,
-        typedData.quizId,
-        typedData.participantId,
-        typedData.answers,
-      );
-      if ((result as any)?.success) {
-        // Send result to the participant
-        client.emit('quiz:result', {
-          totalScore: (result as any).total_score,
-          totalPossibleScore: (result as any).total_possible_score,
-          questionResults: (result as any).question_results,
-        });
-
-        // Create detailed results data for the creator
-        const detailedResults = {
-          quizId: typedData.quizId,
-          score: (result as any).total_score,
-          totalPossibleScore: (result as any).total_possible_score,
-          startedAt: new Date(),
-          finishedAt: new Date(),
-          questionResults: (result as any).question_results || [], // Use snake_case from gRPC
-          submittedAnswers: typedData.answers, // Include the original answers submitted
-        };
-
-        // Notify all users in the room that someone submitted
-        // Include detailed results for the creator
-        client.to(typedData.roomId).emit('quiz:submission', {
-          participantId: typedData.participantId,
-          totalScore: (result as any).total_score,
-          totalPossibleScore: (result as any).total_possible_score, // Add this field
-          results: detailedResults, // Add detailed results for creator
-        });
-      } else {
-        console.error(
-          '[Gateway] Quiz submission failed:',
-          (result as any)?.error,
-        );
-        client.emit('quiz:error', {
-          message: (result as any)?.error || 'Failed to submit quiz',
-          code: 'SUBMIT_ERROR',
-        });
-      }
-    } catch (error) {
-      console.error('[Gateway] Error submitting quiz:', error);
-      client.emit('quiz:error', {
-        message: 'Internal server error',
-        code: 'INTERNAL_ERROR',
-      });
-    }
-  }
-
-  @SubscribeMessage('quiz:get-results')
-  async handleGetQuizResults(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      roomId: string;
-      quizId: string;
-    },
-  ) {
-    try {
-      // Type assertion for safety
-      const typedData = data as {
-        roomId: string;
-        quizId: string;
-      };
-
-      if (!typedData.roomId || !typedData.quizId) {
-        console.error('[Gateway] Invalid quiz results request data:', data);
-        client.emit('quiz:error', {
-          message: 'Missing required quiz data',
-          code: 'INVALID_DATA',
-        });
-        return;
-      }
-
-      const result = await this.interactionClient.getQuizResults(
-        typedData.roomId,
-        typedData.quizId,
-      );
-
-      if ((result as any)?.success) {
-        client.emit('quiz:results', (result as any).quiz_session);
-      } else {
-        console.error(
-          '[Gateway] Quiz results request failed:',
-          (result as any)?.error,
-        );
-        client.emit('quiz:error', {
-          message: (result as any)?.error || 'Quiz not found',
-          code: 'NOT_FOUND',
-        });
-      }
-    } catch (error) {
-      console.error('[Gateway] Error getting quiz results:', error);
-      client.emit('quiz:error', {
-        message: 'Internal server error',
-        code: 'INTERNAL_ERROR',
-      });
-    }
-  }
-
-  @SubscribeMessage('quiz:end')
-  async handleEndQuiz(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      roomId: string;
-      quizId: string;
-      creatorId: string;
-    },
-  ) {
-    try {
-      // Type assertion for safety
-      const typedData = data as {
-        roomId: string;
-        quizId: string;
-        creatorId: string;
-      };
-
-      if (!typedData.roomId || !typedData.quizId || !typedData.creatorId) {
-        console.error('[Gateway] Invalid quiz end data:', data);
-        client.emit('quiz:error', {
-          message: 'Missing required quiz data',
-          code: 'INVALID_DATA',
-        });
-        return;
-      }
-
-      const result = await this.interactionClient.endQuiz(
-        typedData.roomId,
-        typedData.quizId,
-        typedData.creatorId,
-      );
-      if ((result as any)?.success) {
-        // Broadcast quiz end to all clients in the room
-        this.io
-          .to(typedData.roomId)
-          .emit('quiz:ended', (result as any).quiz_session);
-      } else {
-        console.error('[Gateway] Quiz end failed:', (result as any)?.error);
-        client.emit('quiz:error', {
-          message: (result as any)?.error || 'Failed to end quiz',
-          code: 'END_ERROR',
-        });
-      }
-    } catch (error) {
-      console.error('[Gateway] Error ending quiz:', error);
-      client.emit('quiz:error', {
-        message: 'Internal server error',
-        code: 'INTERNAL_ERROR',
-      });
-    }
-  }
-
-  @SubscribeMessage('quiz:get-active')
-  async handleGetActiveQuiz(client: Socket, data: any): Promise<void> {
-    try {
-      const typedData = data as { roomId: string };
-
-      if (!typedData.roomId) {
-        client.emit('quiz:error', {
-          message: 'Room ID is required',
-          code: 'VALIDATION_ERROR',
-        });
-        return;
-      }
-
-      const result = await this.interactionClient.getActiveQuiz(
-        typedData.roomId,
-      );
-
-      if ((result as any)?.quiz_session) {
-        client.emit('quiz:active', result as any);
-      } else {
-        console.log('[Gateway] No active quiz found for room');
-        client.emit('quiz:active', { quiz_session: null });
-      }
-    } catch (error) {
-      console.error('[Gateway] Error getting active quiz:', error);
-      client.emit('quiz:error', {
-        message: 'Failed to get active quiz',
-        code: 'INTERNAL_ERROR',
-      });
-    }
-  }
-
-  // ===================== BEHAVIOR MONITORING METHODS =====================
-  @SubscribeMessage('sfu:toggle-behavior-monitor')
-  async handleToggleBehaviorMonitor(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string; peerId: string; isActive: boolean },
-  ) {
-    try {
-      const roomId = data.roomId;
-      const peerId = data.peerId;
-
-      // Check if user is creator
-      const isCreator = await this.checkIfUserIsCreator(peerId, roomId);
-      if (!isCreator) {
-        this.eventService.emitError(
-          client,
-          'Only room creator can toggle behavior monitoring',
-          'NOT_ROOM_CREATOR',
-        );
-        return;
-      }
-
-      // Set behavior monitor state
-      await this.interactionClient.setBehaviorMonitorState(
+      // Verify user is authorized to send audio for this room
+      const isAuthorized = await this.verifyUserInRoom(
+        client.id,
+        userId,
         roomId,
-        data.isActive,
       );
-
-      // Broadcast to all clients in the room
-      this.io.to(roomId).emit('sfu:behavior-monitor-state', {
-        isActive: data.isActive,
-      });
-
-      return { success: true };
-    } catch (error) {
-      console.error('[Gateway] Error toggling behavior monitor:', error);
-      this.eventService.emitError(
-        client,
-        'Failed to toggle behavior monitoring',
-        'BEHAVIOR_MONITOR_ERROR',
-      );
-      return { success: false };
-    }
-  }
-
-  @SubscribeMessage('sfu:send-behavior-logs')
-  async handleSendBehaviorLogs(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: { peerId: string; roomId: string; behaviorLogs: any[] },
-  ) {
-    try {
-      if (!data.peerId) {
-        return { success: false, error: 'Participant not found' };
+      if (!isAuthorized) {
+        console.error(
+          `[Gateway] Unauthorized audio chunk from ${userId} in room ${roomId}`,
+        );
+        client.emit('audio:error', { message: 'Unauthorized audio access' });
+        return;
       }
 
-      if (!data.behaviorLogs || data.behaviorLogs.length === 0) {
-        return { success: false, error: 'No data to save' };
-      }
-
-      // Convert events to the format expected by the service
-      const events = data.behaviorLogs.map((event) => ({
-        type: event.type,
-        value: String(event.value),
-        time:
-          event.time instanceof Date
-            ? event.time.toISOString()
-            : String(event.time),
-      }));
-
-      await this.interactionClient.saveUserBehavior(
-        data.peerId,
-        data.roomId,
-        events,
+      console.log(
+        `[Gateway] Processing audio chunk: ${Array.isArray(buffer) ? buffer.length : buffer.byteLength} bytes from ${userId}`,
       );
 
-      return { success: true };
-    } catch (error) {
-      console.error('[Gateway] Error saving behavior logs:', error);
-      return { success: false, error: 'Failed to save behavior logs' };
-    }
-  }
-
-  @SubscribeMessage('sfu:download-room-log')
-  async handleDownloadRoomLog(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string; peerId: string },
-  ) {
-    try {
-      const roomId = data.roomId;
-      const peerId = data.peerId;
-
-      // Check if user is creator
-      const isCreator = await this.checkIfUserIsCreator(peerId, roomId);
-      if (!isCreator) {
-        return {
-          success: false,
-          error: 'Only room creator can download log file',
-        };
-      }
-
-      // Turn off monitoring
-      this.io.to(roomId).emit('sfu:behavior-monitor-state', {
-        isActive: false,
-      });
-
-      // Wait a bit for logs to be sent
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-
-      // Generate Excel file
-      const result = (await this.interactionClient.generateRoomLogExcel(
-        roomId,
-      )) as any;
-
-      if (result.success && result.excel_data) {
-        return {
-          success: true,
-          file: Buffer.from(result.excel_data).toString('base64'),
-        };
+      // Convert array to Uint8Array for gRPC if needed
+      let audioBuffer: Uint8Array;
+      if (Array.isArray(buffer)) {
+        audioBuffer = new Uint8Array(buffer);
       } else {
-        return {
-          success: false,
-          error: result.error || 'Failed to generate log file',
-        };
+        audioBuffer = new Uint8Array(buffer);
+      }
+
+      // Forward to Audio Service via gRPC
+      try {
+        const response = await this.audioService.processAudioChunk({
+          roomId: roomId,
+          userId: userId,
+          timestamp: timestamp,
+          audioBuffer: audioBuffer,
+          duration: duration,
+        });
+
+        // Send acknowledgment to client
+        client.emit('audio:chunk-received', {
+          timestamp,
+          status: response.success ? 'processing' : 'failed',
+          message: response.message,
+        });
+
+        console.log(`[Gateway] Audio chunk processed for ${userId}`);
+      } catch (error) {
+        console.error(
+          `[Gateway] Failed to forward audio chunk to service:`,
+          error,
+        );
+        client.emit('audio:error', {
+          message: 'Failed to process audio chunk',
+          timestamp: timestamp,
+        });
       }
     } catch (error) {
-      console.error('[Gateway] Error generating room log:', error);
-      return { success: false, error: 'Failed to generate log file' };
-    }
-  }
-
-  @SubscribeMessage('sfu:download-user-log')
-  async handleDownloadUserLog(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string; peerId: string; creatorId: string },
-  ) {
-    try {
-      const roomId = data.roomId;
-      const peerId = data.peerId;
-      const creatorId = data.creatorId;
-
-      // Check if requester is creator
-      const isCreator = await this.checkIfUserIsCreator(creatorId, roomId);
-      if (!isCreator) {
-        return {
-          success: false,
-          error: 'Only room creator can download log file',
-        };
-      }
-
-      // Request user log from client
-      this.io.to(roomId).emit('sfu:request-user-log', {
-        peerId: peerId,
+      console.error(`[Gateway] Error in handleAudioChunk:`, error);
+      client.emit('audio:error', {
+        message: 'Internal server error',
+        timestamp: data.timestamp,
       });
-
-      // Wait for logs to be sent
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-
-      // Generate Excel file
-      const result = (await this.interactionClient.generateUserLogExcel(
-        roomId,
-        peerId,
-      )) as any;
-
-      if (result.success && result.excel_data) {
-        return {
-          success: true,
-          file: Buffer.from(result.excel_data).toString('base64'),
-        };
-      } else {
-        return {
-          success: false,
-          error: result.error || 'Failed to generate log file',
-        };
-      }
-    } catch (error) {
-      console.error('[Gateway] Error generating user log:', error);
-      return { success: false, error: 'Failed to generate log file' };
     }
   }
 
-  // Helper method to check if a user is the creator of a room
-  private async checkIfUserIsCreator(
-    peerId: string,
+  // VALIDATE AUDIO CHUNK
+  private validateAudioChunk(data: {
+    userId: string;
+    roomId: string;
+    timestamp: number;
+    buffer: number[] | ArrayBuffer;
+    duration: number;
+  }): boolean {
+    if (!data.userId || typeof data.userId !== 'string') {
+      console.warn('[Gateway] Invalid userId in audio chunk');
+      return false;
+    }
+
+    if (!data.roomId || typeof data.roomId !== 'string') {
+      console.warn('[Gateway] Invalid roomId in audio chunk');
+      return false;
+    }
+
+    if (!data.timestamp || typeof data.timestamp !== 'number') {
+      console.warn('[Gateway] Invalid timestamp in audio chunk');
+      return false;
+    }
+
+    // Handle both array and ArrayBuffer formats
+    let bufferSize = 0;
+    if (Array.isArray(data.buffer)) {
+      bufferSize = data.buffer.length;
+    } else if (data.buffer instanceof ArrayBuffer) {
+      bufferSize = data.buffer.byteLength;
+    } else {
+      console.warn('[Gateway] Invalid buffer format in audio chunk');
+      return false;
+    }
+
+    if (
+      !data.duration ||
+      typeof data.duration !== 'number' ||
+      data.duration <= 0
+    ) {
+      console.warn('[Gateway] Invalid duration in audio chunk');
+      return false;
+    }
+
+    // Check reasonable audio buffer size (100ms to 3s of 16kHz 16-bit mono)
+    const minSize = 16000 * 2 * 0.1; // 100ms = 3,200 bytes
+    const maxSize = 16000 * 2 * 3; // 3s = 96,000 bytes
+
+    if (bufferSize < minSize || bufferSize > maxSize) {
+      console.warn(
+        `[Gateway] Audio buffer size out of range: ${bufferSize} bytes (min: ${minSize}, max: ${maxSize})`,
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  // VERIFY USER IN ROOM
+  private async verifyUserInRoom(
+    socketId: string,
+    userId: string,
     roomId: string,
   ): Promise<boolean> {
     try {
+      // Check if socket is mapped to this user
+      const mappedPeerId = this.connectionMap.get(socketId);
+      if (mappedPeerId !== userId) {
+        console.warn(
+          `[Gateway] Socket ${socketId} not mapped to user ${userId}`,
+        );
+        return false;
+      }
+
+      // Verify user is participant in room
       const participant = await this.roomClient.getParticipantByPeerId(
         roomId,
-        peerId,
+        userId,
       );
-      return participant?.is_creator === true;
+      if (!participant) {
+        console.warn(`[Gateway] User ${userId} not found in room ${roomId}`);
+        return false;
+      }
+
+      // Check if participant's socket matches
+      if (participant.socket_id !== socketId) {
+        console.warn(
+          `[Gateway] Socket mismatch for user ${userId} in room ${roomId}`,
+        );
+        return false;
+      }
+
+      return true;
     } catch (error) {
-      console.error('[Gateway] Error checking if user is creator:', error);
+      console.error(`[Gateway] Error verifying user in room:`, error);
       return false;
     }
   }
 
-  // Helper methods
-  private getParticipantBySocketId(socketId: string): string {
-    const peerId = this.connectionMap.get(socketId) || '';
-    return peerId;
-  }
-
-  private async getRoomIdBySocketId(socketId: string): Promise<string> {
-    const peerId = this.connectionMap.get(socketId);
-    if (peerId) {
-      return this.roomParticipantMap.get(peerId) || '';
-    }
-    return '';
-  }
-
-  // Helper method to get all rooms with participants for disconnect handling
-  private async getAllRoomsWithParticipants(): Promise<Map<string, any[]>> {
-    const roomsMap = new Map<string, any[]>();
-
-    // Since we don't have a direct way to get all rooms, we'll use the room participant map
-    // to identify rooms, then get their details
-    const knownRoomIds = new Set<string>();
-
-    // Collect room IDs from the participant map
-    for (const roomId of this.roomParticipantMap.values()) {
-      knownRoomIds.add(roomId);
-    }
-
-    // Also check rooms that clients are joined to
-    for (const [socketId, rooms] of this.io.sockets.adapter.rooms) {
-      // Skip individual socket rooms (they have same ID as socket)
-      if (!this.io.sockets.sockets.has(socketId)) {
-        knownRoomIds.add(socketId);
-      }
-    }
-
-    // Get participants for each known room
-    for (const roomId of knownRoomIds) {
-      try {
-        const room = await this.roomClient.getRoom(roomId);
-        if (room.data?.participants) {
-          roomsMap.set(roomId, room.data.participants);
-        }
-      } catch (error) {
-        console.error(`[Gateway] Error getting room ${roomId}:`, error);
-      }
-    }
-
-    return roomsMap;
-  }
-
-  // Store mapping when participant joins
+  // HELPER METHODS
   private storeParticipantMapping(
     socketId: string,
     peerId: string,
     roomId: string,
-  ) {
+    participantData?: any,
+  ): void {
+    console.log(
+      `[Gateway] Storing participant mapping: socketId=${socketId}, peerId=${peerId}, roomId=${roomId}`,
+    );
+
     this.connectionMap.set(socketId, peerId);
     this.participantSocketMap.set(peerId, socketId);
     this.roomParticipantMap.set(peerId, roomId);
+
+    // Cache participant data if provided
+    if (participantData) {
+      this.participantCache.set(peerId, participantData);
+      console.log(`[Gateway] Cached participant data for ${peerId}`);
+    }
   }
 
-  // Clean up mapping when participant leaves
-  private cleanupParticipantMapping(socketId: string) {
+  private cleanupParticipantMapping(socketId: string): void {
     const peerId = this.connectionMap.get(socketId);
     if (peerId) {
+      console.log(
+        `[Gateway] Cleaning up participant mapping for peerId=${peerId}, socketId=${socketId}`,
+      );
+
       this.connectionMap.delete(socketId);
       this.participantSocketMap.delete(peerId);
       this.roomParticipantMap.delete(peerId);
-    } else {
-      console.log(
-        `[Gateway] No peerId found for socketId=${socketId} during cleanup`,
-      );
+      this.participantCache.delete(peerId);
     }
   }
 
-  // Helper function to find participant by socket ID using connection mapping
-  private async findParticipantBySocketId(
-    socketId: string,
-  ): Promise<{ participant: Participant | null; roomId: string | null }> {
-    if (this.connectionMap.has(socketId)) {
-      const peerId = this.connectionMap.get(socketId);
+  private getParticipantBySocketId(socketId: string): string | null {
+    return this.connectionMap.get(socketId) || null;
+  }
 
-      if (peerId) {
-        // Find participant by peerId across all rooms
-        const roomId = await this.roomClient.getParticipantRoom(peerId);
+  private async getRoomIdBySocketId(socketId: string): Promise<string | null> {
+    const peerId = this.connectionMap.get(socketId);
+    console.log(
+      `[Gateway] getRoomIdBySocketId: socketId=${socketId}, mappedPeerId=${peerId}`,
+    );
 
-        if (roomId) {
-          const participant = await this.roomClient.getParticipantByPeerId(
-            roomId,
-            peerId,
-          );
-          if (participant) {
-            return { participant, roomId };
-          }
-        }
-      }
+    if (peerId) {
+      const roomId = this.roomParticipantMap.get(peerId);
+      console.log(
+        `[Gateway] getRoomIdBySocketId: peerId=${peerId}, mappedRoomId=${roomId}`,
+      );
+      return roomId || null;
     }
+    console.log(
+      `[Gateway] getRoomIdBySocketId: No mapping found for socketId=${socketId}`,
+    );
+    return null;
+  }
 
-    return { participant: null, roomId: null };
+  private async getParticipantByPeerId(
+    roomId: string,
+    peerId: string,
+  ): Promise<any> {
+    try {
+      console.log(
+        `[Gateway] Looking up participant ${peerId} in room ${roomId}`,
+      );
+
+      // First check if we have cached participant data
+      const cachedParticipant = this.participantCache.get(peerId);
+      if (cachedParticipant) {
+        console.log(
+          `[Gateway] Found participant ${peerId} in participant cache`,
+        );
+        return cachedParticipant;
+      }
+
+      // Check if we have this peerId in our local mappings
+      const mappedRoomId = this.roomParticipantMap.get(peerId);
+      const socketId = this.participantSocketMap.get(peerId);
+
+      console.log(
+        `[Gateway] Local mappings - peerId: ${peerId}, mappedRoomId: ${mappedRoomId}, socketId: ${socketId}`,
+      );
+
+      // If we have local mapping for this peerId and it matches the requested roomId
+      if (mappedRoomId === roomId && socketId) {
+        console.log(
+          `[Gateway] Found participant ${peerId} in local mappings for room ${roomId}`,
+        );
+        // Return a minimal participant object from mappings
+        const participant = {
+          peer_id: peerId,
+          socket_id: socketId,
+          is_creator: false, // We don't cache this, but it's not critical for audio validation
+          room_id: roomId,
+        };
+
+        // Cache this minimal participant data
+        this.participantCache.set(peerId, participant);
+        return participant;
+      }
+
+      // Fallback to room service
+      console.log(
+        `[Gateway] Participant ${peerId} not in cache/mappings, calling room service`,
+      );
+      const participant = await this.roomClient.getParticipantByPeerId(
+        roomId,
+        peerId,
+      );
+
+      if (participant) {
+        console.log(`[Gateway] Found participant ${peerId} via room service`);
+        // Update our local cache and mappings
+        this.storeParticipantMapping(
+          participant.socket_id,
+          peerId,
+          roomId,
+          participant,
+        );
+      } else {
+        console.log(
+          `[Gateway] Participant ${peerId} not found via room service`,
+        );
+      }
+
+      return participant;
+    } catch (error) {
+      console.error(
+        `[Gateway] Error getting participant ${peerId} in room ${roomId}:`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  private async getAllRoomsWithParticipants(): Promise<Map<string, any[]>> {
+    try {
+      // This is a simplified version - you might need to implement actual room scanning
+      const roomsMap = new Map<string, any[]>();
+
+      // Scan through existing participant mappings
+      for (const [peerId, roomId] of this.roomParticipantMap) {
+        if (!roomsMap.has(roomId)) {
+          roomsMap.set(roomId, []);
+        }
+        roomsMap.get(roomId)?.push({
+          peer_id: peerId,
+          peerId: peerId,
+          socket_id: this.participantSocketMap.get(peerId),
+        });
+      }
+
+      return roomsMap;
+    } catch (error) {
+      console.error('[Gateway] Error getting all rooms:', error);
+      return new Map();
+    }
   }
 }

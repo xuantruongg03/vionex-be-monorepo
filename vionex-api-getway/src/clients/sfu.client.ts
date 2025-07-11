@@ -78,12 +78,19 @@ export interface SfuGrpcService {
     transport_id: string;
     rtp_capabilities: string;
   }): any;
-  
+
   unpinUser(data: {
     room_id: string;
     unpinner_peer_id: string;
     unpinned_peer_id: string;
   }): any;
+
+  // Speaking management
+  handleSpeaking(data: { room_id: string; peer_id: string; port: number }): any;
+
+  handleStopSpeaking(data: { room_id: string; peer_id: string }): any;
+
+  getActiveSpeakers(data: { room_id: string }): any;
 }
 
 @Injectable()
@@ -277,34 +284,77 @@ export class SfuClientService implements OnModuleInit {
   }
 
   async pinUser(
-  roomId: string,
-  pinnerPeerId: string,
-  pinnedPeerId: string,
-  transportId: string,
-  rtpCapabilities?: any,
-) {
-  return firstValueFrom(
-    this.sfuService.pinUser({
-      room_id: roomId,
-      pinner_peer_id: pinnerPeerId,
-      pinned_peer_id: pinnedPeerId,
-      transport_id: transportId,
-      rtp_capabilities: JSON.stringify(rtpCapabilities || {}),
-    }),
-  );
-}
+    roomId: string,
+    pinnerPeerId: string,
+    pinnedPeerId: string,
+    transportId: string,
+    rtpCapabilities?: any,
+  ) {
+    return firstValueFrom(
+      this.sfuService.pinUser({
+        room_id: roomId,
+        pinner_peer_id: pinnerPeerId,
+        pinned_peer_id: pinnedPeerId,
+        transport_id: transportId,
+        rtp_capabilities: JSON.stringify(rtpCapabilities || {}),
+      }),
+    );
+  }
 
-async unpinUser(
-  roomId: string,
-  unpinnerPeerId: string,
-  unpinnedPeerId: string,
-) {
-  return firstValueFrom(
-    this.sfuService.unpinUser({
-      room_id: roomId,
-      unpinner_peer_id: unpinnerPeerId,
-      unpinned_peer_id: unpinnedPeerId,
-    }),
-  );
-}
+  async unpinUser(
+    roomId: string,
+    unpinnerPeerId: string,
+    unpinnedPeerId: string,
+  ) {
+    return firstValueFrom(
+      this.sfuService.unpinUser({
+        room_id: roomId,
+        unpinner_peer_id: unpinnerPeerId,
+        unpinned_peer_id: unpinnedPeerId,
+      }),
+    );
+  }
+
+  // Speaking management methods
+  async handleSpeaking(roomId: string, peerId: string, port: number) {
+    try {
+      return await firstValueFrom(
+        this.sfuService.handleSpeaking({
+          room_id: roomId,
+          peer_id: peerId,
+          port: port,
+        }),
+      );
+    } catch (error) {
+      console.error('[SFU Client] Error handling speaking:', error);
+      throw error;
+    }
+  }
+
+  async handleStopSpeaking(roomId: string, peerId: string) {
+    try {
+      return await firstValueFrom(
+        this.sfuService.handleStopSpeaking({
+          room_id: roomId,
+          peer_id: peerId,
+        }),
+      );
+    } catch (error) {
+      console.error('[SFU Client] Error handling stop speaking:', error);
+      throw error;
+    }
+  }
+
+  async getActiveSpeakers(roomId: string) {
+    try {
+      return await firstValueFrom(
+        this.sfuService.getActiveSpeakers({
+          room_id: roomId,
+        }),
+      );
+    } catch (error) {
+      console.error('[SFU Client] Error getting active speakers:', error);
+      throw error;
+    }
+  }
 }

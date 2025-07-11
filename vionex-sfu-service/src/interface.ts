@@ -41,3 +41,58 @@ export interface RoomGrpcService {
     participant_id: string;
   }>;
 }
+
+export interface PlanRTP{
+  roomId: string;
+  peerId: string;
+  port?: number; // Optional port for audio service
+  rtpParameters: mediasoupTypes.RtpParameters;
+  transportId: string;
+}
+
+// Speaking management interfaces
+export interface HandleSpeakingRequest {
+  room_id: string;
+  peer_id: string;
+  port: number; // Optional port for audio service
+}
+
+export interface HandleSpeakingResponse {
+  status: string;
+  message: string;
+}
+
+export interface HandleStopSpeakingRequest {
+  room_id: string;
+  peer_id: string;
+}
+
+export interface HandleStopSpeakingResponse {
+  status: string;
+  message: string;
+}
+
+export interface GetActiveSpeakersRequest {
+  room_id: string;
+}
+
+export interface GetActiveSpeakersResponse {
+  active_speakers: ActiveSpeaker[];
+}
+
+export interface ActiveSpeaker {
+  peer_id: string;
+  last_speak_time: string;
+}
+
+export interface RoomPassword {
+  password: string;
+  creatorId: string;
+}
+
+export interface MediaRoomInfo {
+  router: mediasoupTypes.Router | null;
+  producers: Map<string, mediasoupTypes.Producer>;
+  consumers: Map<string, mediasoupTypes.Consumer[]>;
+  workerId?: string;
+}

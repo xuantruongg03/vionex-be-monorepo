@@ -70,6 +70,7 @@ export class SfuController {
       throw new RpcException('Failed to create media room');
     }
   }
+
   @GrpcMethod('SfuService', 'GetStreams')
   async handleGetStreams(data: {
     room_id: string;
@@ -269,6 +270,7 @@ export class SfuController {
     }
     return { status: 'success' };
   }
+
   @GrpcMethod('SfuService', 'CreateConsumer')
   async handleCreateConsumer(data: {
     room_id: string;
@@ -517,18 +519,6 @@ export class SfuController {
         metadata,
         participant,
       });
-
-      // Get participant name/id from various possible fields
-      const participantId =
-        participant.peerId ||
-        participant.peer_id ||
-        participant.participantId ||
-        participant.id ||
-        'unknown';
-      const participantName =
-        participant.name || participant.username || participantId;
-      // Log current stream count
-      const allStreams = await this.sfuService.getStreamsByRoom(data.room_id);
       const responseData = {
         producer_id: result.producerId,
         producer: {
@@ -621,6 +611,82 @@ export class SfuController {
     } catch (error) {
       console.error('Error unpinning user:', error);
       throw new RpcException(error.message || 'Failed to unpin user');
+    }
+  }
+
+  @GrpcMethod('SfuService', 'HandleSpeaking')
+  async handleSpeaking(data: {
+    room_id: string;
+    peer_id: string;
+    port: number; // Optional port for audio service
+  }): Promise<{ status: string; message: string }> {
+    try {
+      console.log(`[SFU Controller] Handle speaking request:`, data);
+
+      if (!data.room_id || !data.peer_id) {
+        throw new RpcException('Missing required fields for handling speaking');
+      }
+
+      const result = await this.sfuService.handleSpeaking({
+        room_id: data.room_id,
+        peer_id: data.peer_id,
+        port: data.port,
+      });
+
+      return result;
+    } catch (error) {
+      console.error('Error handling speaking:', error);
+      throw new RpcException(error.message || 'Failed to handle speaking');
+    }
+  }
+
+  @GrpcMethod('SfuService', 'HandleStopSpeaking')
+  async handleStopSpeaking(data: {
+    room_id: string;
+    peer_id: string;
+  }): Promise<{ status: string; message: string }> {
+    try {
+      console.log(`[SFU Controller] Handle stop speaking request:`, data);
+
+      if (!data.room_id || !data.peer_id) {
+        throw new RpcException(
+          'Missing required fields for handling stop speaking',
+        );
+      }
+
+      const result = await this.sfuService.handleStopSpeaking({
+        room_id: data.room_id,
+        peer_id: data.peer_id,
+      });
+
+      return result;
+    } catch (error) {
+      console.error('Error handling stop speaking:', error);
+      throw new RpcException(error.message || 'Failed to handle stop speaking');
+    }
+  }
+
+  @GrpcMethod('SfuService', 'GetActiveSpeakers')
+  async getActiveSpeakers(data: {
+    room_id: string;
+  }): Promise<{
+    active_speakers: Array<{ peer_id: string; last_speak_time: string }>;
+  }> {
+    try {
+      console.log(`[SFU Controller] Get active speakers request:`, data);
+
+      if (!data.room_id) {
+        throw new RpcException('Missing room_id for getting active speakers');
+      }
+
+      const result = await this.sfuService.getActiveSpeakers({
+        room_id: data.room_id,
+      });
+
+      return result;
+    } catch (error) {
+      console.error('Error getting active speakers:', error);
+      throw new RpcException(error.message || 'Failed to get active speakers');
     }
   }
 }

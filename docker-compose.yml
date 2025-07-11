@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  audio-service:
+    build: ./vionex-audio-service
+    container_name: vionex-audio-service
+    ports:
+      - "30005:30005"
+      - "35000-35400:35000-35400/udp"
+    env_file:
+      - ./vionex-audio-service/.env
+    volumes:
+      - ./vionex-audio-service/transcripts:/app/transcripts
+    networks:
+      - vionex-network
+
+  sfu-service:
+    build: ./vionex-sfu-service
+    container_name: vionex-sfu-service
+    ports:
+      - "30004:30004"
+      - "10000-25999:10000-25999/udp"
+    environment:
+      - AUDIO_SERVICE_HOST=audio-service
+      - AUDIO_SERVICE_PORT=30005
+    env_file:
+      - ./vionex-sfu-service/.env
+    depends_on:
+      - audio-service
+    networks:
+      - vionex-network
+
+networks:
+  vionex-network:
+    driver: bridge

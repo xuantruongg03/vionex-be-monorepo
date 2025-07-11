@@ -1,0 +1,8 @@
+faster-whisper
+pydub
+python-dotenv
+grpcio
+grpcio-tools
+scipy
+numpy
+requests

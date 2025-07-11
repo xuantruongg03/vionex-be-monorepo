@@ -105,91 +105,76 @@ export class RoomGrpcController {
     }
   }
 
-  @GrpcMethod('RoomService', 'IsRoomLocked')
-  async isRoomLocked(data: I.IsRoomLockedRequest): Promise<I.IsRoomLockedResponse> {
-    try {
-      const room = this.roomService.getRoom(data.room_id);
-      // For now, always return false as room doesn't have locked property
-      return { locked: false };
-    } catch (error) {
-      console.error(
-        `Error checking room lock status for ID ${data.room_id}:`,
-        error,
-      );
-      return { locked: false };
-    }
-  }
+  // @GrpcMethod('RoomService', 'LockRoom')
+  // async lockRoom(data: I.LockRoomRequest): Promise<I.LockRoomResponse> {
+  //   try {
+  //     if (!data.room_id || !data.password || !data.creator_id) {
+  //       return {
+  //         status: 'error',
+  //         message: 'Missing required fields for lock room',
+  //       };
+  //     }
 
-  @GrpcMethod('RoomService', 'LockRoom')
-  async lockRoom(data: I.LockRoomRequest): Promise<I.LockRoomResponse> {
-    try {
-      if (!data.room_id || !data.password || !data.creator_id) {
-        return {
-          status: 'error',
-          message: 'Missing required fields for lock room',
-        };
-      }
+  //     const success = this.roomService.lockRoom(
+  //       data.room_id,
+  //       data.password,
+  //       data.creator_id,
+  //     );
 
-      const success = this.roomService.lockRoom(
-        data.room_id,
-        data.password,
-        data.creator_id,
-      );
+  //     if (success) {
+  //       return {
+  //         status: 'success',
+  //         message: 'Room locked successfully',
+  //       };
+  //     } else {
+  //       return {
+  //         status: 'error',
+  //         message: 'Failed to lock room',
+  //       };
+  //     }
+  //   } catch (error) {
+  //     console.error(`Error locking room ${data.room_id}:`, error);
+  //     return {
+  //       status: 'error',
+  //       message: error.message || 'Failed to lock room',
+  //     };
+  //   }
+  // }
 
-      if (success) {
-        return {
-          status: 'success',
-          message: 'Room locked successfully',
-        };
-      } else {
-        return {
-          status: 'error',
-          message: 'Failed to lock room',
-        };
-      }
-    } catch (error) {
-      console.error(`Error locking room ${data.room_id}:`, error);
-      return {
-        status: 'error',
-        message: error.message || 'Failed to lock room',
-      };
-    }
-  }
+  // @GrpcMethod('RoomService', 'UnlockRoom')
+  // async unlockRoom(data: I.UnlockRoomRequest): Promise<I.UnlockRoomResponse> {
+  //   try {
+  //     if (!data.room_id || !data.creator_id) {
+  //       return {
+  //         status: 'error',
+  //         message: 'Missing required fields for unlock room',
+  //       };
+  //     }
 
-  @GrpcMethod('RoomService', 'UnlockRoom')
-  async unlockRoom(data: I.UnlockRoomRequest): Promise<I.UnlockRoomResponse> {
-    try {
-      if (!data.room_id || !data.creator_id) {
-        return {
-          status: 'error',
-          message: 'Missing required fields for unlock room',
-        };
-      }
+  //     const success = this.roomService.unlockRoom(
+  //       data.room_id,
+  //       data.creator_id,
+  //     );
 
-      const success = this.roomService.unlockRoom(
-        data.room_id,
-        data.creator_id,
-      );
-
-      if (success) {
-        return {
-          status: 'success',
-          message: 'Room unlocked successfully',
-        };
-      } else {
-        return {
-          status: 'error',
-          message: 'Failed to unlock room',
-        };
-      }
-    } catch (error) {
-      console.error(`Error unlocking room ${data.room_id}:`, error);
-      return {
-        status: 'error',
-        message: error.message || 'Failed to unlock room',
-      };
-    }
-  }
+  //     if (success) {
+  //       return {
+  //         status: 'success',
+  //         message: 'Room unlocked successfully',
+  //       };
+  //     } else {
+  //       return {
+  //         status: 'error',
+  //         message: 'Failed to unlock room',
+  //       };
+  //     }
+  //   } catch (error) {
+  //     console.error(`Error unlocking room ${data.room_id}:`, error);
+  //     return {
+  //       status: 'error',
+  //       message: error.message || 'Failed to unlock room',
+  //     };
+  //   }
+  // }
 
   @GrpcMethod('RoomService', 'GetRoom')
   async getRoom(data: I.GetRoomRequest): Promise<I.GetRoomResponse> {
@@ -279,24 +264,9 @@ export class RoomGrpcController {
     room_id: string;
   }): Promise<I.GetParticipantByPeerIdResponse> {
     try {
-      console.log(
-        `[RoomService] Looking for participant: roomId=${data.room_id}, peerId=${data.peer_id}`,
-      );
-
       const participant = this.roomService.getParticipantByPeerId(
         data.peer_id,
         data.room_id,
-      );
-
-      console.log(
-        `[RoomService] Found participant:`,
-        participant
-          ? {
-              peer_id: participant.peer_id,
-              socket_id: participant.socket_id,
-              is_creator: participant.is_creator,
-            }
-          : 'null',
       );
 
       if (!participant) {
@@ -334,26 +304,11 @@ export class RoomGrpcController {
     data: any,
   ): Promise<I.GetParticipantBySocketIdResponse> {
     try {
-      console.log(
-        `[RoomController] Getting participant by socket ID: ${data.socket_id}`,
-      );
-
       const result = this.roomService.getParticipantBySocketId(data.socket_id);
 
       if (!result) {
-        console.log(
-          `[RoomController] No participant found for socket ID: ${data.socket_id}`,
-        );
         return { participant: null };
       }
-
-      console.log(
-        `[RoomController] Found participant for socket ID ${data.socket_id}:`,
-        {
-          peer_id: result.participant.peer_id,
-          room_id: result.roomId,
-        },
-      );
 
       // Return participant with room_id included
       const response = {
@@ -592,9 +547,6 @@ export class RoomGrpcController {
       );
 
       if (result) {
-        console.log(
-          `[Room] Room ${data.room_id} locked by ${data.creator_id}`,
-        );
         return {
           status: 'success',
           message: `Room ${data.room_id} has been locked`,
@@ -614,8 +566,6 @@ export class RoomGrpcController {
     creator_id: string;
   }): Promise<{ status: string; message: string }> {
     try {
-      console.log(`[Room Controller] Unlock room request:`, data);
-
       if (!data.room_id || !data.creator_id) {
         throw new RpcException('Missing required fields for unlock room');
       }
@@ -637,9 +587,6 @@ export class RoomGrpcController {
       const result = this.roomService.unlockRoom(data.room_id, data.creator_id);
 
       if (result) {
-        console.log(
-          `[Room] Room ${data.room_id} unlocked by ${data.creator_id}`,
-        );
         return {
           status: 'success',
           message: `Room ${data.room_id} has been unlocked`,

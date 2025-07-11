@@ -1,40 +1,38 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import mediasoupTypes from 'mediasoup/node/lib/types';
-import { Stream } from './interface';
+import mediasoupTypes, { AppData } from 'mediasoup/node/lib/types';
+import * as T from './interface';
 import { WorkerPoolService } from './worker-pool/worker-pool.service';
-
-interface RoomPassword {
-  password: string;
-  creatorId: string;
-}
-
-interface MediaRoomInfo {
-  router: mediasoupTypes.Router | null;
-  producers: Map<string, mediasoupTypes.Producer>;
-  consumers: Map<string, mediasoupTypes.Consumer[]>;
-  workerId?: string;
-}
 
 @Injectable()
 export class SfuService implements OnModuleInit, OnModuleDestroy {
   private rooms = new Map<string, Map<string, any>>();
   private webRtcServer!: mediasoupTypes.WebRtcServer; // Using non-null assertion
   private webRtcServerId!: string; // Using non-null assertion
-  private roomPasswords = new Map<string, RoomPassword>();
+  private roomPasswords = new Map<string, T.RoomPassword>();
 
   private worker!: mediasoupTypes.Worker; // Using non-null assertion as it will be initialized in initializeMediasoup
-  private mediaRooms = new Map<string, MediaRoomInfo>();
+  private mediaRooms = new Map<string, T.MediaRoomInfo>();
   private readonly mediaRouters = new Map<string, mediasoupTypes.Router>();
 
-  private streams = new Map<string, Stream>(); // Map<streamId, Stream>
-  private producerToStream = new Map<string, Stream>(); // Map<producerId, Stream>
+  private streams = new Map<string, T.Stream>(); // Map<streamId, Stream>
+  private producerToStream = new Map<string, T.Stream>(); // Map<producerId, Stream>
   private transports = new Map<string, mediasoupTypes.WebRtcTransport>(); // Map<transportId, Transport>
+  private activeSpeakers = new Map<string, Map<string, Date>>(); // Map<roomId, Map<participantId, lastActiveTime>>
+  private userAudioMap = new Map<
+    string,
+    {
+      plainTransport: mediasoupTypes.PlainTransport;
+      consumer: mediasoupTypes.Consumer;
+    }
+  >(); // Map<participantId, { plainTransport, consumer }>
 
   constructor(
     private configService: ConfigService,
     private readonly workerPool: WorkerPoolService,
   ) {
+    // Kích hoạt task cleanup cho active speakers
+    setInterval(() => this.cleanupInactiveSpeakers(), 5000);
   }
   async onModuleInit() {
     try {
@@ -222,6 +220,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
       throw error;
     }
   }
+
   async getIceServers() {
     if (this.configService.get('USE_ICE_SERVERS') == 'true') {
       return [
@@ -307,6 +306,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
       await router.close();
       this.mediaRouters.delete(roomId);
       this.mediaRooms.delete(roomId);
+
+      // Dọn dẹp speaking data khi đóng phòng
+      this.clearRoomSpeaking(roomId);
     }
   }
 
@@ -337,8 +339,8 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     rtpParameters: mediasoupTypes.RtpParameters,
     metadata: any,
     roomId: string,
-  ): Stream {
-    const stream: Stream = {
+  ): T.Stream {
+    const stream: T.Stream = {
       streamId,
       publisherId,
       producerId,
@@ -353,7 +355,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
   }
 
   // Stream management with room awareness
-  getStreamsByRoom(roomId: string): Stream[] {
+  getStreamsByRoom(roomId: string): T.Stream[] {
     return Array.from(this.streams.values()).filter(
       (stream) => stream.roomId === roomId,
     );
@@ -364,7 +366,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
   }
 
   // Priority stream management - only first 10 streams get consumed
-  getPriorityStreams(roomId: string): Stream[] {
+  getPriorityStreams(roomId: string): T.Stream[] {
     return this.getStreamsByRoom(roomId)
       .sort((a, b) => a.streamId.localeCompare(b.streamId))
       .slice(0, 10);
@@ -384,11 +386,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
       return false;
     }
   }
-  saveStream(stream: Stream): boolean {
+
+  saveStream(stream: T.Stream): boolean {
     if (this.streams.has(stream.streamId)) {
-      console.warn(
-        `⚠️ [SFU] Stream with ID ${stream.streamId} already exists.`,
-      );
       return false;
     }
     this.streams.set(stream.streamId, stream);
@@ -404,7 +404,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     return false;
   }
 
-  saveProducerToStream(producerId: string, stream: Stream): boolean {
+  saveProducerToStream(producerId: string, stream: T.Stream): boolean {
     const hasStream = this.streams.get(stream.streamId);
     if (!hasStream) {
       console.warn(`Stream with ID ${stream.streamId} does not exist.`);
@@ -414,66 +414,19 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     return true;
   }
 
-  // Room management methods from old code
-  isUsernameAvailable(roomId: string, username: string): boolean {
-    if (!this.rooms.has(roomId)) {
-      return true;
-    }
+  // updateRooms(rooms: Map<string, Map<string, any>>) {
+  //   this.rooms = rooms;
+  // }
 
-    const roomParticipants = this.rooms.get(roomId);
-    return !Array.from(roomParticipants?.keys() || []).includes(username);
-  }
+  // getRoom(roomId: string) {
+  //   return this.rooms.get(roomId);
+  // }
 
-  updateRooms(rooms: Map<string, Map<string, any>>) {
-    this.rooms = rooms;
-  }
-
-  getRoom(roomId: string) {
-    return this.rooms.get(roomId);
-  }
-
-  lockRoom(roomId: string, password: string, creatorId: string): boolean {
-    this.roomPasswords.set(roomId, { password, creatorId });
-    return true;
-  }
-
-  unlockRoom(roomId: string, creatorId: string): boolean {
-    const roomPassword = this.roomPasswords.get(roomId);
-
-    if (roomPassword && roomPassword.creatorId === creatorId) {
-      this.roomPasswords.delete(roomId);
-      return true;
-    }
-
-    return false;
-  }
-
-  isRoomLocked(roomId: string): boolean {
-    return this.roomPasswords.has(roomId);
-  }
-
-  verifyRoomPassword(roomId: string, password: string): boolean {
-    const roomPassword = this.roomPasswords.get(roomId);
-
-    if (!roomPassword) {
-      return true;
-    }
-
-    return roomPassword.password === password;
-  }
-
-  isCreatorOfRoom(peerId: string, roomId: string): boolean {
-    const room = this.rooms.get(roomId);
-    if (!room) return false;
-    const participant = room.get(peerId);
-    return participant?.isCreator || false;
-  }
-
-  getParticipantInRoom(peerId: string, roomId: string) {
-    const room = this.rooms.get(roomId);
-    if (!room) return null;
-    return room.get(peerId) || null;
-  }
+  // getParticipantInRoom(peerId: string, roomId: string) {
+  //   const room = this.rooms.get(roomId);
+  //   if (!room) return null;
+  //   return room.get(peerId) || null;
+  // }
 
   // Stream prioritization logic from old code
   private shouldUserReceiveStream(
@@ -516,7 +469,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     // Logic này có thể được mở rộng để notify qua WebSocket
   }
 
-  getStreamByProducerId(producerId: string): Stream | undefined {
+  getStreamByProducerId(producerId: string): T.Stream | undefined {
     return this.producerToStream.get(producerId);
   }
 
@@ -574,10 +527,36 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
       // Get the stream to find the producer
       const stream = this.streams.get(streamId);
       if (!stream) {
+        // Try to find a similar stream from the same participant (fallback mechanism)
+        const streamParts = streamId.split('_');
+        if (streamParts.length >= 2) {
+          const participantId = streamParts[0];
+          const mediaType = streamParts[1];
+
+          // Look for any stream from the same participant with the same media type
+          const alternativeStream = Array.from(this.streams.values()).find(
+            (s) =>
+              s.publisherId === participantId &&
+              s.streamId.includes(`_${mediaType}_`),
+          );
+
+          if (alternativeStream) {
+            // Use the alternative stream
+            return await this.createConsumer(
+              roomId,
+              alternativeStream.streamId,
+              transportId,
+              rtpCapabilities,
+              participant,
+              forcePinConsumer,
+            );
+          }
+        }
+
         throw new Error(`Stream ${streamId} not found`);
       }
 
-      // Check if user should receive this stream (priority logic từ mã cũ)
+      // Check if user should receive this stream
       if (
         !forcePinConsumer &&
         !this.shouldUserReceiveStream(
@@ -586,7 +565,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
           stream.publisherId,
         )
       ) {
-        // Theo mã cũ: stream được tạo nhưng không được consume
         return {
           consumerId: null,
           consumer: null,
@@ -617,9 +595,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
       // If no RTP capabilities provided, use router capabilities as fallback
       let finalRtpCapabilities = rtpCapabilities;
       if (!rtpCapabilities || Object.keys(rtpCapabilities).length === 0) {
-        console.log(
-          `[SFU] No RTP capabilities provided, using router capabilities`,
-        );
         finalRtpCapabilities = mediaRoom.router.rtpCapabilities;
       }
 
@@ -630,9 +605,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
           rtpCapabilities: finalRtpCapabilities,
         })
       ) {
-        console.warn(
-          `[SFU] Router cannot consume producer ${producer.id} with given capabilities`,
-        );
         throw new Error(`Router cannot consume producer ${producer.id}`);
       }
 
@@ -680,9 +652,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
       const consumer = consumers.find((c) => c.id === consumerId);
       if (consumer) {
         await consumer.resume();
-        console.log(
-          `[SFU] Consumer ${consumerId} resumed for participant ${participantId}`,
-        );
         return;
       }
     }
@@ -723,7 +692,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
   }
 
   // Stream retrieval method required by controller
-  getStream(streamId: string): Stream | null {
+  getStream(streamId: string): T.Stream | null {
     const stream = this.streams.get(streamId) || null;
     if (!stream) {
       console.error(`[SFU] Stream ${streamId} not found in streams registry`);
@@ -759,8 +728,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         rtpParameters: data.rtpParameters,
       });
 
-      // --- PATCH: Detect screen share and set streamId accordingly ---
-      // Check both metadata (for HTTP/gRPC) and producer.appData (for WebSocket)
       let isScreenShare = false;
       // Check metadata
       if (
@@ -785,9 +752,28 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
       if (isScreenShare) {
         streamType = data.kind === 'audio' ? 'screen_audio' : 'screen';
       }
-      const streamId = `${data.participant.peerId || data.participant.peer_id}_${streamType}_${Date.now()}`;
 
-      // Create and save stream
+      // Generate a more unique streamId to avoid collisions
+      const timestamp = Date.now();
+      const randomSuffix = Math.random().toString(36).substr(2, 5);
+      let streamId = `${data.participant.peerId || data.participant.peer_id}_${streamType}_${timestamp}_${randomSuffix}`;
+
+      // Ensure streamId is unique
+      let counter = 0;
+      while (this.streams.has(streamId) && counter < 10) {
+        counter++;
+        const newRandomSuffix = Math.random().toString(36).substr(2, 5);
+        streamId = `${data.participant.peerId || data.participant.peer_id}_${streamType}_${timestamp}_${newRandomSuffix}_${counter}`;
+      }
+
+      console.log(
+        `[SFU] Creating producer with streamId: ${streamId} for participant: ${data.participant.peerId || data.participant.peer_id}`,
+      );
+
+      // Store producer in media room
+      mediaRoom.producers.set(streamId, producer);
+
+      // Create and store the stream object
       const stream = this.createStream(
         streamId,
         data.participant.peerId || data.participant.peer_id,
@@ -797,18 +783,20 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         data.roomId,
       );
 
-      // Store producer in media room
-      mediaRoom.producers.set(streamId, producer);
+      console.log(
+        `[SFU] Stream created and stored. Total streams now: ${this.streams.size}`,
+      );
+      console.log(`[SFU] Available streams:`, Array.from(this.streams.keys()));
 
       // Log priority information (từ mã cũ)
       const totalStreams = this.getStreamsByRoom(data.roomId).length;
       const isInPriority = this.isStreamInPriority(data.roomId, streamId);
 
-      if (totalStreams > 10) {
-        console.warn(
-          `⚠️ [SFU] Room ${data.roomId} has ${totalStreams} streams. Only first 10 will be consumed by new participants.`,
-        );
-      }
+      // if (totalStreams > 10) {
+      //   console.warn(
+      //     `[SFU] Room ${data.roomId} has ${totalStreams} streams. Only first 10 will be consumed by new participants.`,
+      //   );
+      // }
 
       // Notify about stream changes (từ mã cũ)
       this.notifyUserStreamChanges(
@@ -824,7 +812,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         totalStreams: totalStreams,
       };
     } catch (error) {
-      console.error(`❌ [SFU] Failed to create producer:`, error);
+      console.error(`[SFU] Failed to create producer:`, error);
       throw error;
     }
   }
@@ -844,8 +832,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     // Update stream metadata
     stream.metadata = { ...stream.metadata, ...metadata };
     this.streams.set(streamId, stream);
-
-    console.log(`✅ [SFU] Stream ${streamId} updated with new metadata`);
   }
 
   // Stream unpublish method
@@ -878,8 +864,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     if (producer) {
       this.producerToStream.delete(producer.id);
     }
-
-    console.log(`✅ [SFU] Stream ${streamId} unpublished from room ${roomId}`);
   }
 
   // Remove participant media method
@@ -912,9 +896,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    console.log(
-      `✅ [SFU] Removed ${removedStreams.length} streams for participant ${participantId} in room ${roomId}`,
-    );
+    // Dọn dẹp speaking data khi participant rời phòng
+    this.removeParticipantSpeaking(roomId, participantId);
+
     return removedStreams;
   }
 
@@ -931,10 +915,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     consumersCreated?: any[];
     alreadyPriority?: boolean;
   }> {
-    console.log(
-      `📌 [SFU] Pin request: ${pinnerPeerId} wants to pin ${pinnedPeerId} in room ${roomId}`,
-    );
-
     try {
       // Get all streams from the pinned user
       const pinnedUserStreams = this.getStreamsByRoom(roomId).filter(
@@ -955,9 +935,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
       );
 
       if (isAlreadyPriority) {
-        console.log(
-          `📌 [SFU] User ${pinnedPeerId} is already in priority, only updating pin list`,
-        );
         return {
           success: true,
           message: `User ${pinnedPeerId} is already in priority`,
@@ -997,10 +974,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      console.log(
-        `📌 [SFU] Created ${consumersCreated.length} consumers for pinned user ${pinnedPeerId}`,
-      );
-
       return {
         success: true,
         message: `Successfully pinned user ${pinnedPeerId}`,
@@ -1008,7 +981,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         alreadyPriority: false,
       };
     } catch (error) {
-      console.error(`📌 [SFU] Error in pinUser:`, error);
+      console.error(`[SFU] Error in pinUser:`, error);
       return {
         success: false,
         message: `Failed to pin user: ${error.message}`,
@@ -1026,10 +999,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     consumersRemoved?: string[];
     stillInPriority?: boolean;
   }> {
-    console.log(
-      `📌 [SFU] Unpin request: ${unpinnerPeerId} wants to unpin ${unpinnedPeerId} in room ${roomId}`,
-    );
-
     try {
       // Get all streams from the unpinned user
       const unpinnedUserStreams = this.getStreamsByRoom(roomId).filter(
@@ -1050,9 +1019,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
       );
 
       if (isStillInPriority) {
-        console.log(
-          `📌 [SFU] User ${unpinnedPeerId} is still in priority, only updating pin list`,
-        );
         return {
           success: true,
           message: `User ${unpinnedPeerId} is still in priority`,
@@ -1085,7 +1051,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
               consumersRemoved.push(consumer.id);
             } catch (error) {
               console.error(
-                `📌 [SFU] Failed to close consumer ${consumer.id}:`,
+                `[SFU] Failed to close consumer ${consumer.id}:`,
                 error,
               );
             }
@@ -1103,10 +1069,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      console.log(
-        `📌 [SFU] Removed ${consumersRemoved.length} consumers for unpinned user ${unpinnedPeerId}`,
-      );
-
       return {
         success: true,
         message: `Successfully unpinned user ${unpinnedPeerId}`,
@@ -1114,11 +1076,308 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         stillInPriority: false,
       };
     } catch (error) {
-      console.error(`📌 [SFU] Error in unpinUser:`, error);
+      console.error(`[SFU] Error in unpinUser:`, error);
       return {
         success: false,
         message: `Failed to unpin user: ${error.message}`,
       };
     }
+  }
+
+  async handleSpeaking(
+    request: T.HandleSpeakingRequest,
+  ): Promise<T.HandleSpeakingResponse> {
+    const roomId = request.room_id;
+    const peerId = request.peer_id;
+    console.log(
+      `[SFU] Handling speaking for ${peerId} in room ${roomId} with port ${request.port}`,
+    );
+    try {
+      if (!this.activeSpeakers.has(roomId)) {
+        this.activeSpeakers.set(roomId, new Map());
+      }
+
+      const roomSpeakers = this.activeSpeakers.get(roomId);
+      if (roomSpeakers) {
+        roomSpeakers.set(peerId, new Date());
+      }
+
+      //Create planRTP for audio service
+      const planRTP = await this.createPlanRTP(roomId, peerId, request.port);
+      // if (planRTP) {
+      //   console.log(`[SFU] Created planRTP for ${peerId} in room ${roomId}`);
+      // } else {
+      //   console.log(
+      //     `[SFU] Failed to create planRTP for ${peerId} in room ${roomId}`,
+      //   );
+      // }
+
+      return { status: 'success', message: 'Speaker updated' };
+    } catch (error) {
+      console.error(
+        `[SFU] Error handling speaking for ${peerId} in room ${roomId}:`,
+        error,
+      );
+      return {
+        status: 'error',
+        message: `Failed to update speaker: ${error.message}`,
+      };
+    }
+  }
+
+  // HAndle stop speaking request
+  async handleStopSpeaking(
+    request: T.HandleStopSpeakingRequest,
+  ): Promise<T.HandleStopSpeakingResponse> {
+    const roomId = request.room_id;
+    const peerId = request.peer_id;
+    console.log(`[SFU] Handling stop speaking for ${peerId} in room ${roomId}`);
+    try {
+      if (this.activeSpeakers.has(roomId)) {
+        const roomSpeakers = this.activeSpeakers.get(roomId);
+        if (roomSpeakers && roomSpeakers.has(peerId)) {
+          // Remove the peer from the speaking list
+          roomSpeakers.delete(peerId);
+
+          //Close the planRTP if exists
+          const entry = this.userAudioMap.get(peerId);
+          if (!entry)
+            return { status: 'success', message: 'User audio entry not found' };
+
+          const { plainTransport, consumer } = entry;
+          consumer.close();
+          plainTransport.close();
+          this.userAudioMap.delete(peerId);
+        }
+      }
+
+      return { status: 'success', message: 'Speaker stopped' };
+    } catch (error) {
+      console.error(
+        `[SFU] Error handling stop speaking for ${peerId} in room ${roomId}:`,
+        error,
+      );
+      return {
+        status: 'error',
+        message: `Failed to stop speaker: ${error.message}`,
+      };
+    }
+  }
+
+  // Get active speakers in a room
+  async getActiveSpeakers(
+    request: T.GetActiveSpeakersRequest,
+  ): Promise<T.GetActiveSpeakersResponse> {
+    const roomId = request.room_id;
+    const activeSpeakers: T.ActiveSpeaker[] = [];
+
+    try {
+      if (this.activeSpeakers.has(roomId)) {
+        const roomSpeakers = this.activeSpeakers.get(roomId);
+        const currentTime = new Date();
+        const speakThreshold = 2000; // 2 giây
+
+        roomSpeakers?.forEach((lastSpeakTime, peerId) => {
+          if (
+            currentTime.getTime() - lastSpeakTime.getTime() <
+            speakThreshold
+          ) {
+            activeSpeakers.push({
+              peer_id: peerId,
+              last_speak_time: lastSpeakTime.getTime().toString(),
+            });
+          }
+        });
+      }
+
+      return { active_speakers: activeSpeakers };
+    } catch (error) {
+      console.error(
+        `[SFU] Error getting active speakers for room ${roomId}:`,
+        error,
+      );
+      return { active_speakers: [] };
+    }
+  }
+
+  getSpeakingStats(roomId: string): {
+    totalSpeakers: number;
+    activeSpeakers: number;
+    recentSpeakers: number;
+  } {
+    const roomSpeakers = this.activeSpeakers.get(roomId);
+    if (!roomSpeakers) {
+      return { totalSpeakers: 0, activeSpeakers: 0, recentSpeakers: 0 };
+    }
+
+    const currentTime = new Date();
+    const activeThreshold = 2000; // 2 giây
+    const recentThreshold = 10000; // 10 giây
+
+    let activeSpeakers = 0;
+    let recentSpeakers = 0;
+
+    roomSpeakers.forEach((lastSpeakTime) => {
+      const timeDiff = currentTime.getTime() - lastSpeakTime.getTime();
+
+      if (timeDiff < activeThreshold) {
+        activeSpeakers++;
+      }
+
+      if (timeDiff < recentThreshold) {
+        recentSpeakers++;
+      }
+    });
+
+    return {
+      totalSpeakers: roomSpeakers.size,
+      activeSpeakers,
+      recentSpeakers,
+    };
+  }
+
+  clearRoomSpeaking(roomId: string): void {
+    if (this.activeSpeakers.has(roomId)) {
+      this.activeSpeakers.delete(roomId);
+      console.log(`[SFU] Cleared speaking data for room ${roomId}`);
+    }
+  }
+
+  removeParticipantSpeaking(roomId: string, peerId: string): void {
+    const roomSpeakers = this.activeSpeakers.get(roomId);
+    if (roomSpeakers && roomSpeakers.has(peerId)) {
+      roomSpeakers.delete(peerId);
+      // console.log(
+      //   `[SFU] Removed speaking data for ${peerId} in room ${roomId}`,
+      // );
+
+      // //Delete the user audio map entry if exists
+      // if (roomSpeakers.size === 0) {
+      //   this.activeSpeakers.delete(roomId);
+      // }
+    }
+  }
+
+  isUserSpeaking(roomId: string, peerId: string): boolean {
+    const roomSpeakers = this.activeSpeakers.get(roomId);
+    if (!roomSpeakers || !roomSpeakers.has(peerId)) {
+      return false;
+    }
+
+    const lastSpeakTime = roomSpeakers.get(peerId)!;
+    const currentTime = new Date();
+    const speakThreshold = 2000; // 2 giây
+
+    return currentTime.getTime() - lastSpeakTime.getTime() < speakThreshold;
+  }
+
+  private cleanupInactiveSpeakers() {
+    const currentTime = new Date();
+    const inactivityThreshold = 5000; // 5s
+    let totalCleaned = 0;
+    let roomsCleaned = 0;
+
+    this.activeSpeakers.forEach((roomSpeakers, roomId) => {
+      const inactiveSpeakers: string[] = [];
+
+      roomSpeakers.forEach((lastSpeakTime, peerId) => {
+        if (
+          currentTime.getTime() - lastSpeakTime.getTime() >
+          inactivityThreshold
+        ) {
+          inactiveSpeakers.push(peerId);
+        }
+      });
+
+      // Delete inactive speakers
+      inactiveSpeakers.forEach((peerId) => {
+        roomSpeakers.delete(peerId);
+        totalCleaned++;
+      });
+
+      // Delete room if no one is speaking
+      // if (roomSpeakers.size === 0) {
+      //   this.activeSpeakers.delete(roomId);
+      //   roomsCleaned++;
+      // }
+    });
+
+    if (totalCleaned > 0 || roomsCleaned > 0) {
+      console.log(
+        `[SFU] Cleanup: Removed ${totalCleaned} inactive speakers from ${roomsCleaned} rooms`,
+      );
+    }
+  }
+
+  async createPlanRTP(
+    roomId: string,
+    peerId: string,
+    port: number,
+  ): Promise<mediasoupTypes.Consumer<mediasoupTypes.AppData> | null> {
+    // Find audio producer for this participant
+    const mediaRoom = this.mediaRooms.get(roomId);
+    if (!mediaRoom) {
+      console.log(`[SFU] Media room ${roomId} not found`);
+      return null;
+    }
+
+    // Look for audio producer by finding a streamId that belongs to this peerId and is audio
+    let audioProducer: mediasoupTypes.Producer | undefined;
+    let audioStreamId: string | undefined;
+
+    for (const [streamId, producer] of mediaRoom.producers.entries()) {
+      // Check if this stream belongs to the peerId and is audio
+      if (
+        streamId.startsWith(`${peerId}_audio_`) &&
+        producer.kind === 'audio'
+      ) {
+        audioProducer = producer;
+        audioStreamId = streamId;
+        break;
+      }
+    }
+
+    // If no exact match, try alternative patterns
+    if (!audioProducer) {
+      console.log(`[SFU] No exact match found, trying alternative patterns...`);
+      for (const [streamId, producer] of mediaRoom.producers.entries()) {
+        // Try broader pattern - any stream that contains the peerId and is audio
+        if (streamId.includes(peerId) && producer.kind === 'audio') {
+          audioProducer = producer;
+          audioStreamId = streamId;
+          break;
+        }
+      }
+    }
+
+    if (!audioProducer) {
+      return null;
+    }
+
+    const router = await this.getMediaRouter(roomId);
+
+    const plainTransport = await router.createPlainTransport({
+      listenIp: {
+        ip: this.configService.get('MEDIASOUP_LISTEN_IP') || '0.0.0.0',
+        announcedIp: this.configService.get('MEDIASOUP_ANNOUNCED_IP'),
+      },
+      rtcpMux: true, // Enable RTCP multiplexing to avoid needing separate RTCP port
+      comedia: false, // Don't wait for incoming packets from audio service
+    });
+
+    await plainTransport.connect({
+      ip: this.configService.get('AUDIO_SERVICE_HOST') || 'localhost',
+      port,
+    });
+
+    const consumer = await plainTransport.consume({
+      producerId: audioProducer.id,
+      rtpCapabilities: router.rtpCapabilities,
+    });
+
+    await consumer.resume();
+
+    this.userAudioMap.set(peerId, { plainTransport, consumer });
+    return consumer;
   }
 }

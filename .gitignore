@@ -2,8 +2,7 @@
 **/node_modules
 **/secrets/
 **/test
-
-# Nếu có file build
+**/local_libs
 **/dist
 **/build
 
@@ -18,7 +17,5 @@
 **/.DS_Store
 **/tmp/
 
-run-chat.bat
-run-gateway.bat
-run-room.bat
-run-sfu.bat
+/run
+**/transcripts
