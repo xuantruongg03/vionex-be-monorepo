@@ -14,6 +14,9 @@
 **/.env
 **/libs/
 /tests
+**/__pycache__/
+*.pyc
+*.pyo
 
 # Optional: Docker volume or temp files
 **/.DS_Store
