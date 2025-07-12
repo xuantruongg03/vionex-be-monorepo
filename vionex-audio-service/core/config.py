@@ -20,6 +20,10 @@ MIN_AUDIO_DURATION = 1.0  # Minimum 1.0s - frontend padding ensures quality
 PORT_MIN = int(os.getenv("AUDIO_PORT_MIN", 35000))
 PORT_MAX = int(os.getenv("AUDIO_PORT_MAX", 35400))
 
+# Semantic service configuration
+SEMANTIC_SERVICE_HOST = os.getenv("SEMANTIC_SERVICE_HOST", "localhost")
+SEMANTIC_SERVICE_PORT = int(os.getenv("SEMANTIC_SERVICE_PORT", 30006))
+
 # Create directories
 os.makedirs(TRANSCRIPT_DIR, exist_ok=True)
 

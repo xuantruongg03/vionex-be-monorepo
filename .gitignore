@@ -12,6 +12,8 @@
 *.log
 .env
 **/.env
+**/libs/
+/tests
 
 # Optional: Docker volume or temp files
 **/.DS_Store

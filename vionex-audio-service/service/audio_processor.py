@@ -1,4 +1,16 @@
 """
+ * Copyright (c) 2025 xuantruongg003
+ *
+ * This software is licensed for non-commercial use only.
+ * You may use, study, and modify this code for educational and research purposes.
+ *
+ * Commercial use of this code, in whole or in part, is strictly prohibited
+ * without prior written permission from the author.
+ *
+ * Author Contact: lexuantruong098@gmail.com
+ */
+"""
+"""
 AUDIO PROCESSOR
 
 Core audio processing via Whisper:
@@ -13,10 +25,11 @@ import numpy as np
 import os
 from datetime import datetime
 from typing import Dict, Any, Optional
-from pydub import AudioSegment
+from clients.semantic import SemanticClient
 
 from core.config import MIN_AUDIO_DURATION, SAMPLE_RATE, TRANSCRIPT_DIR
 from core.model import model as whisper_model
+
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +43,7 @@ class AudioProcessor:
         """Initialize audio processor with pre-loaded Whisper model"""
         # Use pre-loaded model from core.model
         self.model = whisper_model
+        self.semantic_client = SemanticClient()
         
         # Statistics
         self.stats = {
@@ -137,8 +151,8 @@ class AudioProcessor:
             )
             
             transcript = result.get("text", "").strip()
-            language = result.get("language", "")
-            
+            language = result.get("language", "vi")
+
             # Calculate confidence
             confidence = self._calculate_confidence(result)
             
@@ -149,13 +163,18 @@ class AudioProcessor:
                 logger.info(f"Transcription successful in {processing_time:.2f}s: '{transcript}' (confidence: {confidence:.2f})")
                 
                 # Save transcript to JSON file
-                transcript_saved = await self._save_transcript_to_file(room_id, user_id, transcript)
+                # transcript_saved = await self._save_transcript_to_file(room_id, user_id, transcript)
                 
+                # Calling semantic service to save transcript (non-blocking)
+                # Use current timestamp instead of processing_time
+                current_timestamp = str(int(time.time()))
+                asyncio.create_task(self._save_to_semantic_service(room_id, user_id, transcript, language, current_timestamp))
+
                 return {
                     'success': True,
                     'message': 'Transcription successful',
                     'processing_time': processing_time,
-                    'transcript_saved': transcript_saved
+                    'transcript_saved': True  # Always return True since semantic service is non-blocking
                 }
             else:
                 self.stats['no_speech'] += 1
@@ -410,6 +429,28 @@ class AudioProcessor:
         except Exception as e:
             logger.error(f"Error saving transcript to file: {e}")
             return False
+
+    async def _save_to_semantic_service(self, room_id: str, user_id: str, transcript: str, language: str, timestamp: str):
+        """
+        Save transcript to semantic service in background (non-blocking)
+        
+        Args:
+            room_id: Room identifier
+            user_id: User identifier (speaker)
+            transcript: Transcribed text
+            language: Language code
+            timestamp: Timestamp as string
+        """
+        try:
+            # Call semantic service to save transcript
+            success = await self.semantic_client.save_transcript(room_id, user_id, transcript, language, timestamp)
+            if success:
+                logger.info(f"Successfully saved transcript to semantic service for room {room_id}, speaker {user_id}")
+            else:
+                logger.warning(f"Failed to save transcript to semantic service for room {room_id}, speaker {user_id}")
+        except Exception as e:
+            logger.error(f"Error saving transcript to semantic service: {e}")
+            # Don't re-raise - this is background task
 
     def get_stats(self) -> Dict[str, Any]:
         """Get processor statistics"""

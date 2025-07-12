@@ -1,0 +1,5 @@
+python-dotenv
+grpcio
+grpcio-tools
+sentence-transformers
+qdrant-client

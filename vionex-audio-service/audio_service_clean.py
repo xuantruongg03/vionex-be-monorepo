@@ -49,12 +49,12 @@ except Exception as e:
 
 class VionexAudioService(audio_pb2_grpc.AudioServiceServicer):
     """
-    Main gRPC audio service - simplified and clean
+    Main gRPC audio service
     """
     
     def __init__(self):
         """Initialize the audio service"""
-        logger.info("🔧 Initializing Vionex Audio Service...")
+        logger.info("Initializing Vionex Audio Service...")
         
         # Initialize audio processor
         self.audio_processor = AudioProcessor()
@@ -286,51 +286,6 @@ class VionexAudioService(audio_pb2_grpc.AudioServiceServicer):
                 transcripts="[]"
             )
 
-    def GetServiceStats(self, request, context):
-        """
-        Get service statistics
-        
-        Returns service statistics including request counts and processing stats
-        """
-        try:
-            logger.info("GetServiceStats request")
-            
-            # Get stats from audio processor
-            processor_stats = self.audio_processor.get_stats() if self.audio_processor else {}
-            
-            # Combine service stats with processor stats
-            total_requests = self.stats['total_requests']
-            successful = self.stats['successful_transcripts']
-            failed = self.stats['failed_transcripts']
-            no_speech = self.stats['no_speech_detected']
-            
-            success_rate = (successful / total_requests * 100) if total_requests > 0 else 0.0
-            
-            return audio_pb2.ServiceStatsResponse(
-                success=True,
-                message="Service statistics retrieved successfully",
-                totalProcessed=total_requests,
-                successful=successful,
-                failed=failed,
-                tooShort=processor_stats.get('too_short', 0),
-                noSpeech=no_speech,
-                successRate=success_rate,
-                modelLoaded=processor_stats.get('model_loaded', False)
-            )
-            
-        except Exception as e:
-            logger.error(f"GetServiceStats error: {e}")
-            return audio_pb2.ServiceStatsResponse(
-                success=False,
-                message=f"Stats error: {str(e)}",
-                totalProcessed=0,
-                successful=0,
-                failed=0,
-                tooShort=0,
-                noSpeech=0,
-                successRate=0.0,
-                modelLoaded=False
-            )
 def serve():
     """Start the gRPC server"""
     try:

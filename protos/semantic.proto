@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package semantic;
+
+service SemanticService {
+    rpc SaveTranscript(SaveTranscriptRequest) returns (SaveTranscriptResponse);
+    rpc SearchTranscripts(SearchTranscriptsRequest) returns (SearchTranscriptsResponse);
+}
+
+message SaveTranscriptRequest {
+    string room_id = 1;
+    string speaker = 2; // Speaker's name or identifier
+    string text = 3; // Transcript text
+    optional string timestamp = 4; // Optional timestamp for the transcript
+    optional string language = 5; // Optional language code (e.g., "en", "vi")
+}
+
+message SaveTranscriptResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message SearchTranscriptsRequest {
+    string query = 1;
+    string room_id = 2; // Optional room ID to filter results
+    optional int32 limit = 3;
+}
+
+message SearchTranscriptsResponse {
+    repeated TranscriptResult results = 1;
+}
+
+message TranscriptResult {
+    string room_id = 1;
+    string text = 2;
+    string timestamp = 3; // Optional timestamp of the transcript
+    optional float score = 4; // Similarity score with the query
+}
