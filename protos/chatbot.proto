@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package chatbot;
+
+service SemanticService {
+    rpc AskChatBot(AskChatBotRequest) returns (AskChatBotResponse);
+}
+
+message AskChatBotRequest {
+    string question = 1;
+    string room_id = 2;
+}
+
+message AskChatBotResponse {
+    string answer = 1;
+}

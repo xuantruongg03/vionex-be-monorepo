@@ -45,6 +45,13 @@ export interface ProtoStream {
   room_id: string;
 }
 
+export interface ChatBotGrpcServiceInterface {
+  askChatBot(data: {
+    question: string;
+    room_id: string;
+  }): Observable<{ answer: string }>;
+}
+
 export interface RoomGrpcService {
   
   lockRoom(data: {

@@ -1,19 +1,19 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { protoPaths } from './common/paths';
-import { GatewayGateway } from './gateway.gateway';
-import { ChatService } from './services/chat.service';
-import { WebSocketEventService } from './services/websocket-event.service';
-import { RoomClientService } from './clients/room.client';
+import AudioCallbackController from './audio/audio-callback.controller';
+import { AudioClientService } from './clients/audio.client';
 import { ChatClientService } from './clients/chat.client';
 import { InteractionClientService } from './clients/interaction.client';
-import { GatewayController } from './gateway.controller';
-import { RoomHttpController } from './room-http.controller';
-import { HttpBroadcastService } from './services/http-broadcast.service';
+import { RoomClientService } from './clients/room.client';
 import { SfuClientService } from './clients/sfu.client';
-import { AudioClientService } from './clients/audio.client';
-import AudioCallbackController from './audio/audio-callback.controller';
+import { protoPaths } from './common/paths';
+import { GatewayController } from './gateway.controller';
+import { GatewayGateway } from './gateway.gateway';
+import { RoomHttpController } from './room-http.controller';
+import { ChatService } from './services/chat.service';
+import { HttpBroadcastService } from './services/http-broadcast.service';
+import { WebSocketEventService } from './services/websocket-event.service';
 
 @Module({
   imports: [
@@ -92,6 +92,22 @@ import AudioCallbackController from './audio/audio-callback.controller';
             package: 'audio',
             protoPath: protoPaths.audio,
             url: `${configService.get('AUDIO_SERVICE_HOST') || 'localhost'}:${configService.get('AUDIO_SERVICE_GRPC_PORT') || 30005}`,
+            loader: {
+              keepCase: true,
+            },
+          },
+        }),
+        inject: [ConfigService],
+      },
+      {
+        name: 'CHATBOT_SERVICE',
+        imports: [ConfigModule],
+        useFactory: (configService: ConfigService) => ({
+          transport: Transport.GRPC,
+          options: {
+            package: 'chatbot',
+            protoPath: protoPaths.chatbot,
+            url: `${configService.get('CHATBOT_SERVICE_HOST') || 'localhost'}:${configService.get('CHATBOT_SERVICE_GRPC_PORT') || 30007}`,
             loader: {
               keepCase: true,
             },
