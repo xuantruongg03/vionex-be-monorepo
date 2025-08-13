@@ -19,17 +19,39 @@ service SfuService {
   rpc GetMediaRouter(GetMediaRouterRequest) returns (GetMediaRouterResponse);
   rpc ResumeConsumer(ResumeConsumerRequest) returns (ResumeConsumerResponse);
   rpc UnpublishStream(UnpublishStreamRequest) returns (UnpublishStreamResponse);
-  rpc UpdateStream(UpdateStreamRequest) returns (UpdateStreamResponse);  rpc RemoveParticipantMedia(RemoveParticipantMediaRequest) returns (RemoveParticipantMediaResponse);
+  rpc UpdateStream(UpdateStreamRequest) returns (UpdateStreamResponse);
+  rpc RemoveParticipantMedia(RemoveParticipantMediaRequest) returns (RemoveParticipantMediaResponse);
   rpc CloseMediaRoom(CloseMediaRoomRequest) returns (CloseMediaRoomResponse);
-  rpc HandlePresence(HandlePresenceRequest) returns (HandlePresenceResponse);
   rpc CreateProducer(CreateProducerRequest) returns (CreateProducerResponse);
-  rpc SaveProducer(SaveProducerRequest) returns (SaveProducerResponse);
   rpc PinUser(PinUserRequest) returns (PinUserResponse);
   rpc UnpinUser(UnpinUserRequest) returns (UnpinUserResponse);
   rpc HandleSpeaking(HandleSpeakingRequest) returns (HandleSpeakingResponse);
   rpc HandleStopSpeaking(HandleStopSpeakingRequest) returns (HandleStopSpeakingResponse);
-  rpc GetActiveSpeakers(GetActiveSpeakersRequest) returns (GetActiveSpeakersResponse);
+  
+  // Translation Cabin Methods
+  rpc AllocatePort(AllocatePortRequest) returns (AllocatePortResponse);
+  rpc DestroyTranslationCabin(DestroyTranslationCabinRequest) returns (DestroyTranslationCabinResponse);
+  rpc ListTranslationCabin(ListTranslationCabinRequest) returns (ListTranslationCabinResponse);
 }
+
+// Allocate Port Request/Response
+message AllocatePortRequest {
+  string room_id = 1;
+  string source_user_id = 2;
+  string target_user_id = 3;
+  string source_language = 4;
+  string target_language = 5;
+  int32 audio_port = 6;
+  int32 send_port = 7; // Port for sending audio from audio service
+  uint32 ssrc = 8; // SSRC from Audio Service for producer
+}
+
+message AllocatePortResponse {
+  bool success = 1;
+  optional string stream_id = 2; // StreamId of translated audio stream
+  optional string message = 3; // Optional message for additional info
+}
+
 message PinUserRequest {
   string room_id = 1;
   string pinner_peer_id = 2;
@@ -277,18 +299,6 @@ message CloseMediaRoomResponse {
   string message = 2;
 }
 
-// HandlePresence messages
-message HandlePresenceRequest {
-  string room_id = 1;
-  string peer_id = 2;
-  string metadata = 3; // JSON string
-}
-
-message HandlePresenceResponse {
-  string status = 1;
-  string presence_data = 2; // JSON string
-}
-
 // CreateProducer messages
 message CreateProducerRequest {
   string room_id = 1;
@@ -303,18 +313,6 @@ message CreateProducerResponse {
   string status = 1;
   string message = 2;
   optional string producer_data = 3; // JSON string containing producer info
-}
-
-// SaveProducer messages
-message SaveProducerRequest {
-  string room_id = 1;
-  string stream_id = 2;
-  string producer_data = 3; // JSON string
-}
-
-message SaveProducerResponse {
-  string status = 1;
-  string message = 2;
 }
 
 // Speaking management messages
@@ -339,15 +337,31 @@ message HandleStopSpeakingResponse {
   string message = 2;
 }
 
-message GetActiveSpeakersRequest {
+message DestroyTranslationCabinRequest {
   string room_id = 1;
+  string source_user_id = 2;
+  string target_user_id = 3;
+  string source_language = 4;
+  string target_language = 5;
 }
 
-message GetActiveSpeakersResponse {
-  repeated ActiveSpeaker active_speakers = 1;
+message DestroyTranslationCabinResponse {
+  bool success = 1;
+  string message = 2;
 }
 
-message ActiveSpeaker {
-  string peer_id = 1;
-  int64 last_speak_time = 2; // Unix timestamp
+message ListTranslationCabinRequest {
+  string room_id = 1;
+  string user_id = 2;
+}
+
+message ListTranslationCabinResponse {
+  bool success = 1;
+  repeated TranslationCabin cabins = 2;
+}
+
+message TranslationCabin {
+  string target_user_id = 1;
+  string source_language = 2;
+  string target_language = 3;
 }

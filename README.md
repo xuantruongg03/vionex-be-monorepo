@@ -1,4 +1,4 @@
-# 🎥 VIONEX - Advanced Video Conferencing Platform
+# VIONEX - Advanced Video Conferencing Platform
 
 <div align="center">
   <img src="https://res.cloudinary.com/dcweof28t/image/upload/v1751123716/image_products/logo_o34pnk.png" alt="Vionex Logo" width="400"/>
@@ -14,27 +14,27 @@
 
 ---
 
-## 🚀 Overview
+## Overview
 
 **Vionex** is a cutting-edge, enterprise-grade video conferencing platform built with modern microservices architecture. Designed for scalability, reliability, and performance, Vionex delivers seamless real-time communication experiences for businesses, educational institutions, and collaborative teams.
 
-### ✨ Key Features
+### Key Features
 
--   🎥 **HD Video Conferencing** - Crystal-clear video calls with adaptive bitrate streaming
--   💬 **Real-time Chat** - Instant messaging with rich media support
--   📋 **Interactive Whiteboard** - Collaborative drawing and presentation tools
--   🗳️ **Live Polling & Voting** - Engage participants with real-time polls
--   🏢 **Room Management** - Advanced meeting room controls and permissions
--   🔄 **WebRTC SFU** - Selective Forwarding Unit for optimized media routing
--   🎤 **Real-time Audio Transcription** - AI-powered speech-to-text with Whisper
--   🔍 **Semantic Search** - Vector-based transcript search and analysis
--   🌐 **REST & gRPC APIs** - Comprehensive integration capabilities
--   🔒 **Enterprise Security** - End-to-end encryption and access controls
--   📊 **Interaction Analytics** - Comprehensive analytics and reporting
+-   **HD Video Conferencing** - Crystal-clear video calls with adaptive bitrate streaming
+-   **Real-time Chat** - Instant messaging with rich media support
+-   **Interactive Whiteboard** - Collaborative drawing and presentation tools
+-   **Live Polling & Voting** - Engage participants with real-time polls
+-   **Room Management** - Advanced meeting room controls and permissions
+-   **WebRTC SFU** - Selective Forwarding Unit for optimized media routing
+-   **Real-time Audio Transcription** - AI-powered speech-to-text with Whisper
+-   **Semantic Search** - Vector-based transcript search and analysis
+-   **REST & gRPC APIs** - Comprehensive integration capabilities
+-   **Enterprise Security** - End-to-end encryption and access controls
+-   **Interaction Analytics** - Comprehensive analytics and reporting
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 Vionex follows a **microservices architecture** pattern, ensuring scalability, maintainability, and fault tolerance:
 
@@ -64,7 +64,7 @@ Vionex follows a **microservices architecture** pattern, ensuring scalability, m
         └───────────────┘  └─────────────┘
 ```
 
-### 🛠️ Technology Stack
+### Technology Stack
 
 #### **Backend Framework**
 
@@ -102,7 +102,7 @@ Vionex follows a **microservices architecture** pattern, ensuring scalability, m
 
 ---
 
-## 🏢 Service Architecture
+## Service Architecture
 
 ### Core Services
 
@@ -116,9 +116,9 @@ Vionex follows a **microservices architecture** pattern, ensuring scalability, m
 | **Audio Service**       | Real-time speech transcription            | gRPC         | 30005 |
 | **Semantic Service**    | Vector search, transcript analysis        | gRPC         | 30006 |
 
-### 📋 Service Details
+### Service Details
 
-#### 🌐 **API Gateway (vionex-api-getway)**
+#### **API Gateway (vionex-api-getway)**
 
 -   **Main entry point** for all client requests
 -   **WebSocket gateway** for real-time communication
@@ -127,7 +127,7 @@ Vionex follows a **microservices architecture** pattern, ensuring scalability, m
 -   **Authentication & authorization** handling
 -   **Request routing** to appropriate services
 
-#### 💬 **Chat Service (vionex-chat-service)**
+#### **Chat Service (vionex-chat-service)**
 
 -   **Real-time messaging** with WebSocket support
 -   **Message persistence** and history
@@ -135,7 +135,7 @@ Vionex follows a **microservices architecture** pattern, ensuring scalability, m
 -   **Message broadcasting** to participants
 -   **Chat moderation** features
 
-#### 🏢 **Room Service (vionex-room-service)**
+#### **Room Service (vionex-room-service)**
 
 -   **Meeting room management** and lifecycle
 -   **Participant management** and permissions
@@ -143,7 +143,7 @@ Vionex follows a **microservices architecture** pattern, ensuring scalability, m
 -   **Access control** and security
 -   **Room analytics** and monitoring
 
-#### 📡 **SFU Service (vionex-sfu-service)**
+#### **SFU Service (vionex-sfu-service)**
 
 -   **Media streaming** with WebRTC
 -   **Selective Forwarding Unit** implementation
@@ -152,7 +152,7 @@ Vionex follows a **microservices architecture** pattern, ensuring scalability, m
 -   **Screen sharing** capabilities
 -   **Media quality control**
 
-#### 🎨 **Interaction Service (vionex-interaction-service)**
+#### **Interaction Service (vionex-interaction-service)**
 
 -   **Interactive whiteboard** functionality
 -   **Real-time collaborative drawing**
@@ -161,7 +161,7 @@ Vionex follows a **microservices architecture** pattern, ensuring scalability, m
 -   **Participant engagement** tools
 -   **Analytics and reporting**
 
-#### 🎙️ **Audio Service (vionex-audio-service)**
+#### **Audio Service (vionex-audio-service)**
 
 -   **Real-time audio transcription** with OpenAI Whisper
 -   **Speech-to-text processing** for live meetings
@@ -170,7 +170,7 @@ Vionex follows a **microservices architecture** pattern, ensuring scalability, m
 -   **Transcript persistence** and semantic analysis integration
 -   **WebRTC audio stream processing**
 
-#### 🔍 **Semantic Service (vionex-semantic-service)**
+#### **Semantic Service (vionex-semantic-service)**
 
 -   **Vector-based search** for transcript content
 -   **Semantic analysis** of meeting conversations
@@ -179,7 +179,7 @@ Vionex follows a **microservices architecture** pattern, ensuring scalability, m
 -   **Meeting intelligence** and conversation analytics
 -   **Advanced NLP processing** with Sentence Transformers
 
-### 🔄 Communication Flow
+### Communication Flow
 
 1. **Client Connection** → API Gateway (WebSocket/HTTP)
 2. **Service Discovery** → gRPC inter-service communication
@@ -191,7 +191,7 @@ Vionex follows a **microservices architecture** pattern, ensuring scalability, m
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 vionex-backend/
@@ -247,7 +247,7 @@ vionex-backend/
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -380,7 +380,7 @@ npm run build
 
 ---
 
-## � Environment Configuration
+## Environment Configuration
 
 Each service requires its own environment configuration:
 
@@ -448,7 +448,7 @@ COLLECTION_NAME=transcripts
 
 ---
 
-## 📊 Performance & Scalability
+## Performance & Scalability
 
 -   **Concurrent Users**: Supports 10,000+ simultaneous connections
 -   **Media Quality**: Up to 4K video resolution with adaptive streaming
@@ -458,7 +458,7 @@ COLLECTION_NAME=transcripts
 
 ---
 
-## 🔒 Security Features
+## Security Features
 
 -   **JWT Authentication** - Secure token-based authentication
 -   **Role-based Access Control** - Granular permission management
@@ -469,7 +469,7 @@ COLLECTION_NAME=transcripts
 
 ---
 
-## 📚 API Documentation
+## API Documentation
 
 ### Protocol Buffers
 
@@ -501,7 +501,7 @@ COLLECTION_NAME=transcripts
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions from the community! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting pull requests.
 
@@ -515,12 +515,12 @@ We welcome contributions from the community! Please read our [Contributing Guide
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under a custom **Research and Educational License**.
 
--   ✅ **Permitted**: Educational use, research, contributions
--   ❌ **Restricted**: Commercial use without explicit permission
+-   **Permitted**: Educational use, research, contributions
+-   **Restricted**: Commercial use without explicit permission
 
 See the [LICENSE](LICENSE) file for full details.
 
@@ -528,7 +528,7 @@ For commercial licensing inquiries, please contact us.
 
 ---
 
-## 🚀 Deployment
+## Deployment
 
 ### Production Deployment
 
@@ -585,7 +585,7 @@ pm2 start ecosystem.config.js
 
 ---
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 

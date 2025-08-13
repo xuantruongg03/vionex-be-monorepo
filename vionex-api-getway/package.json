@@ -19,7 +19,8 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "proto:install": "npm install @grpc/grpc-js @grpc/proto-loader",
-    "proto:copy": "xcopy proto dist\\proto /E /I /Y || cp -r proto dist/proto"
+    "proto:copy": "xcopy proto dist\\proto /E /I /Y || cp -r proto dist/proto",
+    "add-license": "license-header -f .licenseheader -e .js,.ts src/"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.13.4",

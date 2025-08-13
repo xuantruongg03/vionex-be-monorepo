@@ -5,6 +5,7 @@
 **/local_libs
 **/dist
 **/build
+**/models
 
 # IDE/editor files
 .vscode/

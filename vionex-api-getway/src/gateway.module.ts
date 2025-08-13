@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import AudioCallbackController from './audio/audio-callback.controller';
 import { AudioClientService } from './clients/audio.client';
 import { ChatClientService } from './clients/chat.client';
 import { InteractionClientService } from './clients/interaction.client';
@@ -14,6 +13,7 @@ import { RoomHttpController } from './room-http.controller';
 import { ChatService } from './services/chat.service';
 import { HttpBroadcastService } from './services/http-broadcast.service';
 import { WebSocketEventService } from './services/websocket-event.service';
+import { ChatBotClientService } from './clients/chatbot.client';
 
 @Module({
   imports: [
@@ -117,7 +117,7 @@ import { WebSocketEventService } from './services/websocket-event.service';
       },
     ]),
   ],
-  controllers: [GatewayController, RoomHttpController, AudioCallbackController],
+  controllers: [GatewayController, RoomHttpController],
   providers: [
     GatewayGateway,
     ChatService,
@@ -128,7 +128,7 @@ import { WebSocketEventService } from './services/websocket-event.service';
     HttpBroadcastService,
     SfuClientService,
     InteractionClientService,
-    AudioCallbackController,
+    ChatBotClientService,
   ],
 })
 export class GatewayModule {}

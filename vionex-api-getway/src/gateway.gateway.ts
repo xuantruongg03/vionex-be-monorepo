@@ -20,7 +20,6 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import AudioCallbackController from './audio/audio-callback.controller';
 import { AudioClientService } from './clients/audio.client';
 import { ChatClientService } from './clients/chat.client';
 import { InteractionClientService } from './clients/interaction.client';
@@ -53,13 +52,9 @@ export class GatewayGateway
     private readonly chatClient: ChatClientService,
     private readonly interactionClient: InteractionClientService,
     private readonly audioService: AudioClientService,
-    private readonly audioCallbackController: AudioCallbackController,
   ) {}
   handleConnection(client: Socket) {
     this.httpBroadcastService.setSocketServer(this.io);
-
-    // Set WebSocket server reference for audio callback controller
-    this.audioCallbackController.setSocketServer(this.io);
   }
 
   async handleDisconnect(client: Socket) {
@@ -979,7 +974,15 @@ export class GatewayGateway
       // For consume operation, we need to pass minimal RTP capabilities
       // The SFU service should have stored capabilities when they were set
       const rtpCapabilities = {}; // Will be populated by SFU service from stored data
-
+      console.log("Data to consume", {
+        streamId: data.streamId,
+        transportId: data.transportId,
+        roomId,
+        peerId,
+        rtpCapabilities,
+        participant,
+      });
+      
       const consumerInfo = await this.sfuClient.consume(
         data.streamId,
         data.transportId,
@@ -1006,7 +1009,7 @@ export class GatewayGateway
         console.error('[Gateway] Raw consumer info:', consumerInfo);
         throw new Error('Failed to parse consumer response');
       }
-
+      
       // Check if this is a non-priority stream (no consumer created)
       if (!consumerData.consumerId && consumerData.message) {
         client.emit('sfu:consumer-skipped', {
@@ -1595,10 +1598,6 @@ export class GatewayGateway
     roomId: string,
     participantData?: any,
   ): void {
-    console.log(
-      `[Gateway] Storing participant mapping: socketId=${socketId}, peerId=${peerId}, roomId=${roomId}`,
-    );
-
     this.connectionMap.set(socketId, peerId);
     this.participantSocketMap.set(peerId, socketId);
     this.roomParticipantMap.set(peerId, roomId);
@@ -1613,10 +1612,6 @@ export class GatewayGateway
   private cleanupParticipantMapping(socketId: string): void {
     const peerId = this.connectionMap.get(socketId);
     if (peerId) {
-      console.log(
-        `[Gateway] Cleaning up participant mapping for peerId=${peerId}, socketId=${socketId}`,
-      );
-
       this.connectionMap.delete(socketId);
       this.participantSocketMap.delete(peerId);
       this.roomParticipantMap.delete(peerId);
@@ -1630,20 +1625,10 @@ export class GatewayGateway
 
   private async getRoomIdBySocketId(socketId: string): Promise<string | null> {
     const peerId = this.connectionMap.get(socketId);
-    console.log(
-      `[Gateway] getRoomIdBySocketId: socketId=${socketId}, mappedPeerId=${peerId}`,
-    );
-
     if (peerId) {
       const roomId = this.roomParticipantMap.get(peerId);
-      console.log(
-        `[Gateway] getRoomIdBySocketId: peerId=${peerId}, mappedRoomId=${roomId}`,
-      );
       return roomId || null;
     }
-    console.log(
-      `[Gateway] getRoomIdBySocketId: No mapping found for socketId=${socketId}`,
-    );
     return null;
   }
 
@@ -1652,32 +1637,17 @@ export class GatewayGateway
     peerId: string,
   ): Promise<any> {
     try {
-      console.log(
-        `[Gateway] Looking up participant ${peerId} in room ${roomId}`,
-      );
-
       // First check if we have cached participant data
       const cachedParticipant = this.participantCache.get(peerId);
       if (cachedParticipant) {
-        console.log(
-          `[Gateway] Found participant ${peerId} in participant cache`,
-        );
         return cachedParticipant;
       }
 
       // Check if we have this peerId in our local mappings
       const mappedRoomId = this.roomParticipantMap.get(peerId);
       const socketId = this.participantSocketMap.get(peerId);
-
-      console.log(
-        `[Gateway] Local mappings - peerId: ${peerId}, mappedRoomId: ${mappedRoomId}, socketId: ${socketId}`,
-      );
-
       // If we have local mapping for this peerId and it matches the requested roomId
       if (mappedRoomId === roomId && socketId) {
-        console.log(
-          `[Gateway] Found participant ${peerId} in local mappings for room ${roomId}`,
-        );
         // Return a minimal participant object from mappings
         const participant = {
           peer_id: peerId,
@@ -1692,9 +1662,6 @@ export class GatewayGateway
       }
 
       // Fallback to room service
-      console.log(
-        `[Gateway] Participant ${peerId} not in cache/mappings, calling room service`,
-      );
       const participant = await this.roomClient.getParticipantByPeerId(
         roomId,
         peerId,

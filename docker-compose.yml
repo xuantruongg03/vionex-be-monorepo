@@ -4,15 +4,11 @@ services:
   audio-service:
     build: ./vionex-audio-service
     container_name: vionex-audio-service
-    ports:
-      - "30005:30005"
-      - "35000-35400:35000-35400/udp"
+    network_mode: host  # Use host network to share same network stack with SFU
     env_file:
       - ./vionex-audio-service/.env
     volumes:
       - ./vionex-audio-service/transcripts:/app/transcripts
-    networks:
-      - vionex-network
 
   sfu-service:
     build: ./vionex-sfu-service

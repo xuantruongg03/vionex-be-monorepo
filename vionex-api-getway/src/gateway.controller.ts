@@ -9,6 +9,7 @@ import {
   Delete,
   Param,
   Headers,
+  Query,
 } from '@nestjs/common';
 import { RoomClientService } from './clients/room.client';
 import { WebSocketEventService } from './services/websocket-event.service';
@@ -17,6 +18,7 @@ import { Participant, Stream } from './interfaces/interface';
 import * as mediasoupTypes from 'mediasoup/node/lib/types';
 import { SfuClientService } from './clients/sfu.client';
 import { ChatBotClientService } from './clients/chatbot.client';
+import { AudioClientService } from './clients/audio.client';
 
 @Controller()
 export class GatewayController {
@@ -27,6 +29,7 @@ export class GatewayController {
     private readonly broadcastService: HttpBroadcastService,
     private readonly sfuClient: SfuClientService,
     private readonly chatbotClient: ChatBotClientService,
+    private readonly audioClient: AudioClientService,
   ) {}
 
   @Get('health')
@@ -147,7 +150,7 @@ export class GatewayController {
     }
   }
 
-  @Post("/chatbot/ask")
+  @Post('/chatbot/ask')
   async askChatBot(
     @Body() data: { question: string; roomId: string },
     @Headers('authorization') authorization?: string,
@@ -157,11 +160,17 @@ export class GatewayController {
       const { question, roomId } = data;
 
       if (!question || question.trim().length === 0) {
-        throw new HttpException('Question cannot be empty', HttpStatus.BAD_REQUEST);
+        throw new HttpException(
+          'Question cannot be empty',
+          HttpStatus.BAD_REQUEST,
+        );
       }
 
       // Call the chatbot service
-      const response = await this.chatbotClient.askChatBot({ question, room_id: roomId });
+      const response = await this.chatbotClient.askChatBot({
+        question,
+        room_id: roomId,
+      });
 
       return {
         success: true,
@@ -1016,10 +1025,6 @@ export class GatewayController {
     @Headers('authorization') authorization?: string,
   ) {
     try {
-      console.log('=== Close Producer ===');
-      console.log('Producer ID:', producerId);
-      console.log('Room ID:', data.roomId);
-
       const participant = await this.getParticipantFromHeader(authorization);
 
       // Use removeParticipantMedia to clean up producer
@@ -1027,7 +1032,6 @@ export class GatewayController {
         room_id: data.roomId,
         participant_id: participant.peer_id,
       });
-      console.log('Producer closed successfully');
 
       return {
         success: true,
@@ -1040,5 +1044,153 @@ export class GatewayController {
         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  // ===== TRANSLATION CABIN ENDPOINTS =====
+
+  @Post('translation-cabin')
+  async createTranslationCabin(
+    @Body()
+    data: {
+      roomId: string;
+      sourceUserId: string;
+      targetUserId: string;
+      sourceLanguage: string;
+      targetLanguage: string;
+    },
+  ) {
+    // B1. Audio service opens port for plainRTP
+    const audioPortResponse = await this.audioClient.allocateTranslationPort(
+      data.roomId,
+      data.targetUserId,
+      // sourceLanguage and targetLanguage will be passed in B3 step
+    );
+    if (!audioPortResponse.success || !audioPortResponse.port) {
+      throw new HttpException(
+        'Failed to allocate audio port',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+    // B2. SFU service establishes plainRTP connection to audio service
+    const sfuPortResponse = await this.sfuClient.establishPlainRtpConnection(
+      data.roomId,
+      data.sourceUserId,
+      data.targetUserId,
+      data.sourceLanguage,
+      data.targetLanguage,
+      audioPortResponse.port,
+      audioPortResponse.send_port, // Use snake_case as returned by audio service
+      audioPortResponse.ssrc, // Pass SSRC from Audio Service to SFU
+    );
+    if (!sfuPortResponse.success) {
+      throw new HttpException(
+        sfuPortResponse.message || 'Failed to establish RTP connection',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+    // B3. Start translation cabin processing
+    const translationProduceResponse =
+      await this.audioClient.createTranslationProduce(
+        data.roomId,
+        data.targetUserId,
+        data.sourceLanguage,
+        data.targetLanguage,
+      );
+    if (!translationProduceResponse.success) {
+      throw new HttpException(
+        translationProduceResponse.message ||
+          'Failed to start translation processing',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+    // B4. Return streamId for client consumption
+    return {
+      success: true,
+      data: {
+        streamId: sfuPortResponse.streamId,
+      },
+      message: 'Translation cabin created successfully',
+    };
+  }
+
+  @Post('destroy-translation-cabin')
+  async destroyTranslationCabin(
+    @Body()
+    data: {
+      roomId: string;
+      sourceUserId: string;
+      targetUserId: string;
+      sourceLanguage: string;
+      targetLanguage: string;
+    },
+  ) {
+    // Validate data
+    if (!data.roomId || !data.targetUserId || !data.sourceLanguage || !data.targetLanguage) {
+      return {
+        success: false,
+        message: 'Missing required fields for destroying translation cabin',
+      };
+    }
+    const destroyResponse = await this.sfuClient.destroyTranslationCabin(
+      data.roomId,
+      data.sourceUserId,
+      data.targetUserId,
+      data.sourceLanguage,
+      data.targetLanguage
+    );
+
+    if (!destroyResponse.success) {
+      throw new HttpException(
+        destroyResponse.message || 'Failed to destroy translation cabin',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    } else {
+      // 10001 is code in message from sfu to mark cabin is not use and destroy success
+      // Can search full message in SFU to see details
+      if (destroyResponse.message === "10001") {
+        const destroyCabinTranslationResponse = await this.audioClient.destroyTranslationCabin(
+          data.roomId,
+          data.targetUserId,
+          data.sourceLanguage,
+          data.targetLanguage
+        );
+    
+        if (!destroyCabinTranslationResponse.success) {
+          throw new HttpException(
+            destroyCabinTranslationResponse.message || 'Failed to destroy translation cabin',
+            HttpStatus.INTERNAL_SERVER_ERROR,
+          );
+        }
+      }
+    }
+    return {
+      success: true,
+      message: 'Translation cabin destroyed successfully',
+    };
+  }
+
+  @Get('list-translation-cabin')
+  async listTranslationCabin(
+    @Query()
+    params: {
+      roomId: string;
+      userId: string;
+    },
+  ) {
+    const listResponse = await this.sfuClient.listTranslationCabin(params.roomId, params.userId);
+    if (!listResponse.success) {
+      throw new HttpException(
+        'Failed to list translation cabins',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+    return {
+      success: true,
+      data: listResponse.cabins,
+      message: 'Translation cabins listed successfully',
+    };
   }
 }

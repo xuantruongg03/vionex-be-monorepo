@@ -8,6 +8,9 @@ export interface Stream {
   metadata: any;
   rtpParameters: mediasoupTypes.RtpParameters;
   roomId: string;
+  kind?: 'video' | 'audio'; // Added for filtering streams by type
+  appData?: any; // Added for additional stream metadata
+  created_at?: Date; // Added for stream creation timestamp
 }
 
 export interface Participant {
@@ -42,7 +45,7 @@ export interface RoomGrpcService {
   }>;
 }
 
-export interface PlanRTP{
+export interface PlanRTP {
   roomId: string;
   peerId: string;
   port?: number; // Optional port for audio service

@@ -3,38 +3,59 @@ syntax = "proto3";
 package audio;
 
 service AudioService {
-  // Legacy methods (for backward compatibility)
-  rpc AllocatePort (PortRequest) returns (PortReply);
-  rpc ReleasePort (PortRequest) returns (Empty);
+  // Translation Cabin methods for B1-B4 flow
+  rpc AllocateTranslationPort (PortRequest) returns (PortReply);
+
+  // Establish a plain RTP connection for audio streaming
+  rpc CreateTranslationProduce (CreateTranslationCabinRequest) returns (CreateTranslationCabinResponse);
   
-  // New audio buffer processing - SIMPLIFIED ARCHITECTURE
+  // Main audio buffer processing for transcription
   rpc ProcessAudioBuffer (ProcessAudioBufferRequest) returns (ProcessAudioBufferResponse);
   
-  // Legacy audio chunk processing methods
+  // Legacy audio chunk processing
+  // This is for compatibility with existing clients that send audio in chunks
   rpc ProcessAudioChunk (ProcessAudioRequest) returns (ProcessAudioResponse);
-  rpc GetTranscripts (GetTranscriptsRequest) returns (GetTranscriptsResponse);
   
   // Service statistics
   rpc GetServiceStats (Empty) returns (ServiceStatsResponse);
+
+  // Destroy cabin
+  rpc DestroyCabin (DestroyCabinRequest) returns (DestroyCabinResponse);
 }
 
-// Legacy messages
+/**
+ * PortRequest message for translation port allocation.
+ * Contains room ID and user ID for the target user.
+ */
 message PortRequest {
   string roomId = 1;
-  string userId = 2;
+  string userId = 2; // Target user ID for translation
 }
 
+/**
+ * PortReply message for translation port allocation.
+ * Contains success status, allocated ports for bidirectional communication, and readiness status.
+ */
 message PortReply {
   bool success = 1;
-  int32 port = 2;
-  bool ready = 3;
+  int32 port = 2;      // RTP port allocated for receiving audio from SFU
+  int32 send_port = 3; // RTP port allocated for sending translated audio back to SFU
+  bool ready = 4;
+  uint32 ssrc = 5;    // SSRC for the producer in the translation cabin
 }
 
+/**
+ * Empty message for requests that do not require parameters.
+ * Used for service statistics and other simple requests.
+ */
 message Empty {
   bool success = 1;
 }
 
-// New audio buffer processing messages - SIMPLIFIED ARCHITECTURE
+/**
+ * CreateTranslationCabinRequest message for creating a translation cabin.
+ * Contains room ID, user ID, source language, and target language.
+ */
 message ProcessAudioBufferRequest {
   string userId = 1;
   string roomId = 2;
@@ -45,6 +66,10 @@ message ProcessAudioBufferRequest {
   int32 channels = 7;
 }
 
+/**
+ * ProcessAudioBufferResponse message for the result of audio buffer processing.
+ * Contains success status, transcript, confidence score, and additional message.
+ */
 message ProcessAudioBufferResponse {
   bool success = 1;
   string transcript = 2;
@@ -52,7 +77,10 @@ message ProcessAudioBufferResponse {
   string message = 4;
 }
 
-// Legacy audio chunk processing messages
+/**
+ * ProcessAudioRequest message for processing audio chunks.
+ * Contains room ID, user ID, timestamp, audio buffer, and duration.
+ */
 message ProcessAudioRequest {
   string roomId = 1;
   string userId = 2;
@@ -61,21 +89,13 @@ message ProcessAudioRequest {
   double duration = 5;
 }
 
+/**
+ * ProcessAudioResponse message for the result of audio chunk processing.
+ * Contains success status and additional message.
+ */
 message ProcessAudioResponse {
   bool success = 1;
   string message = 2;
-}
-
-message GetTranscriptsRequest {
-  string roomId = 1;
-  int64 fromTimestamp = 2;
-  int64 toTimestamp = 3;
-}
-
-message GetTranscriptsResponse {
-  bool success = 1;
-  string message = 2;
-  string transcripts = 3; // JSON array of transcripts
 }
 
 message ServiceStatsResponse {
@@ -88,4 +108,37 @@ message ServiceStatsResponse {
   int32 noSpeech = 7;
   double successRate = 8;
   bool modelLoaded = 9;
+}
+
+/**
+ * GetTranscriptsRequest message for fetching transcripts.
+ * Contains room ID and timestamp range for filtering transcripts.
+ */
+message CreateTranslationCabinRequest {
+  string roomId = 1;
+  string userId = 2;
+  string sourceLanguage = 3;
+  string targetLanguage = 4;
+}
+
+/**
+ * CreateTranslationCabinResponse message for the result of creating a translation cabin.
+ * Contains success status, message, and stream ID for client to consume translated audio.
+ */
+message CreateTranslationCabinResponse {
+  bool success = 1;
+  string message = 2;
+  string streamId = 3; // StreamId for client to consume translated audio
+}
+
+message DestroyCabinRequest {
+  string room_id = 1;
+  string target_user_id = 2;
+  string source_language = 3;
+  string target_language = 4;
+}
+
+message DestroyCabinResponse {
+  bool success = 1;
+  string message = 2;
 }
