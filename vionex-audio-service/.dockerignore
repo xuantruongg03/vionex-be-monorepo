@@ -1,0 +1,58 @@
+# Python cache and compiled files
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/*.pkl
+**/*.log
+**/.mypy_cache
+**/.pytest_cache
+
+# Version control
+**/.git
+**/.gitignore
+
+# Documentation
+**/README.md
+**/docs/
+
+# Testing
+**/test.py
+**/test/
+**/.pytest_cache
+**/.coverage
+**/htmlcov
+**/*.webm
+**/*.wav
+**/*.mp3
+sample.*
+/tests/
+../tests/
+
+# Large model directories (download at runtime instead)
+# models/
+!models/.gitkeep
+
+# Runtime generated files
+**/transcripts/*
+**/*.log
+**/*.tmp
+**/*.temp
+**/*.wav
+**/*.mp3
+**/*.mp4
+
+# Development environment
+**/.env
+.vscode/
+.idea/
+node_modules/
+
+# OS files
+**/.DS_Store
+**/Thumbs.db
+
+# Development Docker files
+Dockerfile.dev
+docker-compose.yml
+docker-compose.override.yml

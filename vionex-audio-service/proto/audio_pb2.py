@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0b\x61udio.proto\x12\x05\x61udio\"-\n\x0bPortRequest\x12\x0e\n\x06roomId\x18\x01 \x01(\t\x12\x0e\n\x06userId\x18\x02 \x01(\t\"9\n\tPortReply\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0c\n\x04port\x18\x02 \x01(\x05\x12\r\n\x05ready\x18\x03 \x01(\x08\"\x18\n\x05\x45mpty\x12\x0f\n\x07success\x18\x01 \x01(\x08\"\x96\x01\n\x19ProcessAudioBufferRequest\x12\x0e\n\x06userId\x18\x01 \x01(\t\x12\x0e\n\x06roomId\x18\x02 \x01(\t\x12\x11\n\ttimestamp\x18\x03 \x01(\x03\x12\x0e\n\x06\x62uffer\x18\x04 \x01(\x0c\x12\x10\n\x08\x64uration\x18\x05 \x01(\x01\x12\x12\n\nsampleRate\x18\x06 \x01(\x05\x12\x10\n\x08\x63hannels\x18\x07 \x01(\x05\"f\n\x1aProcessAudioBufferResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x12\n\ntranscript\x18\x02 \x01(\t\x12\x12\n\nconfidence\x18\x03 \x01(\x01\x12\x0f\n\x07message\x18\x04 \x01(\t\"o\n\x13ProcessAudioRequest\x12\x0e\n\x06roomId\x18\x01 \x01(\t\x12\x0e\n\x06userId\x18\x02 \x01(\t\x12\x11\n\ttimestamp\x18\x03 \x01(\x03\x12\x13\n\x0b\x61udioBuffer\x18\x04 \x01(\x0c\x12\x10\n\x08\x64uration\x18\x05 \x01(\x01\"8\n\x14ProcessAudioResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\"S\n\x15GetTranscriptsRequest\x12\x0e\n\x06roomId\x18\x01 \x01(\t\x12\x15\n\rfromTimestamp\x18\x02 \x01(\x03\x12\x13\n\x0btoTimestamp\x18\x03 \x01(\x03\"O\n\x16GetTranscriptsResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\x12\x13\n\x0btranscripts\x18\x03 \x01(\t\"\xc2\x01\n\x14ServiceStatsResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\x12\x16\n\x0etotalProcessed\x18\x03 \x01(\x05\x12\x12\n\nsuccessful\x18\x04 \x01(\x05\x12\x0e\n\x06\x66\x61iled\x18\x05 \x01(\x05\x12\x10\n\x08tooShort\x18\x06 \x01(\x05\x12\x10\n\x08noSpeech\x18\x07 \x01(\x05\x12\x13\n\x0bsuccessRate\x18\x08 \x01(\x01\x12\x13\n\x0bmodelLoaded\x18\t \x01(\x08\x32\xab\x03\n\x0c\x41udioService\x12\x34\n\x0c\x41llocatePort\x12\x12.audio.PortRequest\x1a\x10.audio.PortReply\x12/\n\x0bReleasePort\x12\x12.audio.PortRequest\x1a\x0c.audio.Empty\x12Y\n\x12ProcessAudioBuffer\x12 .audio.ProcessAudioBufferRequest\x1a!.audio.ProcessAudioBufferResponse\x12L\n\x11ProcessAudioChunk\x12\x1a.audio.ProcessAudioRequest\x1a\x1b.audio.ProcessAudioResponse\x12M\n\x0eGetTranscripts\x12\x1c.audio.GetTranscriptsRequest\x1a\x1d.audio.GetTranscriptsResponse\x12<\n\x0fGetServiceStats\x12\x0c.audio.Empty\x1a\x1b.audio.ServiceStatsResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0b\x61udio.proto\x12\x05\x61udio\"-\n\x0bPortRequest\x12\x0e\n\x06roomId\x18\x01 \x01(\t\x12\x0e\n\x06userId\x18\x02 \x01(\t\"Z\n\tPortReply\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0c\n\x04port\x18\x02 \x01(\x05\x12\x11\n\tsend_port\x18\x03 \x01(\x05\x12\r\n\x05ready\x18\x04 \x01(\x08\x12\x0c\n\x04ssrc\x18\x05 \x01(\r\"\x18\n\x05\x45mpty\x12\x0f\n\x07success\x18\x01 \x01(\x08\"\x96\x01\n\x19ProcessAudioBufferRequest\x12\x0e\n\x06userId\x18\x01 \x01(\t\x12\x0e\n\x06roomId\x18\x02 \x01(\t\x12\x11\n\ttimestamp\x18\x03 \x01(\x03\x12\x0e\n\x06\x62uffer\x18\x04 \x01(\x0c\x12\x10\n\x08\x64uration\x18\x05 \x01(\x01\x12\x12\n\nsampleRate\x18\x06 \x01(\x05\x12\x10\n\x08\x63hannels\x18\x07 \x01(\x05\"f\n\x1aProcessAudioBufferResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x12\n\ntranscript\x18\x02 \x01(\t\x12\x12\n\nconfidence\x18\x03 \x01(\x01\x12\x0f\n\x07message\x18\x04 \x01(\t\"o\n\x13ProcessAudioRequest\x12\x0e\n\x06roomId\x18\x01 \x01(\t\x12\x0e\n\x06userId\x18\x02 \x01(\t\x12\x11\n\ttimestamp\x18\x03 \x01(\x03\x12\x13\n\x0b\x61udioBuffer\x18\x04 \x01(\x0c\x12\x10\n\x08\x64uration\x18\x05 \x01(\x01\"8\n\x14ProcessAudioResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\"\xc2\x01\n\x14ServiceStatsResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\x12\x16\n\x0etotalProcessed\x18\x03 \x01(\x05\x12\x12\n\nsuccessful\x18\x04 \x01(\x05\x12\x0e\n\x06\x66\x61iled\x18\x05 \x01(\x05\x12\x10\n\x08tooShort\x18\x06 \x01(\x05\x12\x10\n\x08noSpeech\x18\x07 \x01(\x05\x12\x13\n\x0bsuccessRate\x18\x08 \x01(\x01\x12\x13\n\x0bmodelLoaded\x18\t \x01(\x08\"o\n\x1d\x43reateTranslationCabinRequest\x12\x0e\n\x06roomId\x18\x01 \x01(\t\x12\x0e\n\x06userId\x18\x02 \x01(\t\x12\x16\n\x0esourceLanguage\x18\x03 \x01(\t\x12\x16\n\x0etargetLanguage\x18\x04 \x01(\t\"T\n\x1e\x43reateTranslationCabinResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\x12\x10\n\x08streamId\x18\x03 \x01(\t2\x9f\x03\n\x0c\x41udioService\x12?\n\x17\x41llocateTranslationPort\x12\x12.audio.PortRequest\x1a\x10.audio.PortReply\x12g\n\x18\x43reateTranslationProduce\x12$.audio.CreateTranslationCabinRequest\x1a%.audio.CreateTranslationCabinResponse\x12Y\n\x12ProcessAudioBuffer\x12 .audio.ProcessAudioBufferRequest\x1a!.audio.ProcessAudioBufferResponse\x12L\n\x11ProcessAudioChunk\x12\x1a.audio.ProcessAudioRequest\x1a\x1b.audio.ProcessAudioResponse\x12<\n\x0fGetServiceStats\x12\x0c.audio.Empty\x1a\x1b.audio.ServiceStatsResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -34,23 +34,23 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_PORTREQUEST']._serialized_start=22
   _globals['_PORTREQUEST']._serialized_end=67
   _globals['_PORTREPLY']._serialized_start=69
-  _globals['_PORTREPLY']._serialized_end=126
-  _globals['_EMPTY']._serialized_start=128
-  _globals['_EMPTY']._serialized_end=152
-  _globals['_PROCESSAUDIOBUFFERREQUEST']._serialized_start=155
-  _globals['_PROCESSAUDIOBUFFERREQUEST']._serialized_end=305
-  _globals['_PROCESSAUDIOBUFFERRESPONSE']._serialized_start=307
-  _globals['_PROCESSAUDIOBUFFERRESPONSE']._serialized_end=409
-  _globals['_PROCESSAUDIOREQUEST']._serialized_start=411
-  _globals['_PROCESSAUDIOREQUEST']._serialized_end=522
-  _globals['_PROCESSAUDIORESPONSE']._serialized_start=524
-  _globals['_PROCESSAUDIORESPONSE']._serialized_end=580
-  _globals['_GETTRANSCRIPTSREQUEST']._serialized_start=582
-  _globals['_GETTRANSCRIPTSREQUEST']._serialized_end=665
-  _globals['_GETTRANSCRIPTSRESPONSE']._serialized_start=667
-  _globals['_GETTRANSCRIPTSRESPONSE']._serialized_end=746
-  _globals['_SERVICESTATSRESPONSE']._serialized_start=749
-  _globals['_SERVICESTATSRESPONSE']._serialized_end=943
-  _globals['_AUDIOSERVICE']._serialized_start=946
-  _globals['_AUDIOSERVICE']._serialized_end=1373
+  _globals['_PORTREPLY']._serialized_end=159
+  _globals['_EMPTY']._serialized_start=161
+  _globals['_EMPTY']._serialized_end=185
+  _globals['_PROCESSAUDIOBUFFERREQUEST']._serialized_start=188
+  _globals['_PROCESSAUDIOBUFFERREQUEST']._serialized_end=338
+  _globals['_PROCESSAUDIOBUFFERRESPONSE']._serialized_start=340
+  _globals['_PROCESSAUDIOBUFFERRESPONSE']._serialized_end=442
+  _globals['_PROCESSAUDIOREQUEST']._serialized_start=444
+  _globals['_PROCESSAUDIOREQUEST']._serialized_end=555
+  _globals['_PROCESSAUDIORESPONSE']._serialized_start=557
+  _globals['_PROCESSAUDIORESPONSE']._serialized_end=613
+  _globals['_SERVICESTATSRESPONSE']._serialized_start=616
+  _globals['_SERVICESTATSRESPONSE']._serialized_end=810
+  _globals['_CREATETRANSLATIONCABINREQUEST']._serialized_start=812
+  _globals['_CREATETRANSLATIONCABINREQUEST']._serialized_end=923
+  _globals['_CREATETRANSLATIONCABINRESPONSE']._serialized_start=925
+  _globals['_CREATETRANSLATIONCABINRESPONSE']._serialized_end=1009
+  _globals['_AUDIOSERVICE']._serialized_start=1012
+  _globals['_AUDIOSERVICE']._serialized_end=1427
 # @@protoc_insertion_point(module_scope)

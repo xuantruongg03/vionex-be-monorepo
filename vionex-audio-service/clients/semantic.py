@@ -1,52 +1,64 @@
 """
- * Copyright (c) 2025 xuantruongg003
- *
- * This software is licensed for non-commercial use only.
- * You may use, study, and modify this code for educational and research purposes.
- *
- * Commercial use of this code, in whole or in part, is strictly prohibited
- * without prior written permission from the author.
- *
- * Author Contact: lexuantruong098@gmail.com
- */
+Semantic Service Client
+
+Client for interacting with the Semantic Service for transcript storage
 """
 
 import grpc
+import logging
+from typing import Dict, Any
 from proto import semantic_pb2_grpc, semantic_pb2
 from core.config import SEMANTIC_SERVICE_HOST, SEMANTIC_SERVICE_PORT
 
-channel = grpc.insecure_channel(f'{SEMANTIC_SERVICE_HOST}:{SEMANTIC_SERVICE_PORT}')
-stub = semantic_pb2_grpc.SemanticServiceStub(channel)
+logger = logging.getLogger(__name__)
+
 
 class SemanticClient:
     """Client for interacting with the Semantic Service"""
     
     def __init__(self):
         """Initialize the Semantic Client"""
-        self.stub = stub
-        print("Semantic Client initialized")
-
-    async def save_transcript(self, room_id: str, speaker: str, text: str, language: str, timestamp: str):
-        """Save a transcript using the semantic service."""
         try:
-            # Create request with required fields
+            self.channel = grpc.insecure_channel(f'{SEMANTIC_SERVICE_HOST}:{SEMANTIC_SERVICE_PORT}')
+            self.stub = semantic_pb2_grpc.SemanticServiceStub(self.channel)
+            logger.info("Semantic Client initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize Semantic Client: {e}")
+            self.stub = None
+
+    async def save_transcript(self, data: Dict[str, Any]) -> bool:
+        """Save a transcript using the semantic service"""
+        try:
+            if not self.stub:
+                logger.error("Semantic client not initialized")
+                return False
+
             request = semantic_pb2.SaveTranscriptRequest(
-                room_id=room_id,
-                speaker=speaker,
-                text=text
+                room_id=data.get('room_id', ''),
+                speaker=data.get('user_id', ''),
+                text=data.get('text', ''),
+                timestamp=data.get('timestamp', ''),
+                language=data.get('language', 'unknown')
             )
             
-            # Set optional fields only if provided
-            if timestamp:
-                request.timestamp = timestamp
-            if language:
-                request.language = language
-            
-            # Run gRPC call in executor since it's synchronous
             response = self.stub.SaveTranscript(request)
-            return response.success
+            
+            if response.success:
+                logger.info(f"Transcript saved for room {data.get('room_id')}")
+                return True
+            else:
+                logger.error(f"Failed to save transcript: {response}")
+                return False
             
         except Exception as e:
-            print(f"Error calling semantic service: {e}")
+            logger.error(f"Error calling semantic service: {e}")
             return False
-    
+
+    def close(self):
+        """Close the gRPC channel"""
+        try:
+            if hasattr(self, 'channel'):
+                self.channel.close()
+                logger.info("Semantic client channel closed")
+        except Exception as e:
+            logger.error(f"Error closing semantic client: {e}")

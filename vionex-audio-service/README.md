@@ -156,7 +156,9 @@ python audio_service_clean.py
 
 2. **Run the Docker container**
    ```bash
-   docker run --rm -it -p 30005:30005 --env-file .env -v "${PWD}/transcripts:/app/transcripts" vionex-audio-service
+   docker run --rm -it  -p 30005:30005  -p 35000-35400:35000-35400/udp --env-file .env  -v "${PWD}/transcripts:/app/transcripts"  vionex-audio-service
+   docker run --rm -it -p 30005:30005 -p 35000-35400:35000-35400/udp --env-file .env -v "${PWD}/models/XTTS-v2:/root/.local/share/tts tts_models--multilingual--multi-dataset--xtts_v2" vionex-audio-service
+
    ```
 
 ## 🔧 Configuration

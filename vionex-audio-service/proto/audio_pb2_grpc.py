@@ -34,15 +34,15 @@ class AudioServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.AllocatePort = channel.unary_unary(
-                '/audio.AudioService/AllocatePort',
+        self.AllocateTranslationPort = channel.unary_unary(
+                '/audio.AudioService/AllocateTranslationPort',
                 request_serializer=audio__pb2.PortRequest.SerializeToString,
                 response_deserializer=audio__pb2.PortReply.FromString,
                 _registered_method=True)
-        self.ReleasePort = channel.unary_unary(
-                '/audio.AudioService/ReleasePort',
-                request_serializer=audio__pb2.PortRequest.SerializeToString,
-                response_deserializer=audio__pb2.Empty.FromString,
+        self.CreateTranslationProduce = channel.unary_unary(
+                '/audio.AudioService/CreateTranslationProduce',
+                request_serializer=audio__pb2.CreateTranslationCabinRequest.SerializeToString,
+                response_deserializer=audio__pb2.CreateTranslationCabinResponse.FromString,
                 _registered_method=True)
         self.ProcessAudioBuffer = channel.unary_unary(
                 '/audio.AudioService/ProcessAudioBuffer',
@@ -54,11 +54,6 @@ class AudioServiceStub(object):
                 request_serializer=audio__pb2.ProcessAudioRequest.SerializeToString,
                 response_deserializer=audio__pb2.ProcessAudioResponse.FromString,
                 _registered_method=True)
-        self.GetTranscripts = channel.unary_unary(
-                '/audio.AudioService/GetTranscripts',
-                request_serializer=audio__pb2.GetTranscriptsRequest.SerializeToString,
-                response_deserializer=audio__pb2.GetTranscriptsResponse.FromString,
-                _registered_method=True)
         self.GetServiceStats = channel.unary_unary(
                 '/audio.AudioService/GetServiceStats',
                 request_serializer=audio__pb2.Empty.SerializeToString,
@@ -69,35 +64,31 @@ class AudioServiceStub(object):
 class AudioServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
-    def AllocatePort(self, request, context):
-        """Legacy methods (for backward compatibility)
+    def AllocateTranslationPort(self, request, context):
+        """Translation Cabin methods for B1-B4 flow
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def ReleasePort(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+    def CreateTranslationProduce(self, request, context):
+        """Establish a plain RTP connection for audio streaming
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ProcessAudioBuffer(self, request, context):
-        """New audio buffer processing - SIMPLIFIED ARCHITECTURE
+        """Main audio buffer processing for transcription
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ProcessAudioChunk(self, request, context):
-        """Legacy audio chunk processing methods
+        """Legacy audio chunk processing
+        This is for compatibility with existing clients that send audio in chunks
         """
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def GetTranscripts(self, request, context):
-        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -112,15 +103,15 @@ class AudioServiceServicer(object):
 
 def add_AudioServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'AllocatePort': grpc.unary_unary_rpc_method_handler(
-                    servicer.AllocatePort,
+            'AllocateTranslationPort': grpc.unary_unary_rpc_method_handler(
+                    servicer.AllocateTranslationPort,
                     request_deserializer=audio__pb2.PortRequest.FromString,
                     response_serializer=audio__pb2.PortReply.SerializeToString,
             ),
-            'ReleasePort': grpc.unary_unary_rpc_method_handler(
-                    servicer.ReleasePort,
-                    request_deserializer=audio__pb2.PortRequest.FromString,
-                    response_serializer=audio__pb2.Empty.SerializeToString,
+            'CreateTranslationProduce': grpc.unary_unary_rpc_method_handler(
+                    servicer.CreateTranslationProduce,
+                    request_deserializer=audio__pb2.CreateTranslationCabinRequest.FromString,
+                    response_serializer=audio__pb2.CreateTranslationCabinResponse.SerializeToString,
             ),
             'ProcessAudioBuffer': grpc.unary_unary_rpc_method_handler(
                     servicer.ProcessAudioBuffer,
@@ -131,11 +122,6 @@ def add_AudioServiceServicer_to_server(servicer, server):
                     servicer.ProcessAudioChunk,
                     request_deserializer=audio__pb2.ProcessAudioRequest.FromString,
                     response_serializer=audio__pb2.ProcessAudioResponse.SerializeToString,
-            ),
-            'GetTranscripts': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetTranscripts,
-                    request_deserializer=audio__pb2.GetTranscriptsRequest.FromString,
-                    response_serializer=audio__pb2.GetTranscriptsResponse.SerializeToString,
             ),
             'GetServiceStats': grpc.unary_unary_rpc_method_handler(
                     servicer.GetServiceStats,
@@ -154,7 +140,7 @@ class AudioService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def AllocatePort(request,
+    def AllocateTranslationPort(request,
             target,
             options=(),
             channel_credentials=None,
@@ -167,7 +153,7 @@ class AudioService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/audio.AudioService/AllocatePort',
+            '/audio.AudioService/AllocateTranslationPort',
             audio__pb2.PortRequest.SerializeToString,
             audio__pb2.PortReply.FromString,
             options,
@@ -181,7 +167,7 @@ class AudioService(object):
             _registered_method=True)
 
     @staticmethod
-    def ReleasePort(request,
+    def CreateTranslationProduce(request,
             target,
             options=(),
             channel_credentials=None,
@@ -194,9 +180,9 @@ class AudioService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/audio.AudioService/ReleasePort',
-            audio__pb2.PortRequest.SerializeToString,
-            audio__pb2.Empty.FromString,
+            '/audio.AudioService/CreateTranslationProduce',
+            audio__pb2.CreateTranslationCabinRequest.SerializeToString,
+            audio__pb2.CreateTranslationCabinResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -251,33 +237,6 @@ class AudioService(object):
             '/audio.AudioService/ProcessAudioChunk',
             audio__pb2.ProcessAudioRequest.SerializeToString,
             audio__pb2.ProcessAudioResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def GetTranscripts(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/audio.AudioService/GetTranscripts',
-            audio__pb2.GetTranscriptsRequest.SerializeToString,
-            audio__pb2.GetTranscriptsResponse.FromString,
             options,
             channel_credentials,
             insecure,
