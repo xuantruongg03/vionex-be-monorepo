@@ -110,10 +110,6 @@ message ServiceStatsResponse {
   bool modelLoaded = 9;
 }
 
-/**
- * GetTranscriptsRequest message for fetching transcripts.
- * Contains room ID and timestamp range for filtering transcripts.
- */
 message CreateTranslationCabinRequest {
   string roomId = 1;
   string userId = 2;

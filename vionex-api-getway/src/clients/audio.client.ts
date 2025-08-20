@@ -110,27 +110,6 @@ export class AudioClientService implements OnModuleInit {
         }
     }
 
-    async getTranscripts(
-        roomId: string,
-        fromTimestamp?: number,
-        toTimestamp?: number,
-    ) {
-        try {
-            const data = { roomId, fromTimestamp, toTimestamp };
-            const response = await firstValueFrom(
-                this.audioService.getTranscripts(data),
-            );
-            return response;
-        } catch (error) {
-            console.error('[AudioClientService] getTranscripts error:', error);
-            return {
-                success: false,
-                message: 'Audio service unavailable',
-                transcripts: '[]',
-            };
-        }
-    }
-
     /**
      * Establish a plain RTP connection for audio streaming.
      * @param roomId The ID of the room.

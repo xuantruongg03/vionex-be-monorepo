@@ -2,361 +2,423 @@ import * as mediasoupTypes from 'mediasoup/node/lib/types';
 import { Observable } from 'rxjs';
 
 export interface Participant {
-  socket_id: string;
-  peer_id: string;
-  rtp_capabilities?: mediasoupTypes.RtpCapabilities;
-  transports: Map<string, mediasoupTypes.WebRtcTransport>;
-  producers: Map<string, mediasoupTypes.Producer>;
-  consumers: Map<string, mediasoupTypes.Consumer>;
-  is_creator: boolean;
-  time_arrive: Date;
+    socket_id: string;
+    peer_id: string;
+    rtp_capabilities?: mediasoupTypes.RtpCapabilities;
+    transports: Map<string, mediasoupTypes.WebRtcTransport>;
+    producers: Map<string, mediasoupTypes.Producer>;
+    consumers: Map<string, mediasoupTypes.Consumer>;
+    is_creator: boolean;
+    time_arrive: Date;
+    name?: string;
+    isAudioEnabled?: boolean;
+    isVideoEnabled?: boolean;
+    isHost?: boolean;
+    // Organization room context
+    organizationId?: string;
+    roomId?: string;
 }
 
 export interface ChatMessage {
-  id: string;
-  room_id: string;
-  sender: string;
-  sender_name: string;
-  text: string;
-  timestamp?: string;
-  fileUrl?: string;
-  fileName?: string;
-  fileType?: string;
-  fileSize?: number;
-  isImage?: boolean;
-}
-
-export interface Stream {
-  streamId: string;
-  publisherId: string;
-  producerId: string;
-  metadata: any;
-  rtpParameters: mediasoupTypes.RtpParameters;
-  roomId: string;
-}
-
-// Proto response Stream format (snake_case)
-export interface ProtoStream {
-  stream_id: string;
-  publisher_id: string;
-  producer_id: string;
-  metadata: string; // JSON string
-  rtp_parameters: string; // JSON string
-  room_id: string;
-}
-
-export interface ChatBotGrpcServiceInterface {
-  askChatBot(data: {
-    question: string;
-    room_id: string;
-  }): Observable<{ answer: string }>;
-}
-
-export interface RoomGrpcService {
-  
-  lockRoom(data: {
-    room_id: string;
-    password: string;
-    creator_id: string;
-  }): any;
-  
-  unlockRoom(data: {
-    room_id: string;
-    creator_id: string;
-  }): any;
-  
-  isRoomLocked(data: {
-    room_id: string;
-  }): any;
-  
-  verifyRoomPassword(data: {
-    room_id: string;
-    password: string;
-  }): any;
-  getParticipantByPeerId(data: {
-    peer_id: string;
-    room_id: string;
-  }): Observable<Participant>;
-
-  isUsernameAvailable(data: {
-    room_id: string;
-    username: string;
-  }): Observable<{ success: boolean; message?: string }>;
-
-  isRoomExists(data: { room_id: string }): Observable<{ is_exists: boolean }>;
-
-  createRoom(data: {
-    room_id: string;
-  }): Observable<{ room_id: string; message: string; success: boolean }>;
-
-  joinRoom(data: {
-    room_id: string;
-    user_id: string;
-  }): Observable<{ success: boolean; message: string }>;
-
-  isRoomLocked(data: { room_id: string }): Observable<{ locked: boolean }>;
-
-  verifyRoomPassword(data: {
-    room_id: string;
-    password: string;
-  }): Observable<{ valid: boolean }>;
-
-  getRoom(data: { room_id: string }): Observable<{
-    message: string;
-    data: {
-      room_id: string;
-      participants: any;
-      isLocked: boolean;
-    };
-  }>;
-
-  setParticipant(data: {
-    room_id: string;
-    participant: any;
-  }): Observable<{ success: boolean; message: string }>;
-
-  getParticipants(data: { room_id: string }): Observable<any[]>;
-
-  getParticipantByPeerId(data: {
-    room_id: string;
-    peer_id: string;
-  }): Observable<{ participant: Participant | null }>;
-
-  getParticipantBySocketId(data: {
-    socket_id: string;
-  }): Observable<{ participant: any }>;
-
-  removeParticipant(data: {
-    room_id: string;
-    peer_id: string;
-  }): Observable<{ success: boolean; message: string }>;
-
-  setTransport(data: {
-    room_id: string;
-    transport_data: string; // JSON string to match proto
-    peer_id: string;
-  }): Observable<{ success: boolean; message: string }>;
-
-  setProducer(data: {
-    room_id: string;
-    producer: any;
-    peer_id: string;
-  }): Observable<{ success: boolean; message: string }>;
-
-  getParticipantRoom(data: {
-    peer_id: string;
-  }): Observable<{ room_id: string | null }>;
-
-  removeProducerFromParticipant(data: {
-    room_id: string;
-    peer_id: string;
-    producer_id: string;
-  }): Observable<{ success: boolean; message: string }>;
-
-  updateParticipantRtpCapabilities(data: {
-    peer_id: string;
-    rtp_capabilities: string;
-  }): Observable<{ success: boolean; message?: string; error?: string }>;
-
-  leaveRoom(data: {
-    room_id: string;
-    participant_id: string;
-    socket_id: string;
-  }): Observable<{
-    status: string;
-    message: string;
-    is_room_empty: boolean;
-    new_creator_data: string;
-  }>;
-}
-
-export interface SignalingGrpcService {
-  createMediaRoom(data: {
-    room_id: string;
-  }): Observable<{ router_data: string }>;
-
-  getStreamsByRoom(data: {
-    room_id: string;
-  }): Observable<{ streams: ProtoStream[] }>;
-
-  connectTransport(data: {
-    transport_id: string;
-    dtls_parameters: string;
-    participant_data: string;
-  }): Observable<{ success: boolean; message: string; transport: string }>;
-  createProducer(data: {
-    transport_id: string;
-    kind: string;
-    rtp_parameters: string;
-    room_id: string;
-    participant_data: string;
-    metadata: string;
-  }): Observable<{
-    status: string;
-    message: string;
-    producer_id: string;
-    data: string;
-    success: boolean;
-  }>;
-
-  removeParticipantMedia(data: {
-    room_id: string;
-    participant_id: string;
-  }): Observable<{ removed_stream_ids: string[] }>;
-
-  createTransport(data: {
-    room_id: string;
-  }): Observable<{ transport_data: string }>;
-
-  getIceServers(data: {}): Observable<{ ice_servers: any[] }>;
-
-  saveStream(data: {
-    room_id: string;
-    stream: ProtoStream;
-  }): Observable<{ success: boolean; message: string }>;
-
-  getStream(data: { stream_id: string }): Observable<{
-    stream: ProtoStream;
-    success: boolean;
-    message: string;
-    data: { stream: ProtoStream };
-  }>;
-
-  removeStream(data: {
-    stream_id: string;
-    room_id: string;
-  }): Observable<{ success: boolean; message: string }>;
-
-  saveProducer(data: {
-    room_id: string;
-    stream_id: string;
-    producer_data: string;
-  }): Observable<{ success: boolean; message: string }>;
-
-  getStreamByProducer(data: { producer_id: string }): Observable<ProtoStream>;
-
-  saveProducerToStream(data: {
-    room_id: string;
-    producer_id: string;
-    stream: ProtoStream;
-  }): Observable<{ success: boolean; message: string }>;
-
-  removeProducer(data: {
-    room_id: string;
-    stream_id: string;
-  }): Observable<{ success: boolean; message: string }>;
-
-  createConsumer(data: {
-    room_id: string;
-    stream_id: string;
-    transport_id: string;
-    rtp_capabilities: string;
-    participant_data: string;
-  }): Observable<{
-    status: string;
-    message: string;
-    data: {
-      consumerId: string;
-      consumer: any;
-      kind: string;
-      producerId: string;
-      rtpParameters: any;
-    };
-  }>;
-
-  resumeConsumer(data: {
-    room_id: string;
-    consumer_id: string;
-    participant_id: string;
-  }): Observable<{ status: string; message: string }>;
-
-  unpublishStream(data: {
-    room_id: string;
-    stream_id: string;
-    participant_id: string;
-  }): Observable<{ status: string; message: string }>;
-
-  updateStream(data: {
-    stream_id: string;
-    participant_id: string;
-    metadata: string;
-    room_id: string;
-  }): Observable<{
-    status: string;
-    message: string;
-    data: { stream: ProtoStream };
-  }>;
-
-  leaveRoom(data: {
-    room_id: string;
-    participant_id: string; // Fixed: match with Signaling service
-    socket_id: string;
-  }): Observable<{
-    status: string;
-    message: string;
-    data: {
-      removedStreams: string[];
-      newCreator: { peerId: string; isCreator: boolean } | null;
-      isRoomEmpty: boolean;
-      participantId: string;
-    };
-  }>;
-
-  handlePresence(data: {
-    room_id: string;
-    peer_id: string;
-    metadata: string;
-  }): Observable<{
-    status: string;
-    message: string;
-    data: { stream: ProtoStream; isUpdated: boolean };
-  }>;
-
-  saveConsumer(data: {
-    room_id: string;
-    consumer_data: string; // JSON string to match proto
-    peer_id: string;
-  }): Observable<{ success: boolean; message: string }>;
-}
-
-export interface ChatGRPCService {
-  sendMessage(data: {
+    id: string;
     room_id: string;
     sender: string;
     sender_name: string;
     text: string;
+    timestamp?: string;
     fileUrl?: string;
     fileName?: string;
     fileType?: string;
     fileSize?: number;
     isImage?: boolean;
-  }): Observable<{ success: boolean; message: ChatMessage | null }>;
+}
 
-  getMessages(data: {
-    room_id: string;
-  }): Observable<{ success: boolean; messages: ChatMessage[] }>;
+export interface Stream {
+    streamId: string;
+    publisherId: string;
+    producerId: string;
+    metadata: any;
+    rtpParameters: mediasoupTypes.RtpParameters;
+    roomId: string;
+}
 
-  removeRoomMessages(data: {
+// Proto response Stream format (snake_case)
+export interface ProtoStream {
+    stream_id: string;
+    publisher_id: string;
+    producer_id: string;
+    metadata: string; // JSON string
+    rtp_parameters: string; // JSON string
     room_id: string;
-  }): Observable<{ success: boolean; message: string }>;
+}
+
+export interface ChatBotGrpcServiceInterface {
+    askChatBot(data: {
+        question: string;
+        room_id: string;
+    }): Observable<{ answer: string }>;
+}
+
+export interface RoomGrpcService {
+    lockRoom(data: {
+        room_id: string;
+        password: string;
+        creator_id: string;
+    }): any;
+
+    unlockRoom(data: { room_id: string; creator_id: string }): any;
+
+    isRoomLocked(data: { room_id: string }): any;
+
+    verifyRoomPassword(data: { room_id: string; password: string }): any;
+    getParticipantByPeerId(data: {
+        peer_id: string;
+        room_id: string;
+    }): Observable<Participant>;
+
+    isUsernameAvailable(data: {
+        room_id: string;
+        username: string;
+    }): Observable<{ success: boolean; message?: string }>;
+
+    isRoomExists(data: { room_id: string }): Observable<{ is_exists: boolean }>;
+
+    createRoom(data: {
+        room_id: string;
+    }): Observable<{ room_id: string; message: string; success: boolean }>;
+
+    joinRoom(data: {
+        room_id: string;
+        user_id: string;
+    }): Observable<{ success: boolean; message: string }>;
+
+    isRoomLocked(data: { room_id: string }): Observable<{ locked: boolean }>;
+
+    verifyRoomPassword(data: {
+        room_id: string;
+        password: string;
+    }): Observable<{ valid: boolean }>;
+
+    getRoom(data: { room_id: string }): Observable<{
+        message: string;
+        data: {
+            room_id: string;
+            participants: any;
+            isLocked: boolean;
+        };
+    }>;
+
+    setParticipant(data: {
+        room_id: string;
+        participant: any;
+    }): Observable<{ success: boolean; message: string }>;
+
+    getParticipants(data: { room_id: string }): Observable<any[]>;
+
+    getParticipantByPeerId(data: {
+        room_id: string;
+        peer_id: string;
+    }): Observable<{ participant: Participant | null }>;
+
+    getParticipantBySocketId(data: {
+        socket_id: string;
+    }): Observable<{ participant: any }>;
+
+    removeParticipant(data: {
+        room_id: string;
+        peer_id: string;
+    }): Observable<{ success: boolean; message: string }>;
+
+    setTransport(data: {
+        room_id: string;
+        transport_data: string; // JSON string to match proto
+        peer_id: string;
+    }): Observable<{ success: boolean; message: string }>;
+
+    setProducer(data: {
+        room_id: string;
+        producer: any;
+        peer_id: string;
+    }): Observable<{ success: boolean; message: string }>;
+
+    getParticipantRoom(data: {
+        peer_id: string;
+    }): Observable<{ room_id: string | null }>;
+
+    removeProducerFromParticipant(data: {
+        room_id: string;
+        peer_id: string;
+        producer_id: string;
+    }): Observable<{ success: boolean; message: string }>;
+
+    updateParticipantRtpCapabilities(data: {
+        peer_id: string;
+        rtp_capabilities: string;
+    }): Observable<{ success: boolean; message?: string; error?: string }>;
+
+    leaveRoom(data: {
+        room_id: string;
+        participant_id: string;
+        socket_id: string;
+    }): Observable<{
+        status: string;
+        message: string;
+        is_room_empty: boolean;
+        new_creator_data: string;
+    }>;
+
+    // Organization Room Methods
+    getOrgRooms(data: { user_id: string; org_id: string }): Observable<{
+        success: boolean;
+        message: string;
+        rooms?: any[];
+    }>;
+
+    verifyRoomAccess(data: {
+        user_id: string;
+        room_id: string;
+        org_id?: string;
+        user_role?: string;
+        password?: string;
+    }): Observable<{
+        can_join: boolean;
+        reason?: string;
+    }>;
+
+    createOrgRoom(data: {
+        user_id: string;
+        org_id: string;
+        name: string;
+        description: string;
+        is_public: boolean;
+        password: string;
+    }): Observable<{
+        success: boolean;
+        message: string;
+        room_id?: string;
+    }>;
+}
+
+// export interface SignalingGrpcService {
+//     createMediaRoom(data: {
+//         room_id: string;
+//     }): Observable<{ router_data: string }>;
+
+//     getStreamsByRoom(data: {
+//         room_id: string;
+//     }): Observable<{ streams: ProtoStream[] }>;
+
+//     connectTransport(data: {
+//         transport_id: string;
+//         dtls_parameters: string;
+//         participant_data: string;
+//     }): Observable<{ success: boolean; message: string; transport: string }>;
+//     createProducer(data: {
+//         transport_id: string;
+//         kind: string;
+//         rtp_parameters: string;
+//         room_id: string;
+//         participant_data: string;
+//         metadata: string;
+//     }): Observable<{
+//         status: string;
+//         message: string;
+//         producer_id: string;
+//         data: string;
+//         success: boolean;
+//     }>;
+
+//     removeParticipantMedia(data: {
+//         room_id: string;
+//         participant_id: string;
+//     }): Observable<{ removed_stream_ids: string[] }>;
+
+//     createTransport(data: {
+//         room_id: string;
+//     }): Observable<{ transport_data: string }>;
+
+//     getIceServers(data: {}): Observable<{ ice_servers: any[] }>;
+
+//     saveStream(data: {
+//         room_id: string;
+//         stream: ProtoStream;
+//     }): Observable<{ success: boolean; message: string }>;
+
+//     getStream(data: { stream_id: string }): Observable<{
+//         stream: ProtoStream;
+//         success: boolean;
+//         message: string;
+//         data: { stream: ProtoStream };
+//     }>;
+
+//     removeStream(data: {
+//         stream_id: string;
+//         room_id: string;
+//     }): Observable<{ success: boolean; message: string }>;
+
+//     saveProducer(data: {
+//         room_id: string;
+//         stream_id: string;
+//         producer_data: string;
+//     }): Observable<{ success: boolean; message: string }>;
+
+//     getStreamByProducer(data: { producer_id: string }): Observable<ProtoStream>;
+
+//     saveProducerToStream(data: {
+//         room_id: string;
+//         producer_id: string;
+//         stream: ProtoStream;
+//     }): Observable<{ success: boolean; message: string }>;
+
+//     removeProducer(data: {
+//         room_id: string;
+//         stream_id: string;
+//     }): Observable<{ success: boolean; message: string }>;
+
+//     createConsumer(data: {
+//         room_id: string;
+//         stream_id: string;
+//         transport_id: string;
+//         rtp_capabilities: string;
+//         participant_data: string;
+//     }): Observable<{
+//         status: string;
+//         message: string;
+//         data: {
+//             consumerId: string;
+//             consumer: any;
+//             kind: string;
+//             producerId: string;
+//             rtpParameters: any;
+//         };
+//     }>;
+
+//     resumeConsumer(data: {
+//         room_id: string;
+//         consumer_id: string;
+//         participant_id: string;
+//     }): Observable<{ status: string; message: string }>;
+
+//     unpublishStream(data: {
+//         room_id: string;
+//         stream_id: string;
+//         participant_id: string;
+//     }): Observable<{ status: string; message: string }>;
+
+//     updateStream(data: {
+//         stream_id: string;
+//         participant_id: string;
+//         metadata: string;
+//         room_id: string;
+//     }): Observable<{
+//         status: string;
+//         message: string;
+//         data: { stream: ProtoStream };
+//     }>;
+
+//     leaveRoom(data: {
+//         room_id: string;
+//         participant_id: string; // Fixed: match with Signaling service
+//         socket_id: string;
+//     }): Observable<{
+//         status: string;
+//         message: string;
+//         data: {
+//             removedStreams: string[];
+//             newCreator: { peerId: string; isCreator: boolean } | null;
+//             isRoomEmpty: boolean;
+//             participantId: string;
+//         };
+//     }>;
+
+//     handlePresence(data: {
+//         room_id: string;
+//         peer_id: string;
+//         metadata: string;
+//     }): Observable<{
+//         status: string;
+//         message: string;
+//         data: { stream: ProtoStream; isUpdated: boolean };
+//     }>;
+
+//     saveConsumer(data: {
+//         room_id: string;
+//         consumer_data: string; // JSON string to match proto
+//         peer_id: string;
+//     }): Observable<{ success: boolean; message: string }>;
+
+//     // Organization room methods
+//     createOrgRoom(data: {
+//         room_id: string;
+//         type: string;
+//         host_id: string;
+//         org_id?: string;
+//         access_level?: string;
+//         invited_users?: string[];
+//         password?: string;
+//     }): Observable<{
+//         success: boolean;
+//         message: string;
+//         room_id?: string;
+//         session_token?: string;
+//     }>;
+
+//     getOrgRooms(data: { user_id: string }): Observable<{
+//         success: boolean;
+//         rooms: any[];
+//     }>;
+
+// verifyOrgRoomSession(data: {
+//     user_id: string;
+//     session_token: string;
+// }): Observable<{
+//     success: boolean;
+//     message?: string;
+//     real_room_id?: string;
+//     organization_id?: string;
+//     is_creator?: boolean;
+//     permissions?: string[];
+// }>;
+// }
+
+export interface ChatGRPCService {
+    sendMessage(data: {
+        room_id: string;
+        sender: string;
+        sender_name: string;
+        text: string;
+        fileUrl?: string;
+        fileName?: string;
+        fileType?: string;
+        fileSize?: number;
+        isImage?: boolean;
+    }): Observable<{ success: boolean; message: ChatMessage | null }>;
+
+    getMessages(data: {
+        room_id: string;
+    }): Observable<{ success: boolean; messages: ChatMessage[] }>;
+
+    removeRoomMessages(data: {
+        room_id: string;
+    }): Observable<{ success: boolean; message: string }>;
 }
 
 // Behavior monitoring interfaces
 export interface UserEvent {
-  type: string;
-  value: boolean | string | number;
-  time: Date;
+    type: string;
+    value: boolean | string | number;
+    time: Date;
 }
 
 export interface UserBehaviorLog {
-  userId: string;
-  roomId: string;
-  events: UserEvent[];
-  lastUpdated: Date;
+    userId: string;
+    roomId: string;
+    events: UserEvent[];
+    lastUpdated: Date;
 }
 
 export interface BehaviorLogRequest {
-  userId: string;
-  roomId: string;
-  events: UserEvent[];
+    userId: string;
+    roomId: string;
+    events: UserEvent[];
 }

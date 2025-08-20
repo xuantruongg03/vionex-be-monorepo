@@ -1,0 +1,184 @@
+syntax = "proto3";
+
+package auth;
+
+service AuthService {
+    // Authentication methods
+    rpc Login(LoginRequest) returns (LoginResponse);
+    rpc Register(RegisterRequest) returns (RegisterResponse);
+    rpc Logout(LogoutRequest) returns (LogoutResponse);
+    rpc GetInfo(GetInfoRequest) returns (GetInfoResponse);
+    rpc VerifyToken(VerifyTokenRequest) returns (VerifyTokenResponse);
+    
+    // Organization methods
+    rpc CreateOrganization(CreateOrganizationRequest) returns (CreateOrganizationResponse);
+    rpc GetOrganizationInfo(GetOrganizationInfoRequest) returns (GetOrganizationInfoResponse);
+    rpc UpdateOrganization(UpdateOrganizationRequest) returns (UpdateOrganizationResponse);
+    rpc InviteMember(InviteMemberRequest) returns (InviteMemberResponse);
+    rpc GetMembers(GetMembersRequest) returns (GetMembersResponse);
+    rpc RemoveMember(RemoveMemberRequest) returns (RemoveMemberResponse);
+    rpc VerifyOrgEmail(VerifyOrgEmailRequest) returns (VerifyOrgEmailResponse);
+}
+
+message GetInfoRequest {
+    string access_token = 1;
+}
+
+message GetInfoResponse {
+    bool success = 1;
+    string message = 2;
+    User user = 3;
+}
+
+message User {
+    string id = 1;
+    string email = 2;
+    string name = 3;
+    string avatar = 4;
+    string orgId = 5;
+    string role = 6;
+    string organizationId = 7; // For compatibility
+}
+
+message LoginRequest {
+    string email = 1;
+    string password = 2;
+}
+
+message LoginResponse {
+    bool success = 1;
+    string message = 2;
+    string access_token = 3;
+    string refresh_token = 4;
+}
+
+message RegisterRequest {
+    string email = 1;
+    string password = 2;
+    string name = 3;
+}
+
+message RegisterResponse {
+    bool success = 1;
+    string message = 2;
+    string access_token = 3;
+    string refresh_token = 4;
+}
+
+message LogoutRequest {
+    string access_token = 1;
+}
+
+message LogoutResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message VerifyTokenRequest {
+    string token = 1;
+}
+
+message VerifyTokenResponse {
+    bool success = 1;
+    string message = 2;
+    User user = 3;
+}
+
+// Organization messages
+message Organization {
+    string id = 1;
+    string name = 2;
+    string domain = 3;
+    string description = 4;
+    string ownerId = 5;
+    string createdAt = 6;
+    string updatedAt = 7;
+}
+
+message Member {
+    string id = 1;
+    string email = 2;
+    string name = 3;
+    string role = 4;
+    optional string password = 5;
+    string joinedAt = 6;
+}
+
+message CreateOrganizationRequest {
+    string ownerId = 1;
+    string name = 2;
+    string domain = 3;
+    string description = 4;
+}
+
+message CreateOrganizationResponse {
+    bool success = 1;
+    string message = 2;
+    Organization organization = 3;
+}
+
+message GetOrganizationInfoRequest {
+    string userId = 1;
+}
+
+message GetOrganizationInfoResponse {
+    bool success = 1;
+    string message = 2;
+    Organization organization = 3;
+}
+
+message UpdateOrganizationRequest {
+    string userId = 1;
+    string name = 2;
+    string description = 3;
+}
+
+message UpdateOrganizationResponse {
+    bool success = 1;
+    string message = 2;
+    Organization organization = 3;
+}
+
+message InviteMemberRequest {
+    string userId = 1;
+    string email = 2;
+    string name = 3;
+}
+
+message InviteMemberResponse {
+    bool success = 1;
+    string message = 2;
+    Member member = 3;
+}
+
+message GetMembersRequest {
+    string userId = 1;
+}
+
+message GetMembersResponse {
+    bool success = 1;
+    string message = 2;
+    repeated Member members = 3;
+}
+
+message RemoveMemberRequest {
+    string userId = 1;
+    string memberId = 2;
+}
+
+message RemoveMemberResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message VerifyOrgEmailRequest {
+    string email = 1;
+}
+
+message VerifyOrgEmailResponse {
+    bool success = 1;
+    string message = 2;
+    bool isOrgEmail = 3;
+    string orgDomain = 4;
+    string orgId = 5;
+}

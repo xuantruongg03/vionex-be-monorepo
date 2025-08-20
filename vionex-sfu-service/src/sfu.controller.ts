@@ -300,16 +300,12 @@ export class SfuController {
     }): Promise<{ status: string; consumer_data: string }> {
         try {
             if (!data.stream_id || data.stream_id === 'undefined') {
-                console.error(`[SFU] Invalid streamId: ${data.stream_id}`);
                 throw new RpcException(
                     `Invalid streamId: ${data.stream_id}. StreamId cannot be undefined or null.`,
                 );
             }
 
             if (!data.transport_id) {
-                console.error(
-                    `[SFU] Invalid transportId: ${data.transport_id}`,
-                );
                 throw new RpcException(
                     `Invalid transportId: ${data.transport_id}`,
                 );
