@@ -41,12 +41,6 @@ export default interface AudioGRPCService {
         duration: number;
     }): Observable<{ success: boolean; message: string }>;
 
-    getTranscripts(data: {
-        roomId: string;
-        fromTimestamp?: number;
-        toTimestamp?: number;
-    }): Observable<{ success: boolean; message: string; transcripts: string }>;
-
     // Translation Cabin methods
     createTranslationProduce(data: {
         roomId: string;
@@ -59,14 +53,6 @@ export default interface AudioGRPCService {
         message?: string;
     }>;
 
-    // startTranslationCabin(data: {
-    //   cabinId: string;
-    // }): Observable<{ success: boolean; message?: string }>;
-
-    // stopTranslationCabin(data: {
-    //   cabinId: string;
-    // }): Observable<{ success: boolean; message?: string }>;
-
     destroyTranslationCabin(data: {
         room_id: string;
         target_user_id: string;
@@ -74,18 +60,4 @@ export default interface AudioGRPCService {
         target_language: string;
     }): Observable<{ success: boolean; message?: string }>;
 
-    // listTranslationCabins(data: { roomId: string }): Observable<{
-    //   success: boolean;
-    //   cabins?: Array<{
-    //     cabinId: string;
-    //     roomId: string;
-    //     userId: string;
-    //     sourceLanguage: string;
-    //     targetLanguage: string;
-    //     status: string;
-    //     rtpPort: number;
-    //     createdAt: string;
-    //   }>;
-    //   message?: string;
-    // }>;
 }

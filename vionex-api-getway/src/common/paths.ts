@@ -7,4 +7,5 @@ export const protoPaths = {
   interaction: resolve(__dirname, '../../../protos/interaction.proto'),
   audio: resolve(__dirname, '../../../protos/audio.proto'),
   chatbot: resolve(__dirname, '../../../protos/chatbot.proto'),
+  auth: resolve(__dirname, '../../../protos/auth.proto'),
 };

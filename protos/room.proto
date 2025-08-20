@@ -24,7 +24,90 @@ service RoomService {
   rpc LockRoom(LockRoomRequest) returns (LockRoomResponse);
   rpc UnlockRoom(UnlockRoomRequest) returns (UnlockRoomResponse);
 
+  // Organization Room methods
+  rpc CreateOrgRoom(CreateOrgRoomRequest) returns (CreateOrgRoomResponse);
+  rpc VerifyRoomAccess(VerifyRoomAccessRequest) returns (VerifyRoomAccessResponse);
+  rpc GetOrgRooms(GetOrgRoomsRequest) returns (GetOrgRoomsResponse);
+  rpc AddParticipant(AddParticipantRequest) returns (AddParticipantResponse);
 }
+
+// Organization Room Messages
+message CreateOrgRoomRequest {
+  string user_id = 1;
+  string org_id = 2;
+  string name = 3;
+  string description = 4;
+  bool is_public = 5;
+  string password = 6;
+}
+
+message CreateOrgRoomResponse {
+  bool success = 1;
+  string message = 2;
+  string room_id = 3; 
+}
+
+message VerifyRoomAccessRequest {
+  string user_id = 1;
+  string room_id = 2;
+  string org_id = 3;
+  string user_role = 4;
+}
+
+message VerifyRoomAccessResponse {
+  bool can_join = 1;
+  string reason = 2;
+}
+
+message GetOrgRoomsRequest {
+  string user_id = 1;
+  string org_id = 2;
+}
+
+message GetOrgRoomsResponse {
+  bool success = 1;
+  string message = 2;
+  repeated OrgRoom rooms = 3;
+}
+
+message AddParticipantRequest {
+  string room_id = 1;
+  ParticipantData participant = 2;
+}
+
+message AddParticipantResponse {
+  bool success = 1;
+  string message = 2;
+  ParticipantData participant = 3;
+}
+
+// Organization Session Verification Messages - REMOVED
+// Users should use VerifyRoomAccess instead
+
+message ParticipantData {
+  string peer_id = 1;
+  string socket_id = 2;
+  bool isAudioEnabled = 3;
+  bool isVideoEnabled = 4;
+  bool isHost = 5;
+}
+
+message OrgRoom {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  bool is_public = 4;
+  string organization_id = 5;
+  string created_at = 6;
+  string updated_at = 7;
+  repeated string invited_users = 8;
+  string host_id = 9;
+  repeated Participant participants = 10;
+  string room_id = 11; // Add room_id field
+  string type = 12; // Add type field
+}
+
+// Existing messages
 message LockRoomRequest {
   string room_id = 1;
   string password = 2;

@@ -711,7 +711,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         }
 
         await transport.connect({ dtlsParameters });
-        console.log(`[SFU] Transport ${transportId} connected`);
     }
 
     // Stream retrieval method required by controller
@@ -791,10 +790,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 streamId = `${data.participant.peerId || data.participant.peer_id}_${streamType}_${timestamp}_${newRandomSuffix}_${counter}`;
             }
 
-            console.log(
-                `[SFU] Creating producer with streamId: ${streamId} for participant: ${data.participant.peerId || data.participant.peer_id}`,
-            );
-
             // Store producer in media room
             mediaRoom.producers.set(streamId, producer);
 
@@ -808,23 +803,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 data.roomId,
             );
 
-            console.log(
-                `[SFU] Stream created and stored. Total streams now: ${this.streams.size}`,
-            );
-            console.log(
-                `[SFU] Available streams:`,
-                Array.from(this.streams.keys()),
-            );
-
             // Log priority information (từ mã cũ)
             const totalStreams = this.getStreamsByRoom(data.roomId).length;
             const isInPriority = this.isStreamInPriority(data.roomId, streamId);
-
-            // if (totalStreams > 10) {
-            //   console.warn(
-            //     `[SFU] Room ${data.roomId} has ${totalStreams} streams. Only first 10 will be consumed by new participants.`,
-            //   );
-            // }
 
             // Notify about stream changes
             this.notifyUserStreamChanges(
@@ -996,7 +977,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     }
                 } catch (error) {
                     console.error(
-                        `📌 [SFU] Failed to create consumer for pinned stream ${stream.streamId}:`,
+                        `[SFU] Failed to create consumer for pinned stream ${stream.streamId}:`,
                         error,
                     );
                 }
@@ -1258,7 +1239,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     clearRoomSpeaking(roomId: string): void {
         if (this.activeSpeakers.has(roomId)) {
             this.activeSpeakers.delete(roomId);
-            console.log(`[SFU] Cleared speaking data for room ${roomId}`);
         }
     }
 
@@ -1266,14 +1246,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         const roomSpeakers = this.activeSpeakers.get(roomId);
         if (roomSpeakers && roomSpeakers.has(peerId)) {
             roomSpeakers.delete(peerId);
-            console.log(
-                `[SFU] Removed speaking data for ${peerId} in room ${roomId}`,
-            );
 
             // Clean up room if no speakers remain
             if (roomSpeakers.size === 0) {
                 this.activeSpeakers.delete(roomId);
-                console.log(`[SFU] Removed empty speaker room ${roomId}`);
             }
         }
     }
@@ -1321,12 +1297,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             //   roomsCleaned++;
             // }
         });
-
-        if (totalCleaned > 0 || roomsCleaned > 0) {
-            console.log(
-                `[SFU] Cleanup: Removed ${totalCleaned} inactive speakers from ${roomsCleaned} rooms`,
-            );
-        }
     }
 
     // Translation Cabin Support Methods (Updated for bidirectional)
