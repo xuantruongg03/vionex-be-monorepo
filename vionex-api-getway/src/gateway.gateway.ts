@@ -29,12 +29,12 @@ import { Participant } from './interfaces/interface';
 import { HttpBroadcastService } from './services/http-broadcast.service';
 import { WebSocketEventService } from './services/websocket-event.service';
 
-@WebSocketGateway({
-    transports: ['websocket'],
-    cors: { origin: '*', credentials: true },
-    path: '/socket.io',
-    serveClient: false,
-})
+// @WebSocketGateway({
+//     transports: ['websocket'],
+//     cors: { origin: '*', credentials: true },
+//     path: '/socket.io',
+//     serveClient: false,
+// })
 export class GatewayGateway
     implements OnGatewayConnection, OnGatewayDisconnect
 {
