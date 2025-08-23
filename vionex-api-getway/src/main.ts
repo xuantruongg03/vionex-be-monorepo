@@ -13,6 +13,13 @@ class SecureIoAdapter extends IoAdapter {
             methods: ['GET', 'POST'],
             credentials: true,
         };
+        // Enable transports for HTTPS proxy environments
+        options.transports = ['websocket', 'polling'];
+        // Allow upgrades for better compatibility
+        options.allowUpgrades = true;
+        // Set ping timeout and interval for stability
+        options.pingTimeout = 60000;
+        options.pingInterval = 25000;
 
         return super.createIOServer(port, options);
     }
