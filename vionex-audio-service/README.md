@@ -16,23 +16,23 @@ A high-performance microservice for real-time audio processing and speech recogn
 
 ## ✨ Key Features
 
-- **Real-time Speech Recognition**: Convert audio streams to text using OpenAI Faster-Whisper
-- **Multi-language Support**: Automatic language detection and transcription
-- **Audio Buffer Processing**: Efficient PCM audio buffer handling
-- **Transcript Management**: Automatic transcript saving and user session management
-- **Quality Analysis**: Audio quality assessment and hallucination detection
-- **Streaming Support**: Real-time audio streaming via gRPC
-- **Performance Optimized**: Threaded processing for low-latency transcription
+-   **Real-time Speech Recognition**: Convert audio streams to text using OpenAI Faster-Whisper
+-   **Multi-language Support**: Automatic language detection and transcription
+-   **Audio Buffer Processing**: Efficient PCM audio buffer handling
+-   **Transcript Management**: Automatic transcript saving and user session management
+-   **Quality Analysis**: Audio quality assessment and hallucination detection
+-   **Streaming Support**: Real-time audio streaming via gRPC
+-   **Performance Optimized**: Threaded processing for low-latency transcription
 
 ## 🛠️ Technologies
 
-- **Language**: Python 3.8+
-- **AI Engine**: OpenAI Faster-Whisper
-- **Communication**: gRPC (grpcio, grpcio-tools)
-- **Audio Processing**: NumPy, PyDub
-- **Configuration**: python-dotenv
-- **Containerization**: Docker
-- **Audio Format**: PCM 16-bit, WAV support
+-   **Language**: Python 3.8+
+-   **AI Engine**: OpenAI Faster-Whisper
+-   **Communication**: gRPC (grpcio, grpcio-tools)
+-   **Audio Processing**: NumPy, PyDub
+-   **Configuration**: python-dotenv
+-   **Containerization**: Docker
+-   **Audio Format**: PCM 16-bit, WAV support
 
 ## 📁 Project Structure
 
@@ -106,38 +106,42 @@ LOG_LEVEL=INFO
 
 ### Prerequisites
 
-- Python 3.8 or higher
-- Docker (optional)
-- FFmpeg (for audio processing)
+-   Python 3.8 or higher
+-   Docker (optional)
+-   FFmpeg (for audio processing)
 
 ### Installation
 
 1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd vionex-audio-service
-   ```
+
+    ```bash
+    git clone <repository-url>
+    cd vionex-audio-service
+    ```
 
 2. **Install Python dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+
+    ```bash
+    pip install -r requirements.txt
+    ```
 
 3. **Generate proto files** (if needed)
-   ```bash
-   python -m grpc_tools.protoc -I../protos ../protos/audio.proto --python_out=./proto --grpc_python_out=./proto
-   ```
+
+    ```bash
+    python -m grpc_tools.protoc -I../protos ../protos/audio.proto --python_out=./proto --grpc_python_out=./proto
+    ```
 
 4. **Set up environment variables**
-   ```bash
-   # Create .env file with your configuration
-   cp .env.example .env
-   ```
+
+    ```bash
+    # Create .env file with your configuration
+    cp .env.example .env
+    ```
 
 5. **Create transcript directory**
-   ```bash
-   mkdir transcripts
-   ```
+    ```bash
+    mkdir transcripts
+    ```
 
 ### Running the Service
 
@@ -150,41 +154,64 @@ python audio_service_clean.py
 #### Using Docker
 
 1. **Build the Docker image**
-   ```bash
-   docker build -t vionex-audio-service .
-   ```
+
+    ```bash
+    docker build -t vionex-audio-service .
+    ```
 
 2. **Run the Docker container**
-   ```bash
-   docker run --rm -it  -p 30005:30005  -p 35000-35400:35000-35400/udp --env-file .env  -v "${PWD}/transcripts:/app/transcripts"  vionex-audio-service
-   docker run --rm -it -p 30005:30005 -p 35000-35400:35000-35400/udp --env-file .env -v "${PWD}/models/XTTS-v2:/root/.local/share/tts tts_models--multilingual--multi-dataset--xtts_v2" vionex-audio-service
 
-   ```
+    ```bash
+    # CPU Version
+    docker run --rm -it \
+      -p 30005:30005 -p 35000-35400:35000-35400/udp \
+      --env-file .env \
+      -v "${PWD}/transcripts:/app/transcripts" \
+      vionex-audio-service
+
+    # GPU Version
+    docker run --gpus all --rm -it \
+      -p 30005:30005 -p 35000-35400:35000-35400/udp \
+      --env-file .env \
+      -v "${PWD}/transcripts:/app/transcripts" \
+      -v "${PWD}/models/XTTS-v2:/root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2" \
+      lexuantruong098/vionex-audio-service-gpu:latest
+
+    # Production (Background)
+    docker run --gpus all -d --name vionex-audio-gpu \
+      -p 30005:30005 -p 35000-35400:35000-35400/udp \
+      --env-file .env \
+      --restart unless-stopped \
+      -v "/opt/vionex/transcripts:/app/transcripts" \
+      lexuantruong098/vionex-audio-service-gpu:latest
+    ```
 
 ## 🔧 Configuration
 
 ### Audio Processing Settings
 
-- **Sample Rate**: 16000 Hz (Whisper requirement)
-- **Channels**: Mono (converted automatically)
-- **Format**: 16-bit PCM audio buffers
-- **Min Duration**: 0.5 seconds minimum audio length
+-   **Sample Rate**: 16000 Hz (Whisper requirement)
+-   **Channels**: Mono (converted automatically)
+-   **Format**: 16-bit PCM audio buffers
+-   **Min Duration**: 0.5 seconds minimum audio length
 
 ### Whisper Model Options
 
-- **Model Sizes**: tiny, base, small, medium, large
-- **Device**: CPU or GPU processing
-- **Language**: Auto-detect or specify language code
-- **Temperature**: 0.0 for deterministic output
+-   **Model Sizes**: tiny, base, small, medium, large
+-   **Device**: CPU or GPU processing
+-   **Language**: Auto-detect or specify language code
+-   **Temperature**: 0.0 for deterministic output
 
 ## 📡 gRPC API
 
 ### Service Methods
 
 #### `ProcessAudioBuffer`
+
 Process audio buffer and return transcription result.
 
 **Request:**
+
 ```protobuf
 message AudioBufferRequest {
   bytes audio_buffer = 1;
@@ -197,6 +224,7 @@ message AudioBufferRequest {
 ```
 
 **Response:**
+
 ```protobuf
 message AudioBufferResponse {
   bool success = 1;
@@ -208,40 +236,44 @@ message AudioBufferResponse {
 ```
 
 #### `StartAudioStream`
+
 Start real-time audio streaming session.
 
 #### `StopAudioStream`
+
 Stop audio streaming session.
 
 #### `GetTranscript`
+
 Retrieve stored transcript for a room.
 
 #### `HealthCheck`
+
 Service health status check.
 
 ## 📊 Performance Metrics
 
-- **Latency**: < 2 seconds for 5-second audio clips
-- **Accuracy**: 90%+ for clear speech
-- **Throughput**: Multiple concurrent sessions
-- **Memory**: ~1-2GB RAM usage (depends on model)
+-   **Latency**: < 2 seconds for 5-second audio clips
+-   **Accuracy**: 90%+ for clear speech
+-   **Throughput**: Multiple concurrent sessions
+-   **Memory**: ~1-2GB RAM usage (depends on model)
 
 ## 🔍 Monitoring & Debugging
 
 ### Logging Levels
 
-- **INFO**: Processing status, transcript results, audio metrics
-- **DEBUG**: Detailed processing steps, audio analysis
-- **WARNING**: Audio quality issues, potential problems
-- **ERROR**: Processing failures, system errors
+-   **INFO**: Processing status, transcript results, audio metrics
+-   **DEBUG**: Detailed processing steps, audio analysis
+-   **WARNING**: Audio quality issues, potential problems
+-   **ERROR**: Processing failures, system errors
 
 ### Key Metrics Logged
 
-- Audio buffer size and duration
-- Audio RMS levels and quality
-- Processing time per request
-- Transcript length and confidence
-- Success/failure rates
+-   Audio buffer size and duration
+-   Audio RMS levels and quality
+-   Processing time per request
+-   Transcript length and confidence
+-   Success/failure rates
 
 ## 📄 License
 

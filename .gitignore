@@ -25,3 +25,6 @@
 
 /run
 **/transcripts
+
+**/Dockerfile.gpu.txt
+**/Dockerfile.cpu.txt

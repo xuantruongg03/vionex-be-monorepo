@@ -28,20 +28,37 @@ RUN pip install --user --no-cache-dir \
     "numpy==1.26.4" \
     "scipy==1.11.4" \
     "scikit-learn==1.3.2" \
-    && pip install --user --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
-    torch==2.6.0+cpu torchaudio==2.6.0+cpu \
+    && pip install --user --no-cache-dir \
+    torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu118 \
     && pip install --user --no-cache-dir -r requirements.txt
 
 # Stage 2: Runtime
 FROM python:3.11-slim
 
-# Install only runtime dependencies
+# Install runtime dependencies for CUDA support
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libopus0 \
+    wget \
+    gnupg2 \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /tmp/* \
     && rm -rf /var/tmp/*
+
+# Install CUDA Toolkit keyring and repository
+RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb \
+    && dpkg -i cuda-keyring_1.0-1_all.deb \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+    cuda-cudart-11-8 \
+    cuda-compat-11-8 \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm cuda-keyring_1.0-1_all.deb
+
+# Set CUDA environment variables
+ENV CUDA_HOME=/usr/local/cuda-11.8
+ENV LD_LIBRARY_PATH=/usr/local/cuda-11.8/lib64:/usr/lib/x86_64-linux-gnu
+ENV PATH=/usr/local/cuda-11.8/bin:$PATH
 
 # Copy Python packages from builder stage
 COPY --from=builder /root/.local /root/.local
