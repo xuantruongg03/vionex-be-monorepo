@@ -104,23 +104,17 @@ export class SfuController {
     }): Promise<{ message: string; success: boolean; transport?: string }> {
         try {
             const { transport_id, dtls_parameters } = data;
-            console.log(`[SFU] Attempting to connect transport ${transport_id}`);
-            
             const dtlsParameters = JSON.parse(dtls_parameters);
-            console.log(`[SFU] DTLS parameters:`, dtlsParameters);
 
             // Get transport from SFU service registry
             const transport = this.sfuService.getTransport(transport_id);
             if (!transport) {
-                console.error(`[SFU] Transport ${transport_id} not found`);
+                console.error(`Transport ${transport_id} not found`);
                 throw new RpcException(`Transport ${transport_id} not found`);
             }
 
-            console.log(`[SFU] Transport found, state: ${transport.closed ? 'closed' : 'open'}, observer stats:`, transport.observer);
-
             // Check if already connected
             if (transport.appData?.connected) {
-                console.log(`[SFU] Transport ${transport_id} already connected`);
                 return {
                     message: 'Transport already connected',
                     success: false,
@@ -128,9 +122,7 @@ export class SfuController {
             }
 
             // Connect the transport
-            console.log(`[SFU] Connecting transport ${transport_id}...`);
             await transport.connect({ dtlsParameters });
-            console.log(`[SFU] Transport ${transport_id} connected successfully`);
 
             // Mark as connected
             transport.appData = {
@@ -144,7 +136,7 @@ export class SfuController {
                 transport: JSON.stringify(transport),
             };
         } catch (error) {
-            console.error(`[SFU] Error connecting transport:`, error);
+            console.error('Error connecting transport:', error);
             throw new RpcException('Failed to connect transport');
         }
     }

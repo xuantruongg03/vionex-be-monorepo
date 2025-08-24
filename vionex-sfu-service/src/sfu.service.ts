@@ -171,24 +171,17 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     async createWebRtcTransport(
         roomId: string,
     ): Promise<mediasoupTypes.WebRtcTransport> {
-        console.log(`[SFU Service] Creating WebRTC transport for room ${roomId}`);
-        
         const mediaRoom = this.mediaRooms.get(roomId);
         if (!mediaRoom || !mediaRoom.router) {
-            console.error(`[SFU Service] Room ${roomId} not found`);
             throw new Error(`Room ${roomId} not found`);
         }
 
         try {
             const workerId = mediaRoom.workerId || '';
-            console.log(`[SFU Service] Using worker ID: ${workerId}`);
-            
             const webRtcServer =
                 this.workerPool.getWebRtcServerForWorker(workerId);
 
             if (!webRtcServer) {
-                console.log(`[SFU Service] No WebRTC server found for worker ${workerId}, using dynamic port allocation`);
-                
                 // When not using WebRTC server, create transport with dynamic port allocation
                 const transportOptions: mediasoupTypes.WebRtcTransportOptions =
                     {
@@ -212,47 +205,11 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                         maxSctpMessageSize: 262144,
                     };
 
-                console.log(`[SFU Service] Transport options:`, transportOptions);
-                const transport = await mediaRoom.router.createWebRtcTransport(transportOptions);
-                console.log(`[SFU Service] Transport created successfully with ID: ${transport.id}`);
-                
-                // Store transport for later access
-                this.transports.set(transport.id, transport);
-                console.log(`[SFU Service] Transport ${transport.id} stored in registry`);
-                
-                // Set up cleanup and monitoring when transport closes
-                transport.on('routerclose', () => {
-                    console.log(`[SFU Service] Transport ${transport.id} router closed, removing from registry`);
-                    this.transports.delete(transport.id);
-                });
-
-                transport.on('@close', () => {
-                    console.log(`[SFU Service] Transport ${transport.id} closed, removing from registry`);
-                    this.transports.delete(transport.id);
-                });
-
-                // Add DTLS connection state monitoring
-                transport.on('dtlsstatechange', (dtlsState) => {
-                    console.log(`[SFU Service] Transport ${transport.id} DTLS state changed to: ${dtlsState}`);
-                });
-
-                transport.on('icestatechange', (iceState) => {
-                    console.log(`[SFU Service] Transport ${transport.id} ICE state changed to: ${iceState}`);
-                });
-
-                transport.on('iceselectedtuplechange', (iceSelectedTuple) => {
-                    console.log(`[SFU Service] Transport ${transport.id} ICE selected tuple changed:`, iceSelectedTuple);
-                });
-
-                transport.on('sctpstatechange', (sctpState) => {
-                    console.log(`[SFU Service] Transport ${transport.id} SCTP state changed to: ${sctpState}`);
-                });
-                
-                return transport;
+                return await mediaRoom.router.createWebRtcTransport(
+                    transportOptions,
+                );
             }
 
-            console.log(`[SFU Service] Using WebRTC server for worker ${workerId}`);
-            
             // Use the WebRTC server for this worker
             const transportOptions: mediasoupTypes.WebRtcTransportOptions = {
                 webRtcServer,
@@ -265,54 +222,24 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 maxSctpMessageSize: 262144,
             };
 
-            console.log(`[SFU Service] Transport options with WebRTC server:`, {
-                webRtcServerId: webRtcServer.id,
-                enableUdp: transportOptions.enableUdp,
-                enableTcp: transportOptions.enableTcp,
-                preferUdp: transportOptions.preferUdp
-            });
-
             const transport =
                 await mediaRoom.router.createWebRtcTransport(transportOptions);
 
-            console.log(`[SFU Service] Transport created successfully with ID: ${transport.id}`);
-
             // Store transport for later access
             this.transports.set(transport.id, transport);
-            console.log(`[SFU Service] Transport ${transport.id} stored in registry`);
-            
             // Set up cleanup when transport closes
             transport.on('routerclose', () => {
-                console.log(`[SFU Service] Transport ${transport.id} router closed, removing from registry`);
                 this.transports.delete(transport.id);
             });
 
             transport.on('@close', () => {
-                console.log(`[SFU Service] Transport ${transport.id} closed, removing from registry`);
                 this.transports.delete(transport.id);
-            });
-
-            // Add DTLS connection state monitoring
-            transport.on('dtlsstatechange', (dtlsState) => {
-                console.log(`[SFU Service] Transport ${transport.id} DTLS state changed to: ${dtlsState}`);
-            });
-
-            transport.on('icestatechange', (iceState) => {
-                console.log(`[SFU Service] Transport ${transport.id} ICE state changed to: ${iceState}`);
-            });
-
-            transport.on('iceselectedtuplechange', (iceSelectedTuple) => {
-                console.log(`[SFU Service] Transport ${transport.id} ICE selected tuple changed:`, iceSelectedTuple);
-            });
-
-            transport.on('sctpstatechange', (sctpState) => {
-                console.log(`[SFU Service] Transport ${transport.id} SCTP state changed to: ${sctpState}`);
             });
 
             return transport;
         } catch (error) {
             console.error(
-                `[SFU Service] Failed to create WebRTC transport in room ${roomId}:`,
+                `Failed to create WebRTC transport in room ${roomId}:`,
                 error,
             );
             throw error;
