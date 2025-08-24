@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { ChatService } from './chat.service';
 import { GrpcMethod } from '@nestjs/microservices';
-import { ChatMessage, ChatMessageResponse } from './interface';
+import { ChatMessage, ChatMessageResponse, ReplyInfo } from './interface';
 
 @Controller()
 export class ChatController {
@@ -18,6 +18,7 @@ export class ChatController {
     fileType?: string;
     fileSize?: number;
     isImage?: boolean;
+    replyTo?: ReplyInfo;
   }): Promise<ChatMessageResponse> {
     const rs = await this.chatService.saveMessage(
       data.room_id,
@@ -29,6 +30,7 @@ export class ChatController {
       data.fileType,
       data.fileSize,
       data.isImage,
+      data.replyTo,
     );
     if (!rs) {
       return {

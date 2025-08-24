@@ -1,4 +1,3 @@
-
 import {
     ConnectedSocket,
     MessageBody,
@@ -11,10 +10,10 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { AudioClientService } from './clients/audio.client';
-import { ChatClientService } from './clients/chat.client';
 import { InteractionClientService } from './clients/interaction.client';
 import { RoomClientService } from './clients/room.client';
 import { SfuClientService } from './clients/sfu.client';
+import { ChatHandler } from './handlers/chat.handler';
 import { Participant } from './interfaces/interface';
 import { HttpBroadcastService } from './services/http-broadcast.service';
 import { WebSocketEventService } from './services/websocket-event.service';
@@ -42,13 +41,12 @@ export class GatewayGateway
         private readonly roomClient: RoomClientService,
         private readonly httpBroadcastService: HttpBroadcastService,
         private readonly sfuClient: SfuClientService,
-        private readonly chatClient: ChatClientService,
         private readonly interactionClient: InteractionClientService,
         private readonly audioService: AudioClientService,
+        private readonly chatHandler: ChatHandler,
     ) {}
 
     afterInit(server: Server) {
-        console.log('[Gateway] WebSocket server initialized');
         this.httpBroadcastService.setSocketServer(server);
     }
 
@@ -841,8 +839,8 @@ export class GatewayGateway
         @MessageBody()
         data: { roomId: string; isProducer: boolean; peerId?: string },
     ) {
-        console.log("CREATE TRANSPORT");
-        
+        console.log('CREATE TRANSPORT');
+
         try {
             const peerId =
                 data.peerId || this.getParticipantBySocketId(client.id);
@@ -1816,9 +1814,6 @@ export class GatewayGateway
             );
 
             if (participant) {
-                console.log(
-                    `[Gateway] Found participant ${peerId} via room service`,
-                );
                 // Update our local cache and mappings
                 this.storeParticipantMapping(
                     participant.socket_id,
@@ -1864,5 +1859,72 @@ export class GatewayGateway
             console.error('[Gateway] Error getting all rooms:', error);
             return new Map();
         }
+    }
+
+    // ==================== CHAT HANDLERS ====================
+
+    @SubscribeMessage('chat:join')
+    async handleChatJoin(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: { roomId: string; userName: string },
+    ) {
+        return this.chatHandler.handleJoinRoom(client, data);
+    }
+
+    @SubscribeMessage('chat:leave')
+    async handleChatLeave(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: { roomId: string },
+    ) {
+        return this.chatHandler.handleLeaveRoom(client, data);
+    }
+
+    @SubscribeMessage('chat:message')
+    async handleChatMessage(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            message: {
+                sender: string;
+                senderName: string;
+                text: string;
+                replyTo?: {
+                    messageId: string;
+                    senderName: string;
+                    text: string;
+                    isFile?: boolean;
+                };
+            };
+        },
+    ) {
+        return this.chatHandler.handleSendMessage(client, data);
+    }
+
+    @SubscribeMessage('chat:file')
+    async handleChatFile(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            message: {
+                sender: string;
+                senderName: string;
+                text: string;
+                fileUrl: string;
+                fileName: string;
+                fileType: string;
+                fileSize: number;
+                isImage: boolean;
+                replyTo?: {
+                    messageId: string;
+                    senderName: string;
+                    text: string;
+                    isFile?: boolean;
+                };
+            };
+        },
+    ) {
+        return this.chatHandler.handleSendFileMessage(client, data);
     }
 }

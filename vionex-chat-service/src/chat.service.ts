@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ChatMessage } from './interface';
+import { ChatMessage, ReplyInfo } from './interface';
 import { nanoid } from 'nanoid';
 
 @Injectable()
@@ -16,6 +16,7 @@ export class ChatService {
     fileType?: string,
     fileSize?: number,
     isImage?: boolean,
+    replyTo?: ReplyInfo,
   ): Promise<ChatMessage | null> {
     try {
       const newMessage: ChatMessage = {
@@ -30,6 +31,7 @@ export class ChatService {
         fileType,
         fileSize,
         isImage,
+        replyTo,
       };
 
       if (this.roomMessages.has(room_id)) {

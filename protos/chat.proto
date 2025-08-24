@@ -22,6 +22,16 @@ message ChatMessage {
   optional string fileType = 9;
   optional int64 fileSize = 10;
   optional bool isImage = 11;
+  // Reply fields
+  optional ReplyInfo replyTo = 12;
+}
+
+// Reply information
+message ReplyInfo {
+  string messageId = 1;
+  string senderName = 2;
+  string text = 3;
+  optional bool isFile = 4;
 }
 
 // SendMessage
@@ -35,6 +45,8 @@ message SendMessageRequest {
   optional string fileType = 7;
   optional int64 fileSize = 8;
   optional bool isImage = 9;
+  // Reply fields
+  optional ReplyInfo replyTo = 10;
 }
 
 message SendMessageResponse {

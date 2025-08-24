@@ -18,6 +18,7 @@ import { WebSocketEventService } from './services/websocket-event.service';
 import { ChatBotClientService } from './clients/chatbot.client';
 import { AuthController } from './auth.controller';
 import { AuthClientService } from './clients/auth.client';
+import { ChatHandler } from './handlers/chat.handler';
 
 @Module({
     imports: [
@@ -156,6 +157,7 @@ import { AuthClientService } from './clients/auth.client';
         ChatBotClientService,
         AuthClientService,
         OrganizationClientService,
+        ChatHandler,
     ],
 })
 export class GatewayModule {}

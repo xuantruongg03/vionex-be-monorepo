@@ -1,5 +1,12 @@
 import { Observable } from 'rxjs/internal/Observable';
 
+export interface ReplyInfo {
+  messageId: string;
+  senderName: string;
+  text: string;
+  isFile?: boolean;
+}
+
 export interface ChatMessage {
   id: string;
   room_id: string;
@@ -12,6 +19,7 @@ export interface ChatMessage {
   fileType?: string;
   fileSize?: number;
   isImage?: boolean;
+  replyTo?: ReplyInfo;
 }
 
 export interface ChatGRPCService {
@@ -25,6 +33,7 @@ export interface ChatGRPCService {
     fileType?: string;
     fileSize?: number;
     isImage?: boolean;
+    replyTo?: ReplyInfo;
   }): Observable<ChatMessageResponse | null>;
 
   getMessages(data: {
