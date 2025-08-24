@@ -289,7 +289,8 @@ module.exports = {
     {
       name: 'vionex-auth-service',
       cwd: './vionex-auth-service',
-      script: 'dist/main.js',
+      script: 'npm',
+args: 'run start:dev',
       instances: 1,
       autorestart: true,
       watch: false,
@@ -304,7 +305,9 @@ module.exports = {
     {
       name: 'vionex-api-gateway',
       cwd: './vionex-api-getway',
-      script: 'dist/main.js',
+      script: 'npm',
+args: 'run start:dev',
+
       instances: 1,
       autorestart: true,
       watch: false,
@@ -319,7 +322,9 @@ module.exports = {
     {
       name: 'vionex-room-service',
       cwd: './vionex-room-service',
-      script: 'dist/main.js',
+      script: 'npm',
+args: 'run start:dev',
+
       instances: 1,
       autorestart: true,
       watch: false,
@@ -334,7 +339,9 @@ module.exports = {
     {
       name: 'vionex-sfu-service',
       cwd: './vionex-sfu-service',
-      script: 'dist/main.js',
+      script: 'npm',
+args: 'run start:dev',
+
       instances: 1,
       autorestart: true,
       watch: false,
@@ -349,7 +356,9 @@ module.exports = {
     {
       name: 'vionex-interaction-service',
       cwd: './vionex-interaction-service',
-      script: 'dist/main.js',
+      script: 'npm',
+args: 'run start:dev',
+
       instances: 1,
       autorestart: true,
       watch: false,
@@ -364,7 +373,9 @@ module.exports = {
     {
       name: 'vionex-chat-service',
       cwd: './vionex-chat-service',
-      script: 'dist/main.js',
+      script: 'npm',
+args: 'run start:dev',
+
       instances: 1,
       autorestart: true,
       watch: false,
