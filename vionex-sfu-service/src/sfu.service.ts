@@ -266,13 +266,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             return [
                 {
                     urls:
-                        this.configService.get('STUN_SERVER_URL') ||
-                        'stun:stun.l.google.com:19302',
-                    username: '',
-                    credential: '',
-                },
-                {
-                    urls:
                         this.configService.get('TURN_SERVER_URL') ||
                         'turn:turnserver.example.com:3478',
                     username:
