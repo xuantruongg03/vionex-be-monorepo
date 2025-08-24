@@ -37,18 +37,6 @@ export class GatewayController {
     return {
       status: 'Gateway API is working!',
       timestamp: new Date().toISOString(),
-      socketServer: this.broadcastService.isSocketServerAvailable() ? 'Available' : 'Not Available',
-    };
-  }
-
-  @Get('debug/socket-status')
-  getSocketStatus() {
-    return {
-      socketServerAvailable: this.broadcastService.isSocketServerAvailable(),
-      timestamp: new Date().toISOString(),
-      message: this.broadcastService.isSocketServerAvailable() 
-        ? 'Socket server is properly initialized' 
-        : 'Socket server is not available. Make sure WebSocket gateway is running.',
     };
   }
 
@@ -162,41 +150,41 @@ export class GatewayController {
     }
   }
 
-//   @Post('/chatbot/ask')
-//   async askChatBot(
-//     @Body() data: { question: string; roomId: string },
-//     @Headers('authorization') authorization?: string,
-//   ) {
-//     try {
-//       const participant = await this.getParticipantFromHeader(authorization);
-//       const { question, roomId } = data;
+  @Post('/chatbot/ask')
+  async askChatBot(
+    @Body() data: { question: string; roomId: string },
+    @Headers('authorization') authorization?: string,
+  ) {
+    try {
+      const participant = await this.getParticipantFromHeader(authorization);
+      const { question, roomId } = data;
 
-//       if (!question || question.trim().length === 0) {
-//         throw new HttpException(
-//           'Question cannot be empty',
-//           HttpStatus.BAD_REQUEST,
-//         );
-//       }
+      if (!question || question.trim().length === 0) {
+        throw new HttpException(
+          'Question cannot be empty',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
 
-//       // Call the chatbot service
-//       const response = await this.chatbotClient.askChatBot({
-//         question,
-//         room_id: roomId,
-//       });
+      // Call the chatbot service
+      const response = await this.chatbotClient.askChatBot({
+        question,
+        room_id: roomId,
+      });
 
-//       return {
-//         success: true,
-//         answer: response,
-//         participant: participant.peer_id,
-//       };
-//     } catch (error) {
-//       console.error('Error asking chatbot:', error);
-//       throw new HttpException(
-//         error.message || 'Failed to ask chatbot',
-//         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-//       );
-//     }
-//   }
+      return {
+        success: true,
+        answer: response,
+        participant: participant.peer_id,
+      };
+    } catch (error) {
+      console.error('Error asking chatbot:', error);
+      throw new HttpException(
+        error.message || 'Failed to ask chatbot',
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 
   // Helper method to get participant from header
   private async getParticipantFromHeader(
@@ -485,34 +473,15 @@ export class GatewayController {
   @Put('sfu/streams/:streamId')
   async updateStream(
     @Param('streamId') streamId: string,
-    @Body() data: { metadata: any; roomId: string; participantId?: string },
+    @Body() data: { metadata: any; roomId: string },
     @Headers('authorization') authorization?: string,
   ) {
     try {
-      let participant: any = null;
-      let participantId = data.participantId;
-
-      // Try to get participant from authorization header first
-      if (authorization) {
-        try {
-          participant = await this.getParticipantFromHeader(authorization);
-          participantId = participant.peer_id;
-        } catch (error) {
-          console.warn('[UpdateStream] Authorization header invalid, using fallback:', error.message);
-        }
-      }
-
-      // If no participant from auth header and no participantId provided, throw error
-      if (!participantId) {
-        throw new HttpException(
-          'Either authorization header or participantId in body is required',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
+      const participant = await this.getParticipantFromHeader(authorization);
 
       // Try to get roomId from the request, or look it up
       let roomId: string | undefined = data.roomId;
-      if (!roomId && participant) {
+      if (!roomId) {
         const participantRoom = await this.roomClient.getParticipantRoom(
           participant.peer_id,
         );
@@ -529,7 +498,7 @@ export class GatewayController {
       // Call SFU service to update stream metadata
       const result = await this.sfuClient.updateStream({
         stream_id: streamId,
-        participant_id: participantId,
+        participant_id: participant.peer_id,
         metadata: JSON.stringify(data.metadata),
         room_id: roomId,
       });
@@ -540,7 +509,7 @@ export class GatewayController {
         'sfu:stream-metadata-updated',
         {
           streamId: streamId,
-          publisherId: participantId,
+          publisherId: participant.peer_id,
           metadata: data.metadata,
           roomId: roomId,
         },
@@ -551,7 +520,7 @@ export class GatewayController {
         message: 'Stream updated successfully',
         stream: {
           streamId: streamId,
-          publisherId: participantId,
+          publisherId: participant.peer_id,
           metadata: data.metadata,
         },
       };
@@ -706,17 +675,8 @@ export class GatewayController {
     @Headers('authorization') authorization?: string,
   ) {
     try {
-      console.log('[Gateway] Produce request received:', {
-        transportId,
-        roomId: data.roomId,
-        kind: data.kind,
-        hasAuth: !!authorization
-      });
-
       const participant = await this.getParticipantFromHeader(authorization);
-      console.log('[Gateway] Participant identified:', participant.peer_id);
 
-      console.log('[Gateway] Calling SFU service createProducer...');
       const result = await this.sfuClient.createProducer(
         transportId,
         data.kind,
@@ -725,11 +685,6 @@ export class GatewayController {
         data.roomId,
         data.participantId || participant.peer_id,
       );
-      console.log('[Gateway] SFU service response received:', {
-        success: !!result,
-        hasStreamId: !!(result as any).streamId,
-        hasProducerData: !!(result as any).producer_data
-      });
 
       // Extract streamId from SFU service response
       const participantId = data.participantId || participant.peer_id;
@@ -739,14 +694,13 @@ export class GatewayController {
       if ((result as any).streamId) {
         // Direct streamId field
         streamId = (result as any).streamId;
-        console.log('[Gateway] Using streamId from direct field:', streamId);
+        console.log('Using streamId from direct field:', streamId);
       } else if (
         (result as any).producer &&
         (result as any).producer.streamId
       ) {
         // StreamId in producer object
         streamId = (result as any).producer.streamId;
-        console.log('[Gateway] Using streamId from producer object:', streamId);
       } else {
         // Check for producer_data field (from proto)
         const resultWithProducerData = result as any;
@@ -756,16 +710,16 @@ export class GatewayController {
               resultWithProducerData.producer_data,
             );
             streamId = producerData.streamId;
-            console.log('[Gateway] Using streamId from producer_data:', streamId);
+            console.log('Using streamId from producer_data:', streamId);
           } catch (error) {
-            console.error('[Gateway] Failed to parse producer_data:', error);
+            console.error('Failed to parse producer_data:', error);
             throw new HttpException(
               'Invalid producer data from SFU service',
               HttpStatus.INTERNAL_SERVER_ERROR,
             );
           }
         } else {
-          console.error('[Gateway] No streamId found in result:', result);
+          console.error('No streamId found in result:', result);
           throw new HttpException(
             'No streamId received from SFU service',
             HttpStatus.INTERNAL_SERVER_ERROR,
@@ -773,7 +727,6 @@ export class GatewayController {
         }
       }
 
-      console.log('[Gateway] Preparing to broadcast stream-added event');
       // Broadcast stream-added event to other clients in the room via WebSocket
       const streamInfo = {
         streamId: streamId,
@@ -783,7 +736,6 @@ export class GatewayController {
         rtpParameters: data.rtpParameters,
       };
 
-      console.log('[Gateway] Broadcasting stream-added event to room:', data.roomId);
       // Use broadcast service to notify other clients
       this.broadcastService.broadcastToRoom(
         data.roomId,
@@ -791,7 +743,6 @@ export class GatewayController {
         streamInfo,
       );
 
-      console.log('[Gateway] Produce operation completed successfully');
       return {
         success: true,
         data: {
@@ -802,12 +753,7 @@ export class GatewayController {
         },
       };
     } catch (error) {
-      console.error('[Gateway] Error producing media:', error);
-      console.error('[Gateway] Error details:', {
-        message: error.message,
-        status: error.status,
-        stack: error.stack
-      });
+      console.error('Error producing media:', error);
       throw new HttpException(
         error.message || 'Failed to produce media',
         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
