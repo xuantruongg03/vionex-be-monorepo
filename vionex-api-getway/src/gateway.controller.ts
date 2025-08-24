@@ -320,6 +320,7 @@ export class GatewayController {
       }> = [];
       try {
         iceServers = await this.sfuClient.getIceServers();
+        console.log('iceServers: ', iceServers);
         console.log('Successfully retrieved ICE servers from SFU service. Count:', iceServers.length);
       } catch (error) {
         console.warn('Failed to get ICE servers from SFU service, using comprehensive fallback:', error);
