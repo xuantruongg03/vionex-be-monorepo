@@ -59,6 +59,16 @@ export class SfuClientService implements OnModuleInit {
         );
     }
 
+    async getIceServers() {
+        try {
+            const response = await firstValueFrom(this.sfuService.getIceServers());
+            return response.ice_servers || [];
+        } catch (error) {
+            console.error('[SFU Client] Error getting ICE servers:', error);
+            return [];
+        }
+    }
+
     async createProducer(
         transportId: string,
         kind: string,

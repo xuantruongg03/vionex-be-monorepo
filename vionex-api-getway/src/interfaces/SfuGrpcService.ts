@@ -18,6 +18,16 @@ export default interface SfuGrpcService {
         participant_data: string;
     }): any;
 
+    // ICE servers
+    getIceServers(): Observable<{
+        status: string;
+        ice_servers: Array<{
+            urls: string;
+            username: string;
+            credential: string;
+        }>;
+    }>;
+
     // Producer/Consumer management
     createProducer(data: {
         transport_id: string;

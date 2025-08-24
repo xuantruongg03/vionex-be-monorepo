@@ -186,6 +186,14 @@ python audio_service_clean.py
       lexuantruong098/vionex-audio-service-gpu:latest
     ```
 
+    docker run --gpus all -p 30005:30005 -p 35000-35400:35000-35400/udp \
+  -e TYPE_ENGINE=cuda \
+  lexuantruong098/vionex-audio-service-gpu:latest
+
+docker pull lexuantruong098/vionex-audio-service-gpu:latest
+
+nvidia-smi -l 1
+
 ## 🔧 Configuration
 
 ### Audio Processing Settings

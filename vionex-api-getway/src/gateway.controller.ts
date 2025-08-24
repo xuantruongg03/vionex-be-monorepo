@@ -312,24 +312,29 @@ export class GatewayController {
         data.isProducer,
       );
 
-      // SFU service doesn't have getIceServers, so we'll provide default values
-      const iceServersResponse = {
-        ice_servers: [
-          {
-            urls: ['stun:stun.l.google.com:19302'],
-          },
-        ],
-      };
+      // Get ICE servers from SFU service with comprehensive fallback
+      let iceServers: Array<{
+        urls: string;
+        username: string;
+        credential: string;
+      }> = [];
+      try {
+        iceServers = await this.sfuClient.getIceServers();
+        console.log('Successfully retrieved ICE servers from SFU service. Count:', iceServers.length);
+      } catch (error) {
+        console.warn('Failed to get ICE servers from SFU service, using comprehensive fallback:', error);
+        iceServers = [ ];
+      }
 
       // Extract transport data from the response
       const transport = (transportData as any).transport || transportData;
 
       const transportInfo = {
-        id: transport.id || `test-transport-${Date.now()}`,
+        id: transport.id || `transport-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         iceParameters: transport.iceParameters || {
           iceLite: false,
-          password: 'test-password',
-          usernameFragment: 'test-username',
+          password: Math.random().toString(36).substr(2, 15) + Date.now().toString(36),
+          usernameFragment: Math.random().toString(36).substr(2, 8) + Date.now().toString(36).substr(-4),
         },
         iceCandidates: transport.iceCandidates || [],
         dtlsParameters: transport.dtlsParameters || {
@@ -348,7 +353,7 @@ export class GatewayController {
           connected: false,
           isProducer: data.isProducer,
         },
-        iceServers: iceServersResponse?.ice_servers || [],
+        iceServers: iceServers || [],
       };
       return {
         success: true,
