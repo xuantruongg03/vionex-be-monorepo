@@ -162,41 +162,41 @@ export class GatewayController {
     }
   }
 
-  @Post('/chatbot/ask')
-  async askChatBot(
-    @Body() data: { question: string; roomId: string },
-    @Headers('authorization') authorization?: string,
-  ) {
-    try {
-      const participant = await this.getParticipantFromHeader(authorization);
-      const { question, roomId } = data;
+//   @Post('/chatbot/ask')
+//   async askChatBot(
+//     @Body() data: { question: string; roomId: string },
+//     @Headers('authorization') authorization?: string,
+//   ) {
+//     try {
+//       const participant = await this.getParticipantFromHeader(authorization);
+//       const { question, roomId } = data;
 
-      if (!question || question.trim().length === 0) {
-        throw new HttpException(
-          'Question cannot be empty',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
+//       if (!question || question.trim().length === 0) {
+//         throw new HttpException(
+//           'Question cannot be empty',
+//           HttpStatus.BAD_REQUEST,
+//         );
+//       }
 
-      // Call the chatbot service
-      const response = await this.chatbotClient.askChatBot({
-        question,
-        room_id: roomId,
-      });
+//       // Call the chatbot service
+//       const response = await this.chatbotClient.askChatBot({
+//         question,
+//         room_id: roomId,
+//       });
 
-      return {
-        success: true,
-        answer: response,
-        participant: participant.peer_id,
-      };
-    } catch (error) {
-      console.error('Error asking chatbot:', error);
-      throw new HttpException(
-        error.message || 'Failed to ask chatbot',
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
+//       return {
+//         success: true,
+//         answer: response,
+//         participant: participant.peer_id,
+//       };
+//     } catch (error) {
+//       console.error('Error asking chatbot:', error);
+//       throw new HttpException(
+//         error.message || 'Failed to ask chatbot',
+//         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+//       );
+//     }
+//   }
 
   // Helper method to get participant from header
   private async getParticipantFromHeader(
