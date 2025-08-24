@@ -8,7 +8,6 @@ service SfuService {
   rpc ConnectTransport(ConnectTransportRequest) returns (ConnectTransportResponse);
   rpc RemoveUserMedia(RemoveUserMediaRequest) returns (RemoveUserMediaResponse);
   rpc CreateTransport(CreateTransportRequest) returns (CreateTransportResponse);
-  rpc GetIceServers(GetIceServersRequest) returns (GetIceServersResponse);
   rpc SaveStream(SaveStreamRequest) returns (SaveStreamResponse);
   rpc GetStreamById(GetStreamByIdRequest) returns (GetStreamByIdResponse);
   rpc RemoveStream(RemoveStreamRequest) returns (RemoveStreamResponse);
@@ -137,22 +136,6 @@ message CreateTransportRequest {
 message CreateTransportResponse {
   string status = 1;
   optional string transport_data = 2; // JSON string
-}
-
-// GetIceServers messages
-message GetIceServersRequest {
-  // Empty for now
-}
-
-message GetIceServersResponse {
-  string status = 1;
-  repeated IceServer ice_servers = 2;
-}
-
-message IceServer {
-  string urls = 1;
-  string username = 2;
-  string credential = 3;
 }
 
 // SaveStream messages

@@ -841,6 +841,8 @@ export class GatewayGateway
         @MessageBody()
         data: { roomId: string; isProducer: boolean; peerId?: string },
     ) {
+        console.log("CREATE TRANSPORT");
+        
         try {
             const peerId =
                 data.peerId || this.getParticipantBySocketId(client.id);

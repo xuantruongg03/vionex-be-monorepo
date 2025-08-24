@@ -297,77 +297,78 @@ export class GatewayController {
     }
   }
 
-  // HTTP endpoint for creating transport
-  @Post('sfu/transport')
-  async createTransport(
-    @Body() data: { roomId: string; isProducer: boolean },
-    @Headers('authorization') authorization?: string,
-  ) {
-    try {
-      const participant = await this.getParticipantFromHeader(authorization);
+//   // HTTP endpoint for creating transport
+//   @Post('sfu/transport')
+//   async createTransport(
+//     @Body() data: { roomId: string; isProducer: boolean },
+//     @Headers('authorization') authorization?: string,
+//   ) {
+//     try {
+//       const participant = await this.getParticipantFromHeader(authorization);
+//       console.log('participant 308: ', participant);
 
-      const transportData = await this.sfuClient.createTransport(
-        data.roomId,
-        participant.peer_id,
-        data.isProducer,
-      );
+//       const transportData = await this.sfuClient.createTransport(
+//         data.roomId,
+//         participant.peer_id,
+//         data.isProducer,
+//       );
 
-      // Get ICE servers from SFU service with comprehensive fallback
-      let iceServers: Array<{
-        urls: string;
-        username: string;
-        credential: string;
-      }> = [];
-      try {
-        iceServers = await this.sfuClient.getIceServers();
-        console.log('iceServers: ', iceServers);
-        console.log('Successfully retrieved ICE servers from SFU service. Count:', iceServers.length);
-      } catch (error) {
-        console.warn('Failed to get ICE servers from SFU service, using comprehensive fallback:', error);
-        iceServers = [ ];
-      }
+//       // Get ICE servers from SFU service with comprehensive fallback
+//       let iceServers: Array<{
+//         urls: string;
+//         username: string;
+//         credential: string;
+//       }> = [];
+//       try {
+//         iceServers = await this.sfuClient.getIceServers();
+//         console.log('iceServers: ', iceServers);
+//         console.log('Successfully retrieved ICE servers from SFU service. Count:', iceServers.length);
+//       } catch (error) {
+//         console.warn('Failed to get ICE servers from SFU service, using comprehensive fallback:', error);
+//         iceServers = [ ];
+//       }
 
-      // Extract transport data from the response
-      const transport = (transportData as any).transport || transportData;
+//       // Extract transport data from the response
+//       const transport = (transportData as any).transport || transportData;
 
-      const transportInfo = {
-        id: transport.id || `transport-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        iceParameters: transport.iceParameters || {
-          iceLite: false,
-          password: Math.random().toString(36).substr(2, 15) + Date.now().toString(36),
-          usernameFragment: Math.random().toString(36).substr(2, 8) + Date.now().toString(36).substr(-4),
-        },
-        iceCandidates: transport.iceCandidates || [],
-        dtlsParameters: transport.dtlsParameters || {
-          fingerprints: [
-            {
-              algorithm: 'sha-256',
-              value:
-                '00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00',
-            },
-          ],
-          role: 'auto',
-        },
-        sctpParameters: transport.sctpParameters,
-        isProducer: data.isProducer,
-        appData: {
-          connected: false,
-          isProducer: data.isProducer,
-        },
-        iceServers: iceServers || [],
-      };
-      return {
-        success: true,
-        data: transportInfo,
-      };
-    } catch (error) {
-      console.error('Create WebRTC transport error:', error);
-      throw new HttpException(
-        'Failed to create transport',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
+//       const transportInfo = {
+//         id: transport.id || `transport-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+//         iceParameters: transport.iceParameters || {
+//           iceLite: false,
+//           password: Math.random().toString(36).substr(2, 15) + Date.now().toString(36),
+//           usernameFragment: Math.random().toString(36).substr(2, 8) + Date.now().toString(36).substr(-4),
+//         },
+//         iceCandidates: transport.iceCandidates || [],
+//         dtlsParameters: transport.dtlsParameters || {
+//           fingerprints: [
+//             {
+//               algorithm: 'sha-256',
+//               value:
+//                 '00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00',
+//             },
+//           ],
+//           role: 'auto',
+//         },
+//         sctpParameters: transport.sctpParameters,
+//         isProducer: data.isProducer,
+//         appData: {
+//           connected: false,
+//           isProducer: data.isProducer,
+//         },
+//         iceServers: iceServers || [],
+//       };
+//       return {
+//         success: true,
+//         data: transportInfo,
+//       };
+//     } catch (error) {
+//       console.error('Create WebRTC transport error:', error);
+//       throw new HttpException(
+//         'Failed to create transport',
+//         HttpStatus.INTERNAL_SERVER_ERROR,
+//       );
+//     }
+//   }
 
   // HTTP endpoint for getting users in room
   @Get('sfu/rooms/:roomId/users')

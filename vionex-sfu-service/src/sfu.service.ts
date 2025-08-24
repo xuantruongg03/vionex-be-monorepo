@@ -246,6 +246,21 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
+    async createWebRtcTransportWithIceServers(
+        roomId: string,
+    ): Promise<{
+        transport: mediasoupTypes.WebRtcTransport;
+        iceServers: any[];
+    }> {
+        const transport = await this.createWebRtcTransport(roomId);
+        const iceServers = await this.getIceServers();
+        
+        return {
+            transport,
+            iceServers,
+        };
+    }
+
     async getIceServers() {
         if (this.configService.get('USE_ICE_SERVERS') == 'true') {
             return [

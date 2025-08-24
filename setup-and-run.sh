@@ -189,14 +189,14 @@ SFU_GRPC_PORT=30004
 SFU_SERVICE_HOST=0.0.0.0
 MEDIASOUP_LOG_LEVEL=warn
 MEDIASOUP_LISTEN_IP=0.0.0.0
-MEDIASOUP_ANNOUNCED_IP=192.168.1.8
+MEDIASOUP_ANNOUNCED_IP=103.82.22.185
 MEDIASOUP_PORT=55555
 MEDIASOUP_RTC_MIN_PORT=10000
 MEDIASOUP_RTC_MAX_PORT=25999
-STUN_SERVER_URL=stun:videomeet.website:3478
-TURN_SERVER_URL=turn:videomeet.website:3478
+STUN_SERVER_URL=stun:103.179.173.240:3478
+TURN_SERVER_URL=turn:103.179.173.240:3478
 TURN_SERVER_USERNAME=guest
-TURN_SERVER_PASSWORD=vionex
+TURN_SERVER_PASSWORD=videomeet
 AUDIO_SERVICE_HOST=127.0.0.1
 AUDIO_SERVICE_PORT=30005
 AUDIO_SERVICE_RX_PORT=35000
@@ -289,8 +289,7 @@ module.exports = {
     {
       name: 'vionex-auth-service',
       cwd: './vionex-auth-service',
-      script: 'npm',
-args: 'run start:dev',
+      script: 'dist/main.js',
       instances: 1,
       autorestart: true,
       watch: false,
@@ -305,9 +304,7 @@ args: 'run start:dev',
     {
       name: 'vionex-api-gateway',
       cwd: './vionex-api-getway',
-      script: 'npm',
-args: 'run start:dev',
-
+      script: 'dist/main.js',
       instances: 1,
       autorestart: true,
       watch: false,
@@ -322,9 +319,7 @@ args: 'run start:dev',
     {
       name: 'vionex-room-service',
       cwd: './vionex-room-service',
-      script: 'npm',
-args: 'run start:dev',
-
+      script: 'dist/main.js',
       instances: 1,
       autorestart: true,
       watch: false,
@@ -339,9 +334,7 @@ args: 'run start:dev',
     {
       name: 'vionex-sfu-service',
       cwd: './vionex-sfu-service',
-      script: 'npm',
-args: 'run start:dev',
-
+      script: 'dist/main.js',
       instances: 1,
       autorestart: true,
       watch: false,
@@ -356,9 +349,7 @@ args: 'run start:dev',
     {
       name: 'vionex-interaction-service',
       cwd: './vionex-interaction-service',
-      script: 'npm',
-args: 'run start:dev',
-
+      script: 'dist/main.js',
       instances: 1,
       autorestart: true,
       watch: false,
@@ -373,9 +364,7 @@ args: 'run start:dev',
     {
       name: 'vionex-chat-service',
       cwd: './vionex-chat-service',
-      script: 'npm',
-args: 'run start:dev',
-
+      script: 'dist/main.js',
       instances: 1,
       autorestart: true,
       watch: false,

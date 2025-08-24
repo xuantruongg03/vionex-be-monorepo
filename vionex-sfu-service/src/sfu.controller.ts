@@ -162,17 +162,18 @@ export class SfuController {
         room_id: string;
     }): Promise<{ status: string; transport_data: string }> {
         try {
-            const transport = await this.sfuService.createWebRtcTransport(
+            const result = await this.sfuService.createWebRtcTransportWithIceServers(
                 data.room_id,
             );
 
             // Properly serialize transport data with all required WebRTC parameters
             const transportData = {
-                id: transport.id,
-                iceParameters: transport.iceParameters,
-                iceCandidates: transport.iceCandidates,
-                dtlsParameters: transport.dtlsParameters,
-                sctpParameters: transport.sctpParameters,
+                id: result.transport.id,
+                iceParameters: result.transport.iceParameters,
+                iceCandidates: result.transport.iceCandidates,
+                dtlsParameters: result.transport.dtlsParameters,
+                sctpParameters: result.transport.sctpParameters,
+                iceServers: result.iceServers,
             };
 
             return {
@@ -182,27 +183,6 @@ export class SfuController {
         } catch (error) {
             console.error('Error creating WebRTC transport:', error);
             throw new RpcException('Failed to create WebRTC transport');
-        }
-    }
-
-    @GrpcMethod('SfuService', 'GetIceServers')
-    async handleGetIceServers(): Promise<{
-        status: string;
-        ice_servers: Array<{
-            urls: string;
-            username: string;
-            credential: string;
-        }>;
-    }> {
-        try {
-            const iceServers = await this.sfuService.getIceServers();
-            return {
-                status: 'success',
-                ice_servers: iceServers,
-            };
-        } catch (error) {
-            console.error('Error getting ICE servers:', error);
-            throw new RpcException('Failed to get ICE servers');
         }
     }
 
