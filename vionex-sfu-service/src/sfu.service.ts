@@ -246,15 +246,13 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    async createWebRtcTransportWithIceServers(
-        roomId: string,
-    ): Promise<{
+    async createWebRtcTransportWithIceServers(roomId: string): Promise<{
         transport: mediasoupTypes.WebRtcTransport;
         iceServers: any[];
     }> {
         const transport = await this.createWebRtcTransport(roomId);
         const iceServers = await this.getIceServers();
-        
+
         return {
             transport,
             iceServers,
@@ -264,6 +262,11 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     async getIceServers() {
         if (this.configService.get('USE_ICE_SERVERS') == 'true') {
             return [
+                {
+                    urls:
+                        this.configService.get('STUN_SERVER_URL') ||
+                        'stun:stun.l.google.com:19302',
+                },
                 {
                     urls:
                         this.configService.get('TURN_SERVER_URL') ||
