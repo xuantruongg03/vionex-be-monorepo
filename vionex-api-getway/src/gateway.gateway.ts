@@ -1,20 +1,10 @@
-/*!
- * Copyright (c) 2025 xuantruongg003
- *
- * This software is licensed for non-commercial use only.
- * You may use, study, and modify this code for educational and research purposes.
- *
- * Commercial use of this code, in whole or in part, is strictly prohibited
- * without prior written permission from the author.
- *
- * Author Contact: lexuantruong098@gmail.com
- */
 
 import {
     ConnectedSocket,
     MessageBody,
     OnGatewayConnection,
     OnGatewayDisconnect,
+    OnGatewayInit,
     SubscribeMessage,
     WebSocketGateway,
     WebSocketServer,
@@ -39,7 +29,7 @@ import { WebSocketEventService } from './services/websocket-event.service';
     pingInterval: 25000,
 })
 export class GatewayGateway
-    implements OnGatewayConnection, OnGatewayDisconnect
+    implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
     @WebSocketServer() io: Server;
     private connectionMap = new Map<string, string>(); // socketId -> peerId
@@ -56,8 +46,17 @@ export class GatewayGateway
         private readonly interactionClient: InteractionClientService,
         private readonly audioService: AudioClientService,
     ) {}
+
+    afterInit(server: Server) {
+        console.log('[Gateway] WebSocket server initialized');
+        this.httpBroadcastService.setSocketServer(server);
+    }
+
     handleConnection(client: Socket) {
-        this.httpBroadcastService.setSocketServer(this.io);
+        // Ensure socket server is set (backup in case afterInit didn't run)
+        if (!this.httpBroadcastService['io']) {
+            this.httpBroadcastService.setSocketServer(this.io);
+        }
     }
 
     async handleDisconnect(client: Socket) {

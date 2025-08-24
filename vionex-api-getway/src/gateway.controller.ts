@@ -37,6 +37,18 @@ export class GatewayController {
     return {
       status: 'Gateway API is working!',
       timestamp: new Date().toISOString(),
+      socketServer: this.broadcastService.isSocketServerAvailable() ? 'Available' : 'Not Available',
+    };
+  }
+
+  @Get('debug/socket-status')
+  getSocketStatus() {
+    return {
+      socketServerAvailable: this.broadcastService.isSocketServerAvailable(),
+      timestamp: new Date().toISOString(),
+      message: this.broadcastService.isSocketServerAvailable() 
+        ? 'Socket server is properly initialized' 
+        : 'Socket server is not available. Make sure WebSocket gateway is running.',
     };
   }
 
