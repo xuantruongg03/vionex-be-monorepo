@@ -61,11 +61,68 @@ export class SfuClientService implements OnModuleInit {
 
     async getIceServers() {
         try {
+            console.log('[SFU Client] Requesting ICE servers from SFU service...');
             const response = await firstValueFrom(this.sfuService.getIceServers());
-            return response.ice_servers || [];
+            console.log('[SFU Client] ICE servers response:', response);
+            
+            const iceServers = response.ice_servers || [];
+            console.log('[SFU Client] Extracted ICE servers:', iceServers);
+            return iceServers;
         } catch (error) {
             console.error('[SFU Client] Error getting ICE servers:', error);
-            return [];
+            console.error('[SFU Client] Error details:', {
+                message: error.message,
+                code: error.code,
+                stack: error.stack
+            });
+            
+            // Return comprehensive fallback ICE servers
+            const fallbackServers = [
+                // Google STUN servers
+                {
+                    urls: 'stun:stun.l.google.com:19302',
+                    username: '',
+                    credential: '',
+                },
+                {
+                    urls: 'stun:stun1.l.google.com:19302', 
+                    username: '',
+                    credential: '',
+                },
+                {
+                    urls: 'stun:stun2.l.google.com:19302',
+                    username: '',
+                    credential: '',
+                },
+                {
+                    urls: 'stun:stun3.l.google.com:19302',
+                    username: '',
+                    credential: '',
+                },
+                {
+                    urls: 'stun:stun4.l.google.com:19302',
+                    username: '',
+                    credential: '',
+                },
+                // Additional reliable STUN servers
+                {
+                    urls: 'stun:stun.stunprotocol.org:3478',
+                    username: '',
+                    credential: '',
+                },
+                {
+                    urls: 'stun:stun.voiparound.com',
+                    username: '',
+                    credential: '',
+                },
+                {
+                    urls: 'stun:stun.voipbuster.com',
+                    username: '',
+                    credential: '',
+                },
+            ];
+            console.log('[SFU Client] Using fallback ICE servers:', fallbackServers);
+            return fallbackServers;
         }
     }
 
@@ -77,16 +134,31 @@ export class SfuClientService implements OnModuleInit {
         roomId: string,
         peerId: string,
     ) {
-        return firstValueFrom(
-            this.sfuService.createProducer({
-                transport_id: transportId,
+        try {
+            console.log('[SFU Client] Creating producer:', {
+                transportId,
                 kind,
-                rtp_parameters: JSON.stringify(rtpParameters),
-                metadata: JSON.stringify(metadata),
-                room_id: roomId,
-                participant_data: JSON.stringify({ peer_id: peerId }),
-            }),
-        );
+                roomId,
+                peerId
+            });
+            
+            const result = await firstValueFrom(
+                this.sfuService.createProducer({
+                    transport_id: transportId,
+                    kind,
+                    rtp_parameters: JSON.stringify(rtpParameters),
+                    metadata: JSON.stringify(metadata),
+                    room_id: roomId,
+                    participant_data: JSON.stringify({ peer_id: peerId }),
+                }),
+            );
+            
+            console.log('[SFU Client] Producer created successfully:', result);
+            return result;
+        } catch (error) {
+            console.error('[SFU Client] Error creating producer:', error);
+            throw error;
+        }
     }
 
     async createConsumer(

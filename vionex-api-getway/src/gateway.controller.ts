@@ -706,8 +706,17 @@ export class GatewayController {
     @Headers('authorization') authorization?: string,
   ) {
     try {
-      const participant = await this.getParticipantFromHeader(authorization);
+      console.log('[Gateway] Produce request received:', {
+        transportId,
+        roomId: data.roomId,
+        kind: data.kind,
+        hasAuth: !!authorization
+      });
 
+      const participant = await this.getParticipantFromHeader(authorization);
+      console.log('[Gateway] Participant identified:', participant.peer_id);
+
+      console.log('[Gateway] Calling SFU service createProducer...');
       const result = await this.sfuClient.createProducer(
         transportId,
         data.kind,
@@ -716,6 +725,11 @@ export class GatewayController {
         data.roomId,
         data.participantId || participant.peer_id,
       );
+      console.log('[Gateway] SFU service response received:', {
+        success: !!result,
+        hasStreamId: !!(result as any).streamId,
+        hasProducerData: !!(result as any).producer_data
+      });
 
       // Extract streamId from SFU service response
       const participantId = data.participantId || participant.peer_id;
@@ -725,13 +739,14 @@ export class GatewayController {
       if ((result as any).streamId) {
         // Direct streamId field
         streamId = (result as any).streamId;
-        console.log('Using streamId from direct field:', streamId);
+        console.log('[Gateway] Using streamId from direct field:', streamId);
       } else if (
         (result as any).producer &&
         (result as any).producer.streamId
       ) {
         // StreamId in producer object
         streamId = (result as any).producer.streamId;
+        console.log('[Gateway] Using streamId from producer object:', streamId);
       } else {
         // Check for producer_data field (from proto)
         const resultWithProducerData = result as any;
@@ -741,16 +756,16 @@ export class GatewayController {
               resultWithProducerData.producer_data,
             );
             streamId = producerData.streamId;
-            console.log('Using streamId from producer_data:', streamId);
+            console.log('[Gateway] Using streamId from producer_data:', streamId);
           } catch (error) {
-            console.error('Failed to parse producer_data:', error);
+            console.error('[Gateway] Failed to parse producer_data:', error);
             throw new HttpException(
               'Invalid producer data from SFU service',
               HttpStatus.INTERNAL_SERVER_ERROR,
             );
           }
         } else {
-          console.error('No streamId found in result:', result);
+          console.error('[Gateway] No streamId found in result:', result);
           throw new HttpException(
             'No streamId received from SFU service',
             HttpStatus.INTERNAL_SERVER_ERROR,
@@ -758,6 +773,7 @@ export class GatewayController {
         }
       }
 
+      console.log('[Gateway] Preparing to broadcast stream-added event');
       // Broadcast stream-added event to other clients in the room via WebSocket
       const streamInfo = {
         streamId: streamId,
@@ -767,6 +783,7 @@ export class GatewayController {
         rtpParameters: data.rtpParameters,
       };
 
+      console.log('[Gateway] Broadcasting stream-added event to room:', data.roomId);
       // Use broadcast service to notify other clients
       this.broadcastService.broadcastToRoom(
         data.roomId,
@@ -774,6 +791,7 @@ export class GatewayController {
         streamInfo,
       );
 
+      console.log('[Gateway] Produce operation completed successfully');
       return {
         success: true,
         data: {
@@ -784,7 +802,12 @@ export class GatewayController {
         },
       };
     } catch (error) {
-      console.error('Error producing media:', error);
+      console.error('[Gateway] Error producing media:', error);
+      console.error('[Gateway] Error details:', {
+        message: error.message,
+        status: error.status,
+        stack: error.stack
+      });
       throw new HttpException(
         error.message || 'Failed to produce media',
         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
