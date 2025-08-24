@@ -13,7 +13,7 @@ export class HttpBroadcastService {
     if (this.io) {
       this.io.to(clientId).emit(event, data);
     } else {
-      console.warn('[HTTP Broadcast] Socket.IO server not available');
+      console.warn('[HTTP Broadcast] Socket.IO server not available 1');
     }
   }
 
@@ -21,7 +21,7 @@ export class HttpBroadcastService {
     if (this.io) {
       this.io.to(roomId).emit(event, data);
     } else {
-      console.warn('[HTTP Broadcast] Socket.IO server not available');
+      console.warn('[HTTP Broadcast] Socket.IO server not available 2');
     }
   }
   broadcastToRoomExcept(
@@ -33,7 +33,7 @@ export class HttpBroadcastService {
     if (this.io) {
       this.io.to(roomId).except(excludeSocketId).emit(event, data);
     } else {
-      console.warn('[HTTP Broadcast] Socket.IO server not available');
+      console.warn('[HTTP Broadcast] Socket.IO server not available 3');
     }
   }
 
@@ -41,7 +41,7 @@ export class HttpBroadcastService {
     if (this.io) {
       this.io.emit(event, data);
     } else {
-      console.warn('[HTTP Broadcast] Socket.IO server not available');
+      console.warn('[HTTP Broadcast] Socket.IO server not available 4');
     }
   }
 }
