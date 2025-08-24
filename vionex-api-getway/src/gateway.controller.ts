@@ -485,15 +485,34 @@ export class GatewayController {
   @Put('sfu/streams/:streamId')
   async updateStream(
     @Param('streamId') streamId: string,
-    @Body() data: { metadata: any; roomId: string },
+    @Body() data: { metadata: any; roomId: string; participantId?: string },
     @Headers('authorization') authorization?: string,
   ) {
     try {
-      const participant = await this.getParticipantFromHeader(authorization);
+      let participant: any = null;
+      let participantId = data.participantId;
+
+      // Try to get participant from authorization header first
+      if (authorization) {
+        try {
+          participant = await this.getParticipantFromHeader(authorization);
+          participantId = participant.peer_id;
+        } catch (error) {
+          console.warn('[UpdateStream] Authorization header invalid, using fallback:', error.message);
+        }
+      }
+
+      // If no participant from auth header and no participantId provided, throw error
+      if (!participantId) {
+        throw new HttpException(
+          'Either authorization header or participantId in body is required',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
 
       // Try to get roomId from the request, or look it up
       let roomId: string | undefined = data.roomId;
-      if (!roomId) {
+      if (!roomId && participant) {
         const participantRoom = await this.roomClient.getParticipantRoom(
           participant.peer_id,
         );
@@ -510,7 +529,7 @@ export class GatewayController {
       // Call SFU service to update stream metadata
       const result = await this.sfuClient.updateStream({
         stream_id: streamId,
-        participant_id: participant.peer_id,
+        participant_id: participantId,
         metadata: JSON.stringify(data.metadata),
         room_id: roomId,
       });
@@ -521,7 +540,7 @@ export class GatewayController {
         'sfu:stream-metadata-updated',
         {
           streamId: streamId,
-          publisherId: participant.peer_id,
+          publisherId: participantId,
           metadata: data.metadata,
           roomId: roomId,
         },
@@ -532,7 +551,7 @@ export class GatewayController {
         message: 'Stream updated successfully',
         stream: {
           streamId: streamId,
-          publisherId: participant.peer_id,
+          publisherId: participantId,
           metadata: data.metadata,
         },
       };

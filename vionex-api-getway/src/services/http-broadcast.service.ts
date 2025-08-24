@@ -32,6 +32,7 @@ export class HttpBroadcastService {
       console.error('[HTTP Broadcast] Socket.IO server not available - cannot broadcast to room');
       console.error('[HTTP Broadcast] Event:', event, 'RoomId:', roomId);
       console.error('[HTTP Broadcast] This usually means the WebSocket gateway has not been initialized yet');
+      console.error('[HTTP Broadcast] Stack trace:', new Error().stack);
     }
   }
   broadcastToRoomExcept(
@@ -42,8 +43,10 @@ export class HttpBroadcastService {
   ) {
     if (this.io) {
       this.io.to(roomId).except(excludeSocketId).emit(event, data);
+      console.log(`[HTTP Broadcast] Sent event '${event}' to room ${roomId} except ${excludeSocketId}`);
     } else {
-      console.warn('[HTTP Broadcast] Socket.IO server not available 3');
+      console.error('[HTTP Broadcast] Socket.IO server not available - cannot broadcast to room except');
+      console.error('[HTTP Broadcast] Event:', event, 'RoomId:', roomId);
     }
   }
 
