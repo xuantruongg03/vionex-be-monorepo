@@ -71,6 +71,7 @@ export class RoomHttpController {
     ) {}
 
     @Post(':roomId/join')
+    // @deprecated - Use WebSocket sfu:join instead for new implementations
     async joinRoom(
         @Param('roomId') roomId: string,
         @Body() body: { peerId: string; password?: string },
@@ -145,6 +146,7 @@ export class RoomHttpController {
     }
 
     @Post(':roomId/rtp-capabilities')
+    // @deprecated - RTP capabilities are now provided via WebSocket sfu:router-capabilities
     async setRtpCapabilities(
         @Param('roomId') roomId: string,
         @Body()
