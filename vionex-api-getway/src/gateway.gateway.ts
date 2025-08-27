@@ -212,8 +212,6 @@ export class GatewayGateway
         @MessageBody()
         data: { roomId: string; peerId: string; password?: string },
     ) {
-        console.log(data);
-
         // Check if room is password protected
         const isRoomLocked = await this.roomClient.isRoomLocked(data.roomId);
         if (isRoomLocked) {
@@ -1463,7 +1461,6 @@ export class GatewayGateway
         // Cache participant data if provided
         if (participantData) {
             this.participantCache.set(peerId, participantData);
-            console.log(`[Gateway] Cached participant data for ${peerId}`);
         }
     }
 
