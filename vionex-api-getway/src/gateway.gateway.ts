@@ -1047,11 +1047,34 @@ export class GatewayGateway
         }
 
         try {
-            // Step 5: Emit to all clients in the room (excluding sender)
+            // ENHANCED: Call SFU to handle speaking priority logic instead of just emitting event
+            // This replaces the old simple emit logic with full priority management
+            try {
+                const speakingResult = await this.sfuClient.handleSpeaking(
+                    roomId,
+                    peerId,
+                    0, // port not used for priority logic
+                );
+                console.log(`[Gateway] SFU speaking result:`, speakingResult);
+
+                // ENHANCED: Check if speaking user needs to be prioritized for consumption
+                // This triggers dynamic stream consumption based on voice activity
+                if (
+                    speakingResult &&
+                    (speakingResult as any).status === 'success'
+                ) {
+                    await this.handleSpeakingUserPriority(roomId, peerId);
+                }
+            } catch (sfuError) {
+                console.error(`[Gateway] SFU speaking error:`, sfuError);
+                // Continue with basic emit if SFU fails
+            }
+
+            // Step 5: Emit to all clients in the room (excluding sender) - KEPT ORIGINAL LOGIC
             client.to(roomId).emit('sfu:user-speaking', { peerId });
 
             console.log(
-                `[Gateway] User ${peerId} pipeline ready - waiting for buffered audio + live stream`,
+                `[Gateway] User ${peerId} speaking handled with priority check`,
             );
         } catch (error) {
             console.error('[Gateway] Error handling speaking event:', error);
@@ -1574,6 +1597,156 @@ export class GatewayGateway
         }
     }
 
+    /**
+     * ENHANCED: Handle priority streaming for speaking user
+     * This method implements the voice activity detection-based stream prioritization
+     * When a user speaks, we ensure their stream is consumed by other participants
+     */
+    private async handleSpeakingUserPriority(
+        roomId: string,
+        speakingPeerId: string,
+    ) {
+        try {
+            console.log(
+                `[Gateway] Handling speaking priority for ${speakingPeerId} in room ${roomId}`,
+            );
+
+            // Step 1: Get all participants in the room (except the speaking user)
+            const roomParticipants =
+                await this.getAllParticipantsInRoom(roomId);
+            const otherParticipants = roomParticipants.filter(
+                (p) => p.peer_id !== speakingPeerId,
+            );
+
+            // Step 2: Get streams from the speaking user that need to be prioritized
+            const speakingUserStreams = await this.getSpeakingUserStreams(
+                roomId,
+                speakingPeerId,
+            );
+
+            if (speakingUserStreams.length === 0) {
+                console.log(
+                    `[Gateway] No streams found for speaking user ${speakingPeerId}`,
+                );
+                return;
+            }
+
+            // Step 3: For each other participant, ensure they consume the speaking user's streams
+            for (const participant of otherParticipants) {
+                const socketId = this.participantSocketMap.get(
+                    participant.peer_id,
+                );
+                if (!socketId) continue;
+
+                const socket = this.io.sockets.sockets.get(socketId);
+                if (!socket) continue;
+
+                // Step 4: Trigger stream consumption for speaking user
+                for (const stream of speakingUserStreams) {
+                    // Emit stream-added event to trigger consumption
+                    socket.emit('sfu:stream-added', {
+                        streamId: stream.streamId,
+                        stream_id: stream.streamId,
+                        publisherId: speakingPeerId,
+                        publisher_id: speakingPeerId,
+                        metadata: stream.metadata || {
+                            isFromSpeaking: true, // Mark as priority from speaking
+                            priority: true,
+                        },
+                        rtpParameters: stream.rtpParameters,
+                    });
+
+                    console.log(
+                        `[Gateway] Sent priority stream ${stream.streamId} to ${participant.peer_id}`,
+                    );
+                }
+            }
+
+            console.log(
+                `[Gateway] Successfully handled speaking priority for ${speakingPeerId}`,
+            );
+        } catch (error) {
+            console.error(`[Gateway] Error handling speaking priority:`, error);
+        }
+    }
+
+    /**
+     * ENHANCED: Get all participants in a room
+     * Reuses existing logic from room service
+     */
+    private async getAllParticipantsInRoom(roomId: string): Promise<any[]> {
+        try {
+            const updatedRoom = await this.roomClient.getRoom(roomId);
+            if (
+                updatedRoom &&
+                updatedRoom.data &&
+                updatedRoom.data.participants
+            ) {
+                return updatedRoom.data.participants.map(
+                    (participant: any) => ({
+                        peer_id: participant.peer_id,
+                        peerId: participant.peer_id,
+                        is_creator: participant.is_creator,
+                        time_arrive: participant.time_arrive,
+                    }),
+                );
+            }
+            return [];
+        } catch (error) {
+            console.error(
+                `[Gateway] Error getting participants for room ${roomId}:`,
+                error,
+            );
+            return [];
+        }
+    }
+
+    /**
+     * ENHANCED: Get streams from speaking user that should be prioritized
+     * This method filters for audio/video streams that need priority consumption
+     */
+    private async getSpeakingUserStreams(
+        roomId: string,
+        speakingPeerId: string,
+    ): Promise<any[]> {
+        try {
+            // Get all streams from SFU for this room
+            const allStreams = await this.sfuClient.getStreams(roomId);
+
+            if (!allStreams) {
+                return [];
+            }
+
+            // Cast to any to handle dynamic response structure
+            const streamsData = allStreams as any;
+            const streams = streamsData.streams || streamsData.data || [];
+
+            // Filter streams from the speaking user (audio/video, not screen share)
+            const userStreams = streams.filter((stream: any) => {
+                const streamId = stream.streamId || stream.stream_id;
+                const publisherId = stream.publisherId || stream.publisher_id;
+
+                // Must be from speaking user
+                if (publisherId !== speakingPeerId) return false;
+
+                // Parse stream ID to determine type
+                const parts = streamId.split('_');
+                const mediaType = parts[1]; // video, audio, screen, screen_audio
+
+                // Only prioritize regular audio/video streams, not screen shares
+                return mediaType === 'video' || mediaType === 'audio';
+            });
+
+            return userStreams;
+        } catch (error) {
+            console.error(
+                `[Gateway] Error getting speaking user streams:`,
+                error,
+            );
+            return [];
+        }
+    }
+
     // ==================== SFU HANDLERS ====================
 
     @SubscribeMessage('sfu:unpublish')
@@ -1660,6 +1833,73 @@ export class GatewayGateway
         }
     }
 
+    @SubscribeMessage('sfu:update-stream-metadata')
+    async handleUpdateStreamMetadata(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            streamId: string;
+            metadata: any;
+            roomId?: string;
+        },
+    ) {
+        try {
+            // Get participant info from socket mapping
+            const peerId = this.getParticipantBySocketId(client.id);
+            const roomId =
+                data.roomId || (await this.getRoomIdBySocketId(client.id));
+
+            if (!peerId || !roomId) {
+                client.emit('sfu:error', {
+                    message: 'Invalid participant or room information',
+                    code: 'INVALID_CONTEXT',
+                });
+                return {
+                    success: false,
+                    error: 'Invalid participant or room information',
+                };
+            }
+
+            // Call SFU service to update stream metadata
+            await this.sfuClient.updateStream({
+                stream_id: data.streamId,
+                participant_id: peerId,
+                metadata: JSON.stringify(data.metadata),
+                room_id: roomId,
+            });
+
+            // Broadcast the metadata update to all clients in the room
+            this.io.to(roomId).emit('sfu:stream-metadata-updated', {
+                streamId: data.streamId,
+                publisherId: peerId,
+                metadata: data.metadata,
+                roomId: roomId,
+            });
+
+            // Confirm to the sender
+            client.emit('sfu:stream-metadata-updated-ack', {
+                success: true,
+                streamId: data.streamId,
+                metadata: data.metadata,
+            });
+
+            return {
+                success: true,
+                message: 'Stream metadata updated successfully',
+            };
+        } catch (error) {
+            console.error('[Gateway] Error updating stream metadata:', error);
+            client.emit('sfu:error', {
+                message: error.message || 'Failed to update stream metadata',
+                code: 'UPDATE_STREAM_METADATA_FAILED',
+            });
+            return {
+                success: false,
+                error: error.message || 'Failed to update stream metadata',
+            };
+        }
+    }
+
     // ==================== CHAT HANDLERS ====================
 
     @SubscribeMessage('chat:join')
@@ -1725,6 +1965,130 @@ export class GatewayGateway
         },
     ) {
         return this.chatHandler.handleSendFileMessage(client, data);
+    }
+
+    // ==================== PIN/UNPIN USER HANDLERS ====================
+
+    @SubscribeMessage('sfu:pin-user')
+    async handlePinUser(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            pinnedPeerId: string;
+            transportId: string;
+        },
+    ) {
+        try {
+            const peerId = this.connectionMap.get(client.id);
+            if (!peerId) {
+                client.emit('sfu:pin-user-response', {
+                    success: false,
+                    message: 'User not authenticated',
+                });
+                return;
+            }
+
+            console.log(`[Gateway] Pin user request from ${peerId} to pin ${data.pinnedPeerId}`);
+
+            // Get participant data for RTP capabilities
+            const participant = this.participantCache.get(peerId);
+            const rtpCapabilities = participant?.rtpCapabilities || {};
+
+            const result = await this.sfuClient.pinUser(
+                data.roomId,
+                peerId, // pinnerPeerId
+                data.pinnedPeerId, // pinnedPeerId
+                data.transportId,
+                rtpCapabilities,
+            ) as any;
+
+            const parsedResult = typeof result.pin_data === 'string' 
+                ? JSON.parse(result.pin_data) 
+                : result.pin_data;
+
+            // Emit response to pinner
+            client.emit('sfu:pin-user-response', {
+                success: parsedResult.success,
+                message: parsedResult.message,
+                consumersCreated: parsedResult.consumersCreated || [],
+                alreadyPriority: parsedResult.alreadyPriority,
+                existingConsumer: parsedResult.existingConsumer,
+            });
+
+            // Broadcast pin event to room (for UI updates)
+            client.to(data.roomId).emit('sfu:user-pinned', {
+                pinnerPeerId: peerId,
+                pinnedPeerId: data.pinnedPeerId,
+                roomId: data.roomId,
+            });
+
+            console.log(`[Gateway] Pin user successful: ${peerId} pinned ${data.pinnedPeerId}`);
+
+        } catch (error) {
+            console.error(`[Gateway] Error pinning user:`, error);
+            client.emit('sfu:pin-user-response', {
+                success: false,
+                message: error.message || 'Failed to pin user',
+            });
+        }
+    }
+
+    @SubscribeMessage('sfu:unpin-user')
+    async handleUnpinUser(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            unpinnedPeerId: string;
+        },
+    ) {
+        try {
+            const peerId = this.connectionMap.get(client.id);
+            if (!peerId) {
+                client.emit('sfu:unpin-user-response', {
+                    success: false,
+                    message: 'User not authenticated',
+                });
+                return;
+            }
+
+            console.log(`[Gateway] Unpin user request from ${peerId} to unpin ${data.unpinnedPeerId}`);
+
+            const result = await this.sfuClient.unpinUser(
+                data.roomId,
+                peerId, // unpinnerPeerId
+                data.unpinnedPeerId, // unpinnedPeerId
+            ) as any;
+
+            const parsedResult = typeof result.unpin_data === 'string' 
+                ? JSON.parse(result.unpin_data) 
+                : result.unpin_data;
+
+            // Emit response to unpinner
+            client.emit('sfu:unpin-user-response', {
+                success: parsedResult.success,
+                message: parsedResult.message,
+                consumersRemoved: parsedResult.consumersRemoved || [],
+                stillInPriority: parsedResult.stillInPriority,
+            });
+
+            // Broadcast unpin event to room (for UI updates)
+            client.to(data.roomId).emit('sfu:user-unpinned', {
+                unpinnerPeerId: peerId,
+                unpinnedPeerId: data.unpinnedPeerId,
+                roomId: data.roomId,
+            });
+
+            console.log(`[Gateway] Unpin user successful: ${peerId} unpinned ${data.unpinnedPeerId}`);
+
+        } catch (error) {
+            console.error(`[Gateway] Error unpinning user:`, error);
+            client.emit('sfu:unpin-user-response', {
+                success: false,
+                message: error.message || 'Failed to unpin user',
+            });
+        }
     }
 
     // Helper methods for parsing stream data

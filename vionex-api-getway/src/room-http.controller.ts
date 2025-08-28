@@ -70,188 +70,196 @@ export class RoomHttpController {
         private readonly broadcastService: HttpBroadcastService,
     ) {}
 
-    @Post(':roomId/join')
-    // @deprecated - Use WebSocket sfu:join instead for new implementations
-    async joinRoom(
-        @Param('roomId') roomId: string,
-        @Body() body: { peerId: string; password?: string },
-        @Req() req: any,
-    ) {
-        try {
-            // Validate room access
-            const isLocked = await this.roomClient.isRoomLocked(roomId);
-            if (isLocked && !body.password) {
-                throw new BadRequestException('Room password required');
-            }
-            if (
-                isLocked &&
-                body.password &&
-                !(await this.roomClient.verifyRoomPassword(
-                    roomId,
-                    body.password,
-                ))
-            ) {
-                throw new UnauthorizedException('Invalid room password');
-            }
+    // @Post(':roomId/join')
+    // // @deprecated - Use WebSocket sfu:join instead for new implementations
+    // // This endpoint will be removed in future versions
+    // async joinRoom(
+    //     @Param('roomId') roomId: string,
+    //     @Body() body: { peerId: string; password?: string },
+    //     @Req() req: any,
+    // ) {
+    //     try {
+    //         // Validate room access
+    //         const isLocked = await this.roomClient.isRoomLocked(roomId);
+    //         if (isLocked && !body.password) {
+    //             throw new BadRequestException('Room password required');
+    //         }
+    //         if (
+    //             isLocked &&
+    //             body.password &&
+    //             !(await this.roomClient.verifyRoomPassword(
+    //                 roomId,
+    //                 body.password,
+    //             ))
+    //         ) {
+    //             throw new UnauthorizedException('Invalid room password');
+    //         }
 
-            // Create room if needed
-            let room = await this.roomClient.getRoom(roomId);
-            if (!room.data?.room_id) {
-                await this.roomClient.createRoom(roomId);
-                // Note: Media room creation is now handled by SFU service via WebSocket
-                room = await this.roomClient.getRoom(roomId);
-            }
+    //         // Create room if needed
+    //         let room = await this.roomClient.getRoom(roomId);
+    //         if (!room.data?.room_id) {
+    //             await this.roomClient.createRoom(roomId);
+    //             // Note: Media room creation is now handled by SFU service via WebSocket
+    //             room = await this.roomClient.getRoom(roomId);
+    //         }
 
-            // Check duplicate peerId
-            if (
-                room.data?.participants?.some((p) => p.peerId === body.peerId)
-            ) {
-                throw new ConflictException('Peer ID already in use');
-            }
+    //         // Check duplicate peerId
+    //         if (
+    //             room.data?.participants?.some((p) => p.peerId === body.peerId)
+    //         ) {
+    //             throw new ConflictException('Peer ID already in use');
+    //         }
 
-            // Create participant
-            const participant: Participant = {
-                socket_id: `pending-ws-${roomId}-${body.peerId}`, // Will be updated when WebSocket connects, format: pending-ws-{roomId}-{peerId}
-                peer_id: body.peerId,
-                transports: new Map(),
-                producers: new Map(),
-                consumers: new Map(),
-                is_creator: !room.data?.participants?.length,
-                time_arrive: new Date(),
-            };
+    //         // Create participant
+    //         const participant: Participant = {
+    //             socket_id: `pending-ws-${roomId}-${body.peerId}`, // Will be updated when WebSocket connects, format: pending-ws-{roomId}-{peerId}
+    //             peer_id: body.peerId,
+    //             transports: new Map(),
+    //             producers: new Map(),
+    //             consumers: new Map(),
+    //             is_creator: !room.data?.participants?.length,
+    //             time_arrive: new Date(),
+    //         };
 
-            await this.roomClient.setParticipant(roomId, participant);
+    //         await this.roomClient.setParticipant(roomId, participant);
 
-            // Broadcast via WebSocket to other clients
-            this.broadcastService.broadcastToRoom(roomId, 'sfu:new-peer-join', {
-                roomId,
-                user: {
-                    peerId: participant.peer_id,
-                    isCreator: participant.is_creator,
-                    timeArrive: participant.time_arrive,
-                },
-            });
+    //         // Broadcast via WebSocket to other clients
+    //         this.broadcastService.broadcastToRoom(roomId, 'sfu:new-peer-join', {
+    //             roomId,
+    //             user: {
+    //                 peerId: participant.peer_id,
+    //                 isCreator: participant.is_creator,
+    //                 timeArrive: participant.time_arrive,
+    //             },
+    //         });
 
-            return {
-                success: true,
-                peerId: participant.peer_id,
-                isCreator: participant.is_creator,
-                roomId,
-                rtpCapabilities: null, // Will be provided via WebSocket
-            };
-        } catch (error) {
-            console.error('[HTTP] Join room error:', error);
-            throw error;
-        }
-    }
+    //         return {
+    //             success: true,
+    //             peerId: participant.peer_id,
+    //             isCreator: participant.is_creator,
+    //             roomId,
+    //             rtpCapabilities: null, // Will be provided via WebSocket
+    //         };
+    //     } catch (error) {
+    //         console.error('[HTTP] Join room error:', error);
+    //         throw error;
+    //     }
+    // }
 
-    @Post(':roomId/rtp-capabilities')
-    // @deprecated - RTP capabilities are now provided via WebSocket sfu:router-capabilities
-    async setRtpCapabilities(
-        @Param('roomId') roomId: string,
-        @Body()
-        body: {
-            rtpCapabilities: mediasoupTypes.RtpCapabilities;
-            peerId: string;
-        },
-    ) {
-        try {
-            const peerId = body.peerId;
+    // @Post(':roomId/rtp-capabilities')
+    // // @deprecated - RTP capabilities are now provided via WebSocket sfu:router-capabilities
+    // // This endpoint will be removed in future versions
+    // async setRtpCapabilities(
+    //     @Param('roomId') roomId: string,
+    //     @Body()
+    //     body: {
+    //         rtpCapabilities: mediasoupTypes.RtpCapabilities;
+    //         peerId: string;
+    //     },
+    // ) {
+    //     try {
+    //         const peerId = body.peerId;
 
-            if (!peerId) {
-                throw new BadRequestException('Peer ID required');
-            }
-            const participant = await this.roomClient.getParticipantByPeerId(
-                roomId,
-                peerId,
-            );
+    //         if (!peerId) {
+    //             throw new BadRequestException('Peer ID required');
+    //         }
+    //         const participant = await this.roomClient.getParticipantByPeerId(
+    //             roomId,
+    //             peerId,
+    //         );
 
-            if (!participant) {
-                try {
-                    const room = await this.roomClient.getRoom(roomId);
-                    const roomParticipant = room.data?.participants?.find(
-                        (p) => p.peerId === peerId || p.peer_id === peerId,
-                    );
+    //         if (!participant) {
+    //             try {
+    //                 const room = await this.roomClient.getRoom(roomId);
+    //                 const roomParticipant = room.data?.participants?.find(
+    //                     (p) => p.peerId === peerId || p.peer_id === peerId,
+    //                 );
 
-                    if (roomParticipant) {
-                    } else {
-                        throw new NotFoundException('Not in room');
-                    }
-                } catch (error) {
-                    throw new NotFoundException('Not in room');
-                }
-            } // Update participant's RTP capabilities
-            if (participant) {
-                participant.rtp_capabilities = body.rtpCapabilities;
-                // TODO: Update participant in room service
-                await this.roomClient.updateParticipantRtpCapabilities(
-                    peerId,
-                    participant,
-                );
-            }
-            return {
-                success: true,
-                message: 'RTP capabilities set successfully',
-            };
-        } catch (error) {
-            console.error('[HTTP] Set RTP capabilities error:', error);
-            throw error;
-        }
-    }
+    //                 if (roomParticipant) {
+    //                 } else {
+    //                     throw new NotFoundException('Not in room');
+    //                 }
+    //             } catch (error) {
+    //                 throw new NotFoundException('Not in room');
+    //             }
+    //         } // Update participant's RTP capabilities
+    //         if (participant) {
+    //             participant.rtp_capabilities = body.rtpCapabilities;
+    //             // TODO: Update participant in room service
+    //             await this.roomClient.updateParticipantRtpCapabilities(
+    //                 peerId,
+    //                 participant,
+    //             );
+    //         }
+    //         return {
+    //             success: true,
+    //             message: 'RTP capabilities set successfully',
+    //         };
+    //     } catch (error) {
+    //         console.error('[HTTP] Set RTP capabilities error:', error);
+    //         throw error;
+    //     }
+    // }
 
-    @Get(':roomId/users')
-    async getRoomUsers(@Param('roomId') roomId: string, @Req() req: any) {
-        try {
-            const room = await this.roomClient.getRoom(roomId);
-            if (!room.data) {
-                throw new NotFoundException('Room not found');
-            }
+    // @Get(':roomId/users')
+    // // @deprecated - Use WebSocket for real-time user updates
+    // // This endpoint will be removed in future versions
+    // async getRoomUsers(@Param('roomId') roomId: string, @Req() req: any) {
+    //     try {
+    //         const room = await this.roomClient.getRoom(roomId);
+    //         if (!room.data) {
+    //             throw new NotFoundException('Room not found');
+    //         }
 
-            const users =
-                room.data?.participants?.map((p) => ({
-                    peerId: p.peerId || p.peer_id,
-                    isCreator: p.isCreator || p.is_creator,
-                    timeArrive: p.timeArrive || p.time_arrive,
-                })) || [];
+    //         const users =
+    //             room.data?.participants?.map((p) => ({
+    //                 peerId: p.peerId || p.peer_id,
+    //                 isCreator: p.isCreator || p.is_creator,
+    //                 timeArrive: p.timeArrive || p.time_arrive,
+    //             })) || [];
 
-            return {
-                success: true,
-                users,
-            };
-        } catch (error) {
-            console.error('[HTTP] Get users error:', error);
-            throw error;
-        }
-    }
+    //         return {
+    //             success: true,
+    //             users,
+    //         };
+    //     } catch (error) {
+    //         console.error('[HTTP] Get users error:', error);
+    //         throw error;
+    //     }
+    // }
 
-    @Get(':roomId/streams')
-    async getRoomStreams(@Param('roomId') roomId: string, @Req() req: any) {
-        try {
-            // Note: Stream management is now handled via WebSocket
-            // Use SFU service directly via WebSocket for better real-time updates
-            return {
-                success: true,
-                streams: [],
-                message:
-                    'Use WebSocket connection for real-time stream management',
-            };
-        } catch (error) {
-            console.error('[HTTP] Get streams error:', error);
-            throw error;
-        }
-    }
-    @Post(':roomId/transports')
-    async createTransport(
-        @Param('roomId') roomId: string,
-        @Body() body: { isProducer: boolean; peerId: string },
-    ) {
-        return {
-            success: false,
-            message:
-                'Transport creation is now handled via WebSocket connection. Please use WebSocket API.',
-            redirectTo: 'WebSocket sfu:create-transport event',
-        };
-    }
+    // @Get(':roomId/streams')
+    // // @deprecated - Use WebSocket for real-time stream management
+    // // This endpoint will be removed in future versions
+    // async getRoomStreams(@Param('roomId') roomId: string, @Req() req: any) {
+    //     try {
+    //         // Note: Stream management is now handled via WebSocket
+    //         // Use SFU service directly via WebSocket for better real-time updates
+    //         return {
+    //             success: true,
+    //             streams: [],
+    //             message:
+    //                 'Use WebSocket connection for real-time stream management',
+    //         };
+    //     } catch (error) {
+    //         console.error('[HTTP] Get streams error:', error);
+    //         throw error;
+    //     }
+    // }
+    // @Post(':roomId/transports')
+    // // @deprecated - Use WebSocket sfu:create-transport instead
+    // // This endpoint will be removed in future versions
+    // async createTransport(
+    //     @Param('roomId') roomId: string,
+    //     @Body() body: { isProducer: boolean; peerId: string },
+    // ) {
+    //     return {
+    //         success: false,
+    //         message:
+    //             'Transport creation is now handled via WebSocket connection. Please use WebSocket API.',
+    //         redirectTo: 'WebSocket sfu:create-transport event',
+    //     };
+    // }
 
     @Post(':roomId/transports/:transportId/connect')
     async connectTransport(

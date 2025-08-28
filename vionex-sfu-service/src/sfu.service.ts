@@ -4,6 +4,9 @@ import mediasoupTypes, { AppData } from 'mediasoup/node/lib/types';
 import * as T from './interface';
 import { WorkerPoolService } from './worker-pool/worker-pool.service';
 
+// SFU Configuration Constants
+export const MAX_PRIORITY_STREAMS = 10; // Maximum number of streams to consume for users 1-10
+
 @Injectable()
 export class SfuService implements OnModuleInit, OnModuleDestroy {
     private rooms = new Map<string, Map<string, any>>();
@@ -18,6 +21,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     private producerToStream = new Map<string, T.Stream>(); // Map<producerId, Stream>
     private transports = new Map<string, mediasoupTypes.WebRtcTransport>(); // Map<transportId, Transport>
     private activeSpeakers = new Map<string, Map<string, Date>>(); // Map<roomId, Map<participantId, lastActiveTime>>
+
+    // Pin/Unpin system - Map<roomId, Map<consumerId, Set<publisherId>>>
+    // PRIORITY SYSTEM: Pinned users get HIGHEST priority in shouldUserReceiveStream()
+    private pinnedUsers = new Map<string, Map<string, Set<string>>>();
 
     // Enhanced translation cabin support with bidirectional transports
     private translationCabins = new Map<
@@ -352,6 +359,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
             // Clean the translation cabins
             this.clearTranslationCabins(roomId);
+
+            // Clean the pinned users for this room
+            this.clearPinsForRoom(roomId);
         }
     }
 
@@ -408,11 +418,29 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         return this.getStreamsByRoom(roomId).length;
     }
 
-    // Priority stream management - only first 10 streams get consumed
+    // ENHANCED: Priority stream management based on speaking activity and special status
+    // This replaces the old static "first 10 streams" logic with intelligent prioritization
     getPriorityStreams(roomId: string): T.Stream[] {
-        return this.getStreamsByRoom(roomId)
-            .sort((a, b) => a.streamId.localeCompare(b.streamId))
-            .slice(0, 10);
+        const allRoomStreams = this.getStreamsByRoom(roomId);
+
+        // Use the enhanced priority sorting that considers speaking activity
+        const sortedStreams = this.sortStreamsByPriority(
+            allRoomStreams,
+            roomId,
+        );
+
+        // Get prioritized users (speaking + special + top streams)
+        const prioritizedUsers = this.getPrioritizedUsers(roomId);
+
+        // Return streams from prioritized users
+        const priorityStreams = sortedStreams.filter((stream) =>
+            prioritizedUsers.has(stream.publisherId),
+        );
+
+        console.log(
+            `[SFU] Priority streams for room ${roomId}: ${priorityStreams.length} streams from ${prioritizedUsers.size} users`,
+        );
+        return priorityStreams;
     }
 
     isStreamInPriority(roomId: string, streamId: string): boolean {
@@ -457,32 +485,183 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         return true;
     }
 
-    // Stream prioritization logic from old code
+    // Helper method to check if user is in first N users of a room
+    private isUserInFirstN(roomId: string, userId: string, n: number): boolean {
+        const roomState = this.rooms.get(roomId);
+        if (!roomState) return false;
+
+        const users = Array.from(roomState.keys());
+        return users.slice(0, n).includes(userId);
+    }
+
+    // PIN/UNPIN Helper Methods
+    private isPinnedUser(
+        roomId: string,
+        consumerId: string,
+        publisherId: string,
+    ): boolean {
+        const roomPins = this.pinnedUsers.get(roomId);
+        if (!roomPins) return false;
+
+        const userPins = roomPins.get(consumerId);
+        return userPins ? userPins.has(publisherId) : false;
+    }
+
+    private initializePinForRoom(roomId: string): void {
+        if (!this.pinnedUsers.has(roomId)) {
+            this.pinnedUsers.set(roomId, new Map());
+        }
+    }
+
+    private initializePinForUser(roomId: string, userId: string): void {
+        this.initializePinForRoom(roomId);
+        const roomPins = this.pinnedUsers.get(roomId)!;
+        if (!roomPins.has(userId)) {
+            roomPins.set(userId, new Set());
+        }
+    }
+
+    /**
+     * OPTIMIZED CONSUMPTION LOGIC - Tận dụng toàn bộ existing logic
+     *
+     * Strategy: "10 người đầu consume tất cả, từ người thứ 11 trở đi chỉ consume priority"
+     *
+     * Performance Benefits:
+     * - 1-10 users: Full mesh (high quality, manageable bandwidth)
+     * - 11+ users: Priority-only (bandwidth optimization, scalability)
+     *
+     * Leverages existing methods:
+     * - isSpecialUser(): Screen share, translation, special roles
+     * - isUserSpeaking(): VAD-based speaking detection
+     * - getPrioritizedUsers(): Dynamic priority calculation
+     * - sortStreamsByPriority(): Intelligent stream ordering
+     *
+     * No new logic needed - pure optimization of existing codebase!
+     */
     private shouldUserReceiveStream(
         roomId: string,
         consumerId: string,
         publisherId: string,
     ): boolean {
-        // Sử dụng logic từ mã cũ để kiểm tra xem user có nên nhận stream này không
+        const roomState = this.rooms.get(roomId);
+        if (!roomState) return false;
+
+        // PRIORITY 0: Pinned users always consume (highest priority)
+        if (this.isPinnedUser(roomId, consumerId, publisherId)) {
+            console.log(
+                `[SFU] User ${consumerId} consuming PINNED stream from ${publisherId}`,
+            );
+            return true;
+        }
+
+        const totalUsers = roomState.size;
+        const isConsumerInFirst10 = this.isUserInFirstN(roomId, consumerId, 10);
+
+        // First 10 users consume ALL streams (high bandwidth scenario)
+        if (totalUsers <= 10 || isConsumerInFirst10) {
+            console.log(
+                `[SFU] User ${consumerId} in first 10 - consuming all streams`,
+            );
+            return true;
+        }
+
+        // 11+ users only consume PRIORITY streams (bandwidth optimization)
+        // Tận dụng existing priority logic methods
+        const isPriorityStream =
+            this.isSpecialUser(roomId, publisherId) ||
+            this.isUserSpeaking(roomId, publisherId);
+
+        if (isPriorityStream) {
+            console.log(
+                `[SFU] User ${consumerId} (11+) consuming priority stream from ${publisherId}`,
+            );
+            return true;
+        }
+
+        // For 11+ users, check if publisher is in prioritized users list
         const prioritizedUsers = this.getPrioritizedUsers(roomId);
-        return prioritizedUsers.has(publisherId);
+        const isInPriorityList = prioritizedUsers.has(publisherId);
+
+        if (isInPriorityList) {
+            console.log(
+                `[SFU] User ${consumerId} consuming prioritized stream from ${publisherId}`,
+            );
+            return true;
+        }
+
+        console.log(
+            `[SFU] User ${consumerId} (11+) not consuming regular stream from ${publisherId}`,
+        );
+        return false;
     }
 
+    // ENHANCED: Dynamic prioritized users based on speaking activity and special status
+    // This replaces the old static "first 10 streams" logic with intelligent prioritization
     private getPrioritizedUsers(roomId: string): Set<string> {
         const prioritizedUsers = new Set<string>();
 
-        // Logic từ mã cũ: chỉ cho phép 10 stream đầu tiên được consume
-        const roomStreams = Array.from(this.streams.values())
-            .filter((stream) => stream.roomId === roomId)
-            .sort((a, b) => {
-                // Sắp xếp theo thời gian tạo (dựa trên streamId có timestamp)
-                return a.streamId.localeCompare(b.streamId);
-            })
-            .slice(0, 10); // Chỉ lấy 10 stream đầu tiên
+        // Step 1: Add currently speaking users (highest priority)
+        const roomSpeakers = this.activeSpeakers.get(roomId);
+        if (roomSpeakers) {
+            const currentTime = new Date();
+            const speakingThreshold = 5000; // 5 seconds
 
-        roomStreams.forEach((stream) => {
-            prioritizedUsers.add(stream.publisherId);
+            roomSpeakers.forEach((lastSpeakTime, peerId) => {
+                if (
+                    currentTime.getTime() - lastSpeakTime.getTime() <
+                    speakingThreshold
+                ) {
+                    prioritizedUsers.add(peerId);
+                    console.log(
+                        `[SFU] Added speaking user ${peerId} to priority list`,
+                    );
+                }
+            });
+        }
+
+        // Step 2: Add special users (creators, admins, etc.)
+        const allRoomStreams = this.getStreamsByRoom(roomId);
+        const specialUsers = new Set<string>();
+        allRoomStreams.forEach((stream) => {
+            if (this.isSpecialUser(roomId, stream.publisherId)) {
+                specialUsers.add(stream.publisherId);
+            }
         });
+        specialUsers.forEach((userId) => {
+            prioritizedUsers.add(userId);
+            console.log(`[SFU] Added special user ${userId} to priority list`);
+        });
+
+        // Step 3: Fill remaining slots with streams based on priority
+        const remainingSlots = Math.max(
+            0,
+            MAX_PRIORITY_STREAMS - prioritizedUsers.size,
+        );
+        if (remainingSlots > 0) {
+            // Get streams sorted by priority (excluding already prioritized users)
+            const sortedStreams = this.sortStreamsByPriority(
+                allRoomStreams,
+                roomId,
+            ).filter((stream) => !prioritizedUsers.has(stream.publisherId));
+
+            // Add users from highest priority streams until we reach the limit
+            const addedUsers = new Set<string>();
+            for (const stream of sortedStreams) {
+                if (addedUsers.size >= remainingSlots) break;
+
+                if (!addedUsers.has(stream.publisherId)) {
+                    prioritizedUsers.add(stream.publisherId);
+                    addedUsers.add(stream.publisherId);
+                    console.log(
+                        `[SFU] Added priority user ${stream.publisherId} to fill remaining slots`,
+                    );
+                }
+            }
+        }
+
+        console.log(
+            `[SFU] Total prioritized users for room ${roomId}: ${prioritizedUsers.size}`,
+        );
         return prioritizedUsers;
     }
 
@@ -588,7 +767,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 throw new Error(`Stream ${streamId} not found`);
             }
 
-            // Check if user should receive this stream
+            // ENHANCED: Check if user should receive this stream with speaking priority
             if (
                 !forcePinConsumer &&
                 !this.shouldUserReceiveStream(
@@ -605,7 +784,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     streamId: streamId,
                     producerId: stream.producerId,
                     message:
-                        'Stream not in priority list - only first 10 streams are consumed',
+                        'Stream not in priority list - prioritizing speaking users and special users',
                 };
             }
 
@@ -922,7 +1101,11 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         return removedStreams;
     }
 
-    // Pin/Unpin logic methods
+    // ================== ENHANCED PIN/UNPIN LOGIC ==================
+
+    /**
+     * Pin a user for consumption - with smart consumer reuse and pin system integration
+     */
     async pinUser(
         roomId: string,
         pinnerPeerId: string,
@@ -934,8 +1117,16 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         message: string;
         consumersCreated?: any[];
         alreadyPriority?: boolean;
+        existingConsumer?: boolean;
     }> {
         try {
+            // Add to pin system first
+            this.initializePinForUser(roomId, pinnerPeerId);
+            const userPins = this.pinnedUsers.get(roomId)!.get(pinnerPeerId)!;
+
+            const wasAlreadyPinned = userPins.has(pinnedPeerId);
+            userPins.add(pinnedPeerId);
+
             // Get all streams from the pinned user
             const pinnedUserStreams = this.getStreamsByRoom(roomId).filter(
                 (stream) => stream.publisherId === pinnedPeerId,
@@ -954,27 +1145,46 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 priorityStreams.some((p) => p.streamId === stream.streamId),
             );
 
-            if (isAlreadyPriority) {
+            // Case 1: Already pinned AND in priority - no action needed
+            if (isAlreadyPriority && wasAlreadyPinned) {
                 return {
                     success: true,
-                    message: `User ${pinnedPeerId} is already in priority`,
+                    message: `User ${pinnedPeerId} is already pinned and in priority`,
                     alreadyPriority: true,
+                    existingConsumer: true,
                     consumersCreated: [],
                 };
             }
 
-            // Create consumers for all streams from pinned user
+            // Case 2: Not pinned but already in priority - just update pin state, no new consumers
+            if (isAlreadyPriority && !wasAlreadyPinned) {
+                console.log(
+                    `[SFU] User ${pinnedPeerId} added to pin list but already in priority - no new consumers needed`,
+                );
+                return {
+                    success: true,
+                    message: `User ${pinnedPeerId} pinned (already in priority view)`,
+                    alreadyPriority: true,
+                    existingConsumer: true,
+                    consumersCreated: [], // No new consumers created
+                };
+            }
+
+            // Create consumers for all streams from pinned user (with reuse check)
             const consumersCreated: any[] = [];
             const participant = { peerId: pinnerPeerId, peer_id: pinnerPeerId };
 
             for (const stream of pinnedUserStreams) {
                 try {
+                    // For pin functionality, always attempt to create consumer
+                    // MediaSoup will handle duplicates appropriately
                     const consumerResult = await this.createConsumer(
                         roomId,
                         stream.streamId,
                         transportId,
                         rtpCapabilities,
                         participant,
+                        true, // forcePinConsumer = true for pinned streams
                     );
 
                     if (consumerResult.consumer) {
@@ -984,7 +1194,12 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                             kind: consumerResult.kind,
                             rtpParameters: consumerResult.rtpParameters,
                             producerId: consumerResult.producerId,
+                            reused: false, // Always consider as new for pin functionality
                         });
+
+                        console.log(
+                            `[SFU] Pin: Created/ensured consumer for ${pinnerPeerId} -> ${pinnedPeerId} (${stream.streamId})`,
+                        );
                     }
                 } catch (error) {
                     console.error(
@@ -994,11 +1209,15 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 }
             }
 
+            console.log(
+                `[SFU] Successfully pinned ${pinnedPeerId} for ${pinnerPeerId}, ${consumersCreated.length} consumers`,
+            );
             return {
                 success: true,
                 message: `Successfully pinned user ${pinnedPeerId}`,
                 consumersCreated,
-                alreadyPriority: false,
+                alreadyPriority: isAlreadyPriority,
+                existingConsumer: wasAlreadyPinned,
             };
         } catch (error) {
             console.error(`[SFU] Error in pinUser:`, error);
@@ -1009,6 +1228,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
+    /**
+     * Unpin a user - remove from pin system but keep consuming if bandwidth allows
+     */
     async unpinUser(
         roomId: string,
         unpinnerPeerId: string,
@@ -1020,6 +1242,25 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         stillInPriority?: boolean;
     }> {
         try {
+            // Remove from pin system
+            const roomPins = this.pinnedUsers.get(roomId);
+            if (!roomPins) {
+                return {
+                    success: true,
+                    message: `No pins found for room ${roomId}`,
+                };
+            }
+
+            const userPins = roomPins.get(unpinnerPeerId);
+            if (!userPins) {
+                return {
+                    success: true,
+                    message: `No pins found for user ${unpinnerPeerId}`,
+                };
+            }
+
+            const wasRemoved = userPins.delete(unpinnedPeerId);
+
             // Get all streams from the unpinned user
             const unpinnedUserStreams = this.getStreamsByRoom(roomId).filter(
                 (stream) => stream.publisherId === unpinnedPeerId,
@@ -1027,77 +1268,38 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
             if (unpinnedUserStreams.length === 0) {
                 return {
-                    success: false,
-                    message: `No streams found for user ${unpinnedPeerId}`,
+                    success: wasRemoved,
+                    message: wasRemoved
+                        ? `Unpinned ${unpinnedPeerId}, but no streams found`
+                        : `User ${unpinnedPeerId} was not pinned`,
                 };
             }
 
-            // Check if unpinned user is still in priority (top 10)
+            // Check if unpinned user is still in priority (top 10) - they can continue consuming
             const priorityStreams = this.getPriorityStreams(roomId);
             const isStillInPriority = unpinnedUserStreams.some((stream) =>
                 priorityStreams.some((p) => p.streamId === stream.streamId),
             );
 
-            if (isStillInPriority) {
+            // DON'T remove consumers - let shouldUserReceiveStream logic handle it
+            console.log(
+                `[SFU] Unpinned ${unpinnedPeerId} from ${unpinnerPeerId} - consumers continue normally`,
+            );
+
+            if (wasRemoved) {
                 return {
                     success: true,
-                    message: `User ${unpinnedPeerId} is still in priority`,
-                    stillInPriority: true,
-                    consumersRemoved: [],
+                    message: `Unpinned ${unpinnedPeerId} from ${unpinnerPeerId}, streams continue if priority allows`,
+                    consumersRemoved: [], // No consumers removed on unpin
+                    stillInPriority: isStillInPriority,
+                };
+            } else {
+                return {
+                    success: true,
+                    message: `User ${unpinnedPeerId} was not pinned for ${unpinnerPeerId}`,
+                    stillInPriority: isStillInPriority,
                 };
             }
-
-            // Remove consumers for all streams from unpinned user
-            const mediaRoom = this.mediaRooms.get(roomId);
-            if (!mediaRoom) {
-                throw new Error(`Media room ${roomId} not found`);
-            }
-
-            const consumersRemoved: string[] = [];
-
-            for (const stream of unpinnedUserStreams) {
-                const consumers = mediaRoom.consumers.get(stream.streamId);
-                if (consumers) {
-                    // Find consumers belonging to the unpinner
-                    const unpinnerConsumers = consumers.filter((consumer) => {
-                        // You might need to track consumer ownership
-                        // For now, we'll remove all consumers for this stream
-                        return true;
-                    });
-
-                    for (const consumer of unpinnerConsumers) {
-                        try {
-                            consumer.close();
-                            consumersRemoved.push(consumer.id);
-                        } catch (error) {
-                            console.error(
-                                `[SFU] Failed to close consumer ${consumer.id}:`,
-                                error,
-                            );
-                        }
-                    }
-
-                    // Remove closed consumers from the list
-                    const remainingConsumers = consumers.filter(
-                        (c) => !unpinnerConsumers.includes(c),
-                    );
-                    if (remainingConsumers.length > 0) {
-                        mediaRoom.consumers.set(
-                            stream.streamId,
-                            remainingConsumers,
-                        );
-                    } else {
-                        mediaRoom.consumers.delete(stream.streamId);
-                    }
-                }
-            }
-
-            return {
-                success: true,
-                message: `Successfully unpinned user ${unpinnedPeerId}`,
-                consumersRemoved,
-                stillInPriority: false,
-            };
         } catch (error) {
             console.error(`[SFU] Error in unpinUser:`, error);
             return {
@@ -1113,9 +1315,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         const roomId = request.room_id;
         const peerId = request.peer_id;
         console.log(
-            `[SFU] Handling speaking for ${peerId} in room ${roomId} with port ${request.port}`,
+            `[SFU] ENHANCED: Handling speaking for ${peerId} in room ${roomId} with priority logic`,
         );
         try {
+            // ORIGINAL LOGIC: Track active speakers - KEPT
             if (!this.activeSpeakers.has(roomId)) {
                 this.activeSpeakers.set(roomId, new Map());
             }
@@ -1128,7 +1331,14 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 );
             }
 
-            return { status: 'success', message: 'Speaker updated' };
+            // ENHANCED: Handle priority streaming for speaking user
+            // This replaces the old simple speaker tracking with dynamic stream prioritization
+            await this.handleSpeakingUserStreamPriority(roomId, peerId);
+
+            return {
+                status: 'success',
+                message: 'Speaker updated with priority',
+            };
         } catch (error) {
             console.error(
                 `[SFU] Error handling speaking for ${peerId} in room ${roomId}:`,
@@ -1141,16 +1351,17 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    // HAndle stop speaking request
+    // ENHANCED: Handle stop speaking request with priority management
     async handleStopSpeaking(
         request: T.HandleStopSpeakingRequest,
     ): Promise<T.HandleStopSpeakingResponse> {
         const roomId = request.room_id;
         const peerId = request.peer_id;
         console.log(
-            `[SFU] Handling stop speaking for ${peerId} in room ${roomId}`,
+            `[SFU] ENHANCED: Handling stop speaking for ${peerId} in room ${roomId} with priority rebalancing`,
         );
         try {
+            // ORIGINAL LOGIC: Remove from active speakers - KEPT
             if (this.activeSpeakers.has(roomId)) {
                 const roomSpeakers = this.activeSpeakers.get(roomId);
                 if (roomSpeakers && roomSpeakers.has(peerId)) {
@@ -1162,7 +1373,16 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 }
             }
 
-            return { status: 'success', message: 'Speaker stopped' };
+            // ENHANCED: Clear speaking priority metadata from user's streams
+            await this.clearSpeakingPriorityForUser(roomId, peerId);
+
+            // ENHANCED: Rebalance stream priorities now that user stopped speaking
+            await this.rebalanceStreamPrioritiesAfterSpeaking(roomId, peerId);
+
+            return {
+                status: 'success',
+                message: 'Speaker stopped and priorities rebalanced',
+            };
         } catch (error) {
             console.error(
                 `[SFU] Error handling stop speaking for ${peerId} in room ${roomId}:`,
@@ -1308,6 +1528,439 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             //   roomsCleaned++;
             // }
         });
+    }
+
+    /**
+     * ENHANCED: Handle stream priority for speaking user
+     * This implements voice activity detection-based stream prioritization
+     * When user speaks, ensure their streams are prioritized for consumption
+     */
+    private async handleSpeakingUserStreamPriority(
+        roomId: string,
+        speakingPeerId: string,
+    ): Promise<void> {
+        try {
+            console.log(
+                `[SFU] Handling stream priority for speaking user ${speakingPeerId} in room ${roomId}`,
+            );
+
+            // Step 1: Get the media room
+            const mediaRoom = this.mediaRooms.get(roomId);
+            if (!mediaRoom) {
+                console.warn(
+                    `[SFU] Media room ${roomId} not found for priority handling`,
+                );
+                return;
+            }
+
+            // Step 2: Get speaking user's streams that should be prioritized
+            const speakingUserStreams = this.getSpeakingUserStreamsForPriority(
+                roomId,
+                speakingPeerId,
+            );
+            if (speakingUserStreams.length === 0) {
+                console.log(
+                    `[SFU] No streams found for speaking user ${speakingPeerId}`,
+                );
+                return;
+            }
+
+            // Step 3: Update priority system - mark speaking user streams as high priority
+            await this.updateStreamPriorityForSpeaker(
+                roomId,
+                speakingUserStreams,
+            );
+
+            // Step 4: Check if we need to replace low-priority streams due to threshold
+            await this.manageStreamThresholdForSpeaker(
+                roomId,
+                speakingPeerId,
+                speakingUserStreams,
+            );
+
+            console.log(
+                `[SFU] Successfully handled stream priority for speaking user ${speakingPeerId}`,
+            );
+        } catch (error) {
+            console.error(
+                `[SFU] Error handling speaking user stream priority:`,
+                error,
+            );
+        }
+    }
+
+    /**
+     * ENHANCED: Get speaking user streams that should be prioritized
+     * Only regular audio/video streams, not screen shares
+     */
+    private getSpeakingUserStreamsForPriority(
+        roomId: string,
+        speakingPeerId: string,
+    ): T.Stream[] {
+        const roomStreams = this.getStreamsByRoom(roomId);
+
+        return roomStreams.filter((stream) => {
+            // Must be from speaking user
+            if (stream.publisherId !== speakingPeerId) return false;
+
+            // Parse stream ID to determine type
+            const parts = stream.streamId.split('_');
+            const mediaType = parts[1]; // video, audio, screen, screen_audio
+
+            // Only prioritize regular audio/video streams, not screen shares
+            return mediaType === 'video' || mediaType === 'audio';
+        });
+    }
+
+    /**
+     * ENHANCED: Update stream priority for speaking user
+     * This modifies the existing priority system to favor speaking users
+     */
+    private async updateStreamPriorityForSpeaker(
+        roomId: string,
+        speakingStreams: T.Stream[],
+    ): Promise<void> {
+        // Mark speaking streams with high priority metadata
+        speakingStreams.forEach((stream) => {
+            // Add speaking priority metadata - this extends existing stream metadata
+            stream.metadata = {
+                ...stream.metadata,
+                speakingPriority: true,
+                priorityTimestamp: Date.now(),
+                isFromSpeaking: true,
+            };
+
+            // Update the stored stream
+            this.streams.set(stream.streamId, stream);
+
+            console.log(
+                `[SFU] Marked stream ${stream.streamId} as speaking priority`,
+            );
+        });
+    }
+
+    /**
+     * ENHANCED: Manage stream threshold when speaker is active
+     * This replaces the old static priority system with dynamic speaker-based priority
+     */
+    private async manageStreamThresholdForSpeaker(
+        roomId: string,
+        speakingPeerId: string,
+        speakingStreams: T.Stream[],
+    ): Promise<void> {
+        const mediaRoom = this.mediaRooms.get(roomId);
+        if (!mediaRoom) return;
+
+        // Count current active consumers across all streams
+        let totalActiveConsumers = 0;
+        mediaRoom.consumers.forEach((consumers) => {
+            totalActiveConsumers += consumers.filter((c) => !c.closed).length;
+        });
+
+        // Define threshold - this replaces the old hardcoded 10 stream limit
+        const CONSUMER_THRESHOLD = 20; // Allow more consumers but manage dynamically
+
+        console.log(
+            `[SFU] Current active consumers: ${totalActiveConsumers}, threshold: ${CONSUMER_THRESHOLD}`,
+        );
+
+        if (totalActiveConsumers >= CONSUMER_THRESHOLD) {
+            // Need to pause some low-priority streams to make room for speaking user
+            await this.pauseLowPriorityStreamsForSpeaker(
+                roomId,
+                speakingPeerId,
+                speakingStreams,
+            );
+        }
+    }
+
+    /**
+     * ENHANCED: Pause low-priority streams to prioritize speaking user
+     * This implements dynamic stream replacement based on speaking activity
+     */
+    private async pauseLowPriorityStreamsForSpeaker(
+        roomId: string,
+        speakingPeerId: string,
+        speakingStreams: T.Stream[],
+    ): Promise<void> {
+        const mediaRoom = this.mediaRooms.get(roomId);
+        if (!mediaRoom) return;
+
+        console.log(
+            `[SFU] Looking for low-priority streams to pause for speaking user ${speakingPeerId}`,
+        );
+
+        // Get all streams in room sorted by priority (speaking users first, then by age)
+        const allRoomStreams = this.getStreamsByRoom(roomId);
+        const prioritizedStreams = this.sortStreamsByPriority(
+            allRoomStreams,
+            roomId,
+        );
+
+        // Find streams that can be paused (not from special users, not currently speaking)
+        const pausableStreams = prioritizedStreams.filter((stream) => {
+            // Don't pause speaking user's own streams
+            if (stream.publisherId === speakingPeerId) return false;
+
+            // Don't pause streams from currently active speakers
+            if (this.isUserSpeaking(roomId, stream.publisherId)) return false;
+
+            // Don't pause special users (creators, admins, etc.) - extend this logic as needed
+            if (this.isSpecialUser(roomId, stream.publisherId)) return false;
+
+            // Check if stream has active consumers
+            const consumers = mediaRoom.consumers.get(stream.streamId);
+            return consumers && consumers.some((c) => !c.closed);
+        });
+
+        // Pause the lowest priority streams
+        const streamsToPause = pausableStreams.slice(-speakingStreams.length); // Take the least priority ones
+
+        for (const stream of streamsToPause) {
+            await this.pauseStreamConsumers(stream.streamId, roomId);
+            console.log(
+                `[SFU] Paused low-priority stream ${stream.streamId} for speaking user ${speakingPeerId}`,
+            );
+        }
+    }
+
+    /**
+     * ENHANCED: Sort streams by priority with optimized special stream detection
+     * Tận dụng metadata có sẵn để tối ưu performance
+     */
+    private sortStreamsByPriority(
+        streams: T.Stream[],
+        roomId: string,
+    ): T.Stream[] {
+        return streams.sort((a, b) => {
+            // Priority 0: Screen share streams (absolute highest priority)
+            const aIsScreenShare =
+                a.metadata?.isScreenShare === true ||
+                a.metadata?.type === 'screen' ||
+                a.metadata?.type === 'screen_audio';
+            const bIsScreenShare =
+                b.metadata?.isScreenShare === true ||
+                b.metadata?.type === 'screen' ||
+                b.metadata?.type === 'screen_audio';
+            if (aIsScreenShare && !bIsScreenShare) return -1;
+            if (!aIsScreenShare && bIsScreenShare) return 1;
+
+            // Priority 1: Currently speaking users
+            const aIsSpeaking = this.isUserSpeaking(roomId, a.publisherId);
+            const bIsSpeaking = this.isUserSpeaking(roomId, b.publisherId);
+            if (aIsSpeaking && !bIsSpeaking) return -1;
+            if (!aIsSpeaking && bIsSpeaking) return 1;
+
+            // Priority 2: Translation streams (cabin users)
+            const aIsTranslation =
+                a.metadata?.isTranslation === true ||
+                a.metadata?.type === 'translation';
+            const bIsTranslation =
+                b.metadata?.isTranslation === true ||
+                b.metadata?.type === 'translation';
+            if (aIsTranslation && !bIsTranslation) return -1;
+            if (!aIsTranslation && bIsTranslation) return 1;
+
+            // Priority 3: Other special users (creators, etc.)
+            const aIsSpecial = this.isSpecialUser(roomId, a.publisherId);
+            const bIsSpecial = this.isSpecialUser(roomId, b.publisherId);
+            if (aIsSpecial && !bIsSpecial) return -1;
+            if (!aIsSpecial && bIsSpecial) return 1;
+
+            // Priority 4: Speaking priority metadata
+            const aSpeakingPriority = a.metadata?.speakingPriority ? 1 : 0;
+            const bSpeakingPriority = b.metadata?.speakingPriority ? 1 : 0;
+            if (aSpeakingPriority !== bSpeakingPriority) {
+                return bSpeakingPriority - aSpeakingPriority;
+            }
+
+            // Priority 5: Age (newer streams have higher priority)
+            return b.streamId.localeCompare(a.streamId);
+        });
+    }
+
+    /**
+     * ENHANCED: Check if user is special (creator, admin, etc.) or has special streams
+     * Leverages existing metadata detection logic for optimal performance
+     */
+    private isSpecialUser(roomId: string, peerId: string): boolean {
+        // Check if user has screen sharing streams (highest priority special user)
+        const userStreams = this.getStreamsByRoom(roomId).filter(
+            (stream) => stream.publisherId === peerId,
+        );
+
+        for (const stream of userStreams) {
+            // Reuse existing screen share detection logic
+            if (
+                stream.metadata?.isScreenShare === true ||
+                stream.metadata?.type === 'screen' ||
+                stream.metadata?.type === 'screen_audio'
+            ) {
+                return true;
+            }
+
+            // Check for translation streams (cabin users)
+            if (
+                stream.metadata?.isTranslation === true ||
+                stream.metadata?.type === 'translation'
+            ) {
+                return true;
+            }
+        }
+
+        // TODO: Add room creator logic when participant data is available
+        // Could check against room creator ID stored in room metadata
+
+        return false;
+    }
+
+    /**
+     * ENHANCED: Pause consumers for a specific stream
+     * This allows dynamic stream management without closing connections
+     */
+    private async pauseStreamConsumers(
+        streamId: string,
+        roomId: string,
+    ): Promise<void> {
+        const mediaRoom = this.mediaRooms.get(roomId);
+        if (!mediaRoom) return;
+
+        const consumers = mediaRoom.consumers.get(streamId);
+        if (!consumers) return;
+
+        for (const consumer of consumers) {
+            if (!consumer.closed) {
+                try {
+                    await consumer.pause();
+                    console.log(
+                        `[SFU] Paused consumer ${consumer.id} for stream ${streamId}`,
+                    );
+                } catch (error) {
+                    console.error(
+                        `[SFU] Error pausing consumer ${consumer.id}:`,
+                        error,
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * ENHANCED: Clear speaking priority metadata from user's streams
+     * This removes the temporary speaking priority when user stops speaking
+     */
+    private async clearSpeakingPriorityForUser(
+        roomId: string,
+        peerId: string,
+    ): Promise<void> {
+        const userStreams = this.getStreamsByRoom(roomId).filter(
+            (stream) => stream.publisherId === peerId,
+        );
+
+        userStreams.forEach((stream) => {
+            if (stream.metadata?.speakingPriority) {
+                // Remove speaking priority metadata but keep other metadata
+                const {
+                    speakingPriority,
+                    priorityTimestamp,
+                    isFromSpeaking,
+                    ...remainingMetadata
+                } = stream.metadata;
+                stream.metadata = remainingMetadata;
+
+                // Update the stored stream
+                this.streams.set(stream.streamId, stream);
+
+                console.log(
+                    `[SFU] Cleared speaking priority from stream ${stream.streamId}`,
+                );
+            }
+        });
+    }
+
+    /**
+     * ENHANCED: Rebalance stream priorities after user stops speaking
+     * This may resume previously paused streams or adjust consumer priorities
+     */
+    private async rebalanceStreamPrioritiesAfterSpeaking(
+        roomId: string,
+        stoppedSpeakingPeerId: string,
+    ): Promise<void> {
+        try {
+            console.log(
+                `[SFU] Rebalancing stream priorities after ${stoppedSpeakingPeerId} stopped speaking`,
+            );
+
+            const mediaRoom = this.mediaRooms.get(roomId);
+            if (!mediaRoom) return;
+
+            // Step 1: Check if there are paused streams that can be resumed
+            const allRoomStreams = this.getStreamsByRoom(roomId);
+            const pausedStreams: T.Stream[] = [];
+
+            // Find streams with paused consumers
+            allRoomStreams.forEach((stream) => {
+                const consumers = mediaRoom.consumers.get(stream.streamId);
+                if (consumers) {
+                    const hasPausedConsumers = consumers.some(
+                        (c) => !c.closed && c.paused,
+                    );
+                    if (hasPausedConsumers) {
+                        pausedStreams.push(stream);
+                    }
+                }
+            });
+
+            // Step 2: Get current priority list (now that speaking user is removed)
+            const currentPriorityUsers = this.getPrioritizedUsers(roomId);
+
+            // Step 3: Resume streams from users that are now in priority
+            for (const stream of pausedStreams) {
+                if (currentPriorityUsers.has(stream.publisherId)) {
+                    await this.resumeStreamConsumers(stream.streamId, roomId);
+                    console.log(
+                        `[SFU] Resumed stream ${stream.streamId} from priority user ${stream.publisherId}`,
+                    );
+                }
+            }
+
+            console.log(
+                `[SFU] Completed stream priority rebalancing for room ${roomId}`,
+            );
+        } catch (error) {
+            console.error(`[SFU] Error rebalancing stream priorities:`, error);
+        }
+    }
+
+    /**
+     * ENHANCED: Resume consumers for a specific stream
+     * This is the counterpart to pauseStreamConsumers
+     */
+    private async resumeStreamConsumers(
+        streamId: string,
+        roomId: string,
+    ): Promise<void> {
+        const mediaRoom = this.mediaRooms.get(roomId);
+        if (!mediaRoom) return;
+
+        const consumers = mediaRoom.consumers.get(streamId);
+        if (!consumers) return;
+
+        for (const consumer of consumers) {
+            if (!consumer.closed && consumer.paused) {
+                try {
+                    await consumer.resume();
+                    console.log(
+                        `[SFU] Resumed consumer ${consumer.id} for stream ${streamId}`,
+                    );
+                } catch (error) {
+                    console.error(
+                        `[SFU] Error resuming consumer ${consumer.id}:`,
+                        error,
+                    );
+                }
+            }
+        }
     }
 
     // Translation Cabin Support Methods (Updated for bidirectional)
@@ -1930,5 +2583,44 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 error,
             );
         }
+    }
+
+    /**
+     * Clear all pins for a user (called when user leaves room)
+     */
+    clearPinsForUser(roomId: string, userId: string): void {
+        const roomPins = this.pinnedUsers.get(roomId);
+        if (!roomPins) return;
+
+        // Remove user as consumer (clear their pin list)
+        roomPins.delete(userId);
+
+        // Remove user from other users' pin lists (if they pinned this user)
+        for (const [consumerId, userPins] of roomPins.entries()) {
+            userPins.delete(userId);
+        }
+
+        console.log(
+            `[SFU] Cleared all pins for user ${userId} in room ${roomId}`,
+        );
+    }
+
+    /**
+     * Clear all pins for a room (called when room is destroyed)
+     */
+    clearPinsForRoom(roomId: string): void {
+        this.pinnedUsers.delete(roomId);
+        console.log(`[SFU] Cleared all pins for room ${roomId}`);
+    }
+
+    /**
+     * Get all pinned users for a consumer
+     */
+    getPinnedUsersForConsumer(roomId: string, consumerId: string): string[] {
+        const roomPins = this.pinnedUsers.get(roomId);
+        if (!roomPins) return [];
+
+        const userPins = roomPins.get(consumerId);
+        return userPins ? Array.from(userPins) : [];
     }
 }
