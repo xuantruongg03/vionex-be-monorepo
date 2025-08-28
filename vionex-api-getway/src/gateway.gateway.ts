@@ -17,6 +17,7 @@ import { ChatHandler } from './handlers/chat.handler';
 import { Participant } from './interfaces/interface';
 import { HttpBroadcastService } from './services/http-broadcast.service';
 import { WebSocketEventService } from './services/websocket-event.service';
+import { StreamService } from './services/stream.service';
 
 @WebSocketGateway({
     transports: ['websocket', 'polling'],
@@ -44,6 +45,7 @@ export class GatewayGateway
         private readonly interactionClient: InteractionClientService,
         private readonly audioService: AudioClientService,
         private readonly chatHandler: ChatHandler,
+        private readonly streamService: StreamService,
     ) {}
 
     afterInit(server: Server) {
@@ -1569,6 +1571,92 @@ export class GatewayGateway
         } catch (error) {
             console.error('[Gateway] Error getting all rooms:', error);
             return new Map();
+        }
+    }
+
+    // ==================== SFU HANDLERS ====================
+
+    @SubscribeMessage('sfu:unpublish')
+    async handleUnpublish(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: { streamId: string; roomId?: string },
+    ) {
+        try {
+            // Get participant info from socket mapping
+            const peerId = this.getParticipantBySocketId(client.id);
+            const roomId =
+                data.roomId || (await this.getRoomIdBySocketId(client.id));
+
+            if (!peerId || !roomId) {
+                client.emit('sfu:error', {
+                    message: 'Invalid participant or room information',
+                    code: 'INVALID_CONTEXT',
+                });
+                return {
+                    success: false,
+                    error: 'Invalid participant or room information',
+                };
+            }
+
+            console.log(
+                `[Gateway] Handling unpublish for stream ${data.streamId} from ${peerId} in room ${roomId}`,
+            );
+
+            // Verify stream ownership for security
+            const isOwner = await this.streamService.verifyStreamOwnership(
+                data.streamId,
+                peerId,
+                roomId,
+            );
+
+            if (!isOwner) {
+                console.warn(
+                    `[Gateway] Unauthorized unpublish attempt: ${peerId} trying to unpublish ${data.streamId}`,
+                );
+                client.emit('sfu:error', {
+                    message: 'You can only unpublish your own streams',
+                    code: 'UNAUTHORIZED_UNPUBLISH',
+                });
+                return { success: false, error: 'Unauthorized' };
+            }
+
+            // Unpublish the stream
+            const result = await this.streamService.unpublishStream({
+                streamId: data.streamId,
+                roomId: roomId,
+                participantId: peerId,
+            });
+
+            if (result.success) {
+                // Send success confirmation to the requesting client
+                client.emit('sfu:unpublish-success', {
+                    streamId: data.streamId,
+                    message: result.message,
+                });
+
+                console.log(
+                    `[Gateway] Successfully unpublished stream ${data.streamId} for ${peerId}`,
+                );
+            } else {
+                // Send error to the requesting client
+                client.emit('sfu:error', {
+                    message: result.message,
+                    code: 'UNPUBLISH_FAILED',
+                });
+
+                console.error(
+                    `[Gateway] Failed to unpublish stream ${data.streamId}: ${result.message}`,
+                );
+            }
+
+            return result;
+        } catch (error) {
+            console.error('[Gateway] Error in handleUnpublish:', error);
+            client.emit('sfu:error', {
+                message: 'Internal server error during unpublish',
+                code: 'INTERNAL_ERROR',
+            });
+            return { success: false, error: error.message };
         }
     }
 

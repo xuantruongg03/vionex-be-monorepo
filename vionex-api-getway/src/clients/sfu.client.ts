@@ -439,17 +439,39 @@ export class SfuClientService implements OnModuleInit {
             );
             return {
                 success: response.success,
-                cabins: (response.cabins || []).map(cabin => ({
+                cabins: (response.cabins || []).map((cabin) => ({
                     targetUserId: cabin.target_user_id,
                     sourceLanguage: cabin.source_language,
                     targetLanguage: cabin.target_language,
-                }))
+                })),
             };
         } catch (error) {
             console.error(
                 '[SFU Client] Error listing translation cabins:',
                 error,
             );
+            throw error;
+        }
+    }
+
+    async removeStream(data: { stream_id: string }) {
+        try {
+            return await firstValueFrom(this.sfuService.removeStream(data));
+        } catch (error) {
+            console.error('[SFU Client] Error removing stream:', error);
+            throw error;
+        }
+    }
+
+    async unpublishStream(data: {
+        room_id: string;
+        stream_id: string;
+        participant_id: string;
+    }) {
+        try {
+            return await firstValueFrom(this.sfuService.unpublishStream(data));
+        } catch (error) {
+            console.error('[SFU Client] Error unpublishing stream:', error);
             throw error;
         }
     }
