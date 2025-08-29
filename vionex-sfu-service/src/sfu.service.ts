@@ -485,15 +485,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         return true;
     }
 
-    // Helper method to check if user is in first N users of a room
-    private isUserInFirstN(roomId: string, userId: string, n: number): boolean {
-        const roomState = this.rooms.get(roomId);
-        if (!roomState) return false;
-
-        const users = Array.from(roomState.keys());
-        return users.slice(0, n).includes(userId);
-    }
-
     // PIN/UNPIN Helper Methods
     private isPinnedUser(
         roomId: string,
@@ -520,32 +511,24 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             roomPins.set(userId, new Set());
         }
     }
-
-    /**
-     * OPTIMIZED CONSUMPTION LOGIC - Tận dụng toàn bộ existing logic
-     *
-     * Strategy: "10 người đầu consume tất cả, từ người thứ 11 trở đi chỉ consume priority"
-     *
-     * Performance Benefits:
-     * - 1-10 users: Full mesh (high quality, manageable bandwidth)
-     * - 11+ users: Priority-only (bandwidth optimization, scalability)
-     *
-     * Leverages existing methods:
-     * - isSpecialUser(): Screen share, translation, special roles
-     * - isUserSpeaking(): VAD-based speaking detection
-     * - getPrioritizedUsers(): Dynamic priority calculation
-     * - sortStreamsByPriority(): Intelligent stream ordering
-     *
-     * No new logic needed - pure optimization of existing codebase!
-     */
     private shouldUserReceiveStream(
         roomId: string,
         consumerId: string,
         publisherId: string,
     ): boolean {
-        const roomState = this.rooms.get(roomId);
-        if (!roomState) return false;
-
+        // Use mediaRooms instead of rooms for room state
+        const mediaRoom = this.mediaRooms.get(roomId);
+        
+        if (!mediaRoom) {
+            console.log(`[SFU DEBUG] Media room ${roomId} not found`);
+            return false;
+        }
+        
+        // Calculate total users from room streams (unique publishers)
+        const roomStreams = this.getStreamsByRoom(roomId);
+        const uniqueUsers = new Set(roomStreams.map(s => s.publisherId));
+        const totalUsers = uniqueUsers.size;
+        
         // PRIORITY 0: Pinned users always consume (highest priority)
         if (this.isPinnedUser(roomId, consumerId, publisherId)) {
             console.log(
@@ -554,19 +537,14 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             return true;
         }
 
-        const totalUsers = roomState.size;
-        const isConsumerInFirst10 = this.isUserInFirstN(roomId, consumerId, 10);
-
-        // First 10 users consume ALL streams (high bandwidth scenario)
-        if (totalUsers <= 10 || isConsumerInFirst10) {
+        // For small rooms (≤10 users), consume all streams
+        if (totalUsers <= 10) {
             console.log(
-                `[SFU] User ${consumerId} in first 10 - consuming all streams`,
+                `[SFU] Small room (${totalUsers} users) - ${consumerId} consuming all streams from ${publisherId}`,
             );
             return true;
         }
 
-        // 11+ users only consume PRIORITY streams (bandwidth optimization)
-        // Tận dụng existing priority logic methods
         const isPriorityStream =
             this.isSpecialUser(roomId, publisherId) ||
             this.isUserSpeaking(roomId, publisherId);
@@ -588,14 +566,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             );
             return true;
         }
-
-        console.log(
-            `[SFU] User ${consumerId} (11+) not consuming regular stream from ${publisherId}`,
-        );
         return false;
     }
 
-    // ENHANCED: Dynamic prioritized users based on speaking activity and special status
     // This replaces the old static "first 10 streams" logic with intelligent prioritization
     private getPrioritizedUsers(roomId: string): Set<string> {
         const prioritizedUsers = new Set<string>();

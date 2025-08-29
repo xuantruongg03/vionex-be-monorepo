@@ -149,10 +149,7 @@ export class GatewayGateway
 
                 this.io.to(roomId).emit('sfu:peer-left', {
                     peerId: peerId,
-                });
-
-                this.io.to(roomId).emit('sfu:user-removed', {
-                    peerId: peerId,
+                    reason: 'voluntary', // User left voluntarily (disconnect)
                 });
 
                 // If this was the creator and there's a new creator, send the creator-changed event
@@ -1989,23 +1986,26 @@ export class GatewayGateway
                 return;
             }
 
-            console.log(`[Gateway] Pin user request from ${peerId} to pin ${data.pinnedPeerId}`);
+            console.log(
+                `[Gateway] Pin user request from ${peerId} to pin ${data.pinnedPeerId}`,
+            );
 
             // Get participant data for RTP capabilities
             const participant = this.participantCache.get(peerId);
             const rtpCapabilities = participant?.rtpCapabilities || {};
 
-            const result = await this.sfuClient.pinUser(
+            const result = (await this.sfuClient.pinUser(
                 data.roomId,
                 peerId, // pinnerPeerId
                 data.pinnedPeerId, // pinnedPeerId
                 data.transportId,
                 rtpCapabilities,
-            ) as any;
+            )) as any;
 
-            const parsedResult = typeof result.pin_data === 'string' 
-                ? JSON.parse(result.pin_data) 
-                : result.pin_data;
+            const parsedResult =
+                typeof result.pin_data === 'string'
+                    ? JSON.parse(result.pin_data)
+                    : result.pin_data;
 
             // Emit response to pinner
             client.emit('sfu:pin-user-response', {
@@ -2023,8 +2023,9 @@ export class GatewayGateway
                 roomId: data.roomId,
             });
 
-            console.log(`[Gateway] Pin user successful: ${peerId} pinned ${data.pinnedPeerId}`);
-
+            console.log(
+                `[Gateway] Pin user successful: ${peerId} pinned ${data.pinnedPeerId}`,
+            );
         } catch (error) {
             console.error(`[Gateway] Error pinning user:`, error);
             client.emit('sfu:pin-user-response', {
@@ -2053,17 +2054,20 @@ export class GatewayGateway
                 return;
             }
 
-            console.log(`[Gateway] Unpin user request from ${peerId} to unpin ${data.unpinnedPeerId}`);
+            console.log(
+                `[Gateway] Unpin user request from ${peerId} to unpin ${data.unpinnedPeerId}`,
+            );
 
-            const result = await this.sfuClient.unpinUser(
+            const result = (await this.sfuClient.unpinUser(
                 data.roomId,
                 peerId, // unpinnerPeerId
                 data.unpinnedPeerId, // unpinnedPeerId
-            ) as any;
+            )) as any;
 
-            const parsedResult = typeof result.unpin_data === 'string' 
-                ? JSON.parse(result.unpin_data) 
-                : result.unpin_data;
+            const parsedResult =
+                typeof result.unpin_data === 'string'
+                    ? JSON.parse(result.unpin_data)
+                    : result.unpin_data;
 
             // Emit response to unpinner
             client.emit('sfu:unpin-user-response', {
@@ -2080,8 +2084,9 @@ export class GatewayGateway
                 roomId: data.roomId,
             });
 
-            console.log(`[Gateway] Unpin user successful: ${peerId} unpinned ${data.unpinnedPeerId}`);
-
+            console.log(
+                `[Gateway] Unpin user successful: ${peerId} unpinned ${data.unpinnedPeerId}`,
+            );
         } catch (error) {
             console.error(`[Gateway] Error unpinning user:`, error);
             client.emit('sfu:unpin-user-response', {
@@ -2102,6 +2107,105 @@ export class GatewayGateway
         } catch (error) {
             console.error('Failed to parse stream metadata:', error);
             return { video: true, audio: true, type: 'webcam' };
+        }
+    }
+
+    @SubscribeMessage('sfu:kick-user')
+    async handleKickUser(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            participantId: string;
+        },
+    ) {
+        try {
+            const requesterPeerId = this.connectionMap.get(client.id);
+            if (!requesterPeerId) {
+                client.emit('sfu:kick-user-response', {
+                    success: false,
+                    message: 'User not authenticated',
+                });
+                return;
+            }
+
+            console.log('=== Kick User WebSocket ===');
+            console.log('Room ID:', data.roomId);
+            console.log('Participant ID to kick:', data.participantId);
+            console.log('Requester:', requesterPeerId);
+
+            // Check if requester is the creator (has permission to kick)
+            const roomResponse = await this.roomClient.getRoom(data.roomId);
+            const roomData = roomResponse?.data;
+
+            // Find requester participant to check if they are creator
+            const participants = await this.roomClient.getParticipants(
+                data.roomId,
+            );
+            const requesterParticipant = participants.find(
+                (p) => p.peer_id === requesterPeerId,
+            );
+
+            if (!requesterParticipant || !requesterParticipant.is_creator) {
+                client.emit('sfu:kick-user-response', {
+                    success: false,
+                    message: 'Only room creator can kick users',
+                });
+                return;
+            }
+
+            // Call room service to leave room
+            const leaveRoomResponse = await this.roomClient.leaveRoom({
+                roomId: data.roomId,
+                participantId: data.participantId,
+                socketId: '', // WebSocket kick doesn't have specific socketId
+            });
+
+            // Broadcast leave events to all clients in the room
+            this.eventService.broadcastToRoom(
+                client,
+                data.roomId,
+                'sfu:peer-left',
+                {
+                    peerId: data.participantId,
+                    reason: 'kicked',
+                },
+            );
+
+            this.eventService.broadcastToRoom(
+                client,
+                data.roomId,
+                'sfu:user-removed',
+                {
+                    peerId: data.participantId,
+                    reason: 'kicked',
+                },
+            );
+
+            // If this was the creator and there's a new creator, send the creator-changed event
+            if (leaveRoomResponse?.data?.newCreator) {
+                this.eventService.broadcastToRoom(
+                    client,
+                    data.roomId,
+                    'sfu:creator-changed',
+                    {
+                        peerId: leaveRoomResponse.data.newCreator,
+                        isCreator: true,
+                    },
+                );
+            }
+
+            console.log('User kicked successfully:', data.participantId);
+            client.emit('sfu:kick-user-response', {
+                success: true,
+                message: 'User kicked successfully',
+            });
+        } catch (error) {
+            console.error('Error kicking user:', error);
+            client.emit('sfu:kick-user-response', {
+                success: false,
+                message: error.message || 'Failed to kick user',
+            });
         }
     }
 

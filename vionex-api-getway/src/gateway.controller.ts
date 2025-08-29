@@ -1,24 +1,23 @@
 import {
     Body,
     Controller,
+    Delete,
     Get,
+    Headers,
     HttpException,
     HttpStatus,
+    Param,
     Post,
     Put,
-    Delete,
-    Param,
-    Headers,
     Query,
 } from '@nestjs/common';
-import { RoomClientService } from './clients/room.client';
-import { WebSocketEventService } from './services/websocket-event.service';
-import { HttpBroadcastService } from './services/http-broadcast.service';
-import { Participant, Stream } from './interfaces/interface';
 import * as mediasoupTypes from 'mediasoup/node/lib/types';
-import { SfuClientService } from './clients/sfu.client';
-import { ChatBotClientService } from './clients/chatbot.client';
 import { AudioClientService } from './clients/audio.client';
+import { ChatBotClientService } from './clients/chatbot.client';
+import { RoomClientService } from './clients/room.client';
+import { SfuClientService } from './clients/sfu.client';
+import { Participant } from './interfaces/interface';
+import { HttpBroadcastService } from './services/http-broadcast.service';
 
 @Controller()
 export class GatewayController {
@@ -409,66 +408,6 @@ export class GatewayController {
             console.error('Error getting streams:', error);
             throw new HttpException(
                 error.message || 'Failed to get streams',
-                error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-            );
-        }
-    }
-
-    // NOTE: updateStream HTTP endpoint removed - now handled via WebSocket 'sfu:update-stream-metadata'
-
-    // HTTP endpoint for removing user (admin action)
-    @Delete('sfu/rooms/:roomId/users/:participantId')
-    async removeUser(
-        @Param('roomId') roomId: string,
-        @Param('participantId') participantId: string,
-        @Headers('authorization') authorization?: string,
-    ) {
-        try {
-            console.log('=== Remove User HTTP ===');
-            console.log('Room ID:', roomId);
-            console.log('Participant ID to remove:', participantId);
-
-            const requester =
-                await this.getParticipantFromHeader(authorization);
-            console.log('Requester:', requester.peer_id);
-
-            // Call room service to leave room instead of signaling service
-            const leaveRoomResponse = await this.roomClient.leaveRoom({
-                roomId: roomId,
-                participantId: participantId,
-                socketId: '', // HTTP requests don't have socketId
-            });
-
-            // Broadcast leave events to all clients in the room
-            this.broadcastService.broadcastToRoom(roomId, 'sfu:peer-left', {
-                peerId: participantId,
-            });
-
-            this.broadcastService.broadcastToRoom(roomId, 'sfu:user-removed', {
-                peerId: participantId,
-            });
-
-            // If this was the creator and there's a new creator, send the creator-changed event
-            if (leaveRoomResponse?.data?.newCreator) {
-                this.broadcastService.broadcastToRoom(
-                    roomId,
-                    'sfu:creator-changed',
-                    {
-                        peerId: leaveRoomResponse.data.newCreator,
-                        isCreator: true,
-                    },
-                );
-            }
-
-            console.log('User removed successfully:', participantId);
-            return {
-                success: true,
-                message: 'User removed successfully',
-            };
-        } catch (error) {
-            console.error('Error removing user:', error);
-            throw new HttpException(
-                error.message || 'Failed to remove user',
                 error.status || HttpStatus.INTERNAL_SERVER_ERROR,
             );
         }
