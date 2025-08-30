@@ -21,6 +21,8 @@ import { ChatBotClientService } from './clients/chatbot.client';
 import { AuthController } from './auth.controller';
 import { AuthClientService } from './clients/auth.client';
 import { ChatHandler } from './handlers/chat.handler';
+import { VotingHandler } from './handlers/voting.handler';
+import { GatewayHelperService } from './helpers/gateway.helper';
 
 @Module({
     imports: [
@@ -160,6 +162,8 @@ import { ChatHandler } from './handlers/chat.handler';
         AuthClientService,
         OrganizationClientService,
         ChatHandler,
+        VotingHandler,
+        GatewayHelperService,
         StreamService,
         ServiceErrorService,
     ],

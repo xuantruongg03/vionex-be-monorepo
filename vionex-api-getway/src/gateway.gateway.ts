@@ -14,6 +14,8 @@ import { InteractionClientService } from './clients/interaction.client';
 import { RoomClientService } from './clients/room.client';
 import { SfuClientService } from './clients/sfu.client';
 import { ChatHandler } from './handlers/chat.handler';
+import { VotingHandler } from './handlers/voting.handler';
+import { GatewayHelperService } from './helpers/gateway.helper';
 import { Participant } from './interfaces/interface';
 import { HttpBroadcastService } from './services/http-broadcast.service';
 import { WebSocketEventService } from './services/websocket-event.service';
@@ -32,10 +34,6 @@ export class GatewayGateway
     implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
     @WebSocketServer() io: Server;
-    private connectionMap = new Map<string, string>(); // socketId -> peerId
-    private participantSocketMap = new Map<string, string>(); // peerId -> socketId
-    private roomParticipantMap = new Map<string, string>(); // peerId -> roomId
-    private participantCache = new Map<string, any>(); // peerId -> participant object
 
     constructor(
         private readonly eventService: WebSocketEventService,
@@ -45,6 +43,8 @@ export class GatewayGateway
         private readonly interactionClient: InteractionClientService,
         private readonly audioService: AudioClientService,
         private readonly chatHandler: ChatHandler,
+        private readonly votingHandler: VotingHandler,
+        private readonly helperService: GatewayHelperService,
         private readonly streamService: StreamService,
     ) {}
 
@@ -61,8 +61,10 @@ export class GatewayGateway
 
     async handleDisconnect(client: Socket) {
         // Get participant info before cleanup
-        let peerId = this.connectionMap.get(client.id);
-        let roomId = peerId ? this.roomParticipantMap.get(peerId) : null;
+        let peerId = this.helperService.getParticipantBySocketId(client.id);
+        let roomId = peerId
+            ? this.helperService.getRoomParticipantMap().get(peerId)
+            : null;
 
         if (!peerId || !roomId) {
             try {
@@ -82,7 +84,7 @@ export class GatewayGateway
                     // If still not found, do full scan
                     if (!peerId || !roomId) {
                         const allRooms =
-                            await this.getAllRoomsWithParticipants();
+                            await this.helperService.getAllRoomsWithParticipants();
 
                         for (const [currentRoomId, participants] of allRooms) {
                             const participant = participants.find(
@@ -202,7 +204,7 @@ export class GatewayGateway
         }
 
         // Clean up connection mapping
-        this.cleanupParticipantMapping(client.id);
+        this.helperService.cleanupParticipantMapping(client.id);
     }
 
     @SubscribeMessage('sfu:join')
@@ -303,7 +305,7 @@ export class GatewayGateway
                 existingParticipant,
             );
 
-            this.storeParticipantMapping(
+            this.helperService.storeParticipantMapping(
                 client.id,
                 data.peerId,
                 data.roomId,
@@ -370,7 +372,7 @@ export class GatewayGateway
             await this.roomClient.setParticipant(data.roomId, participant);
 
             // Track the connection mapping for disconnect cleanup - IMPORTANT
-            this.storeParticipantMapping(
+            this.helperService.storeParticipantMapping(
                 client.id,
                 data.peerId,
                 data.roomId,
@@ -526,9 +528,11 @@ export class GatewayGateway
         try {
             // Extract peerId from socket mapping
             const peerId =
-                data.peerId || this.getParticipantBySocketId(client.id);
+                data.peerId ||
+                this.helperService.getParticipantBySocketId(client.id);
             const roomId =
-                data.roomId || (await this.getRoomIdBySocketId(client.id));
+                data.roomId ||
+                (await this.helperService.getRoomIdBySocketId(client.id));
 
             if (!peerId || !roomId) {
                 client.emit('sfu:error', {
@@ -562,7 +566,8 @@ export class GatewayGateway
     ) {
         try {
             const peerId =
-                data.peerId || this.getParticipantBySocketId(client.id);
+                data.peerId ||
+                this.helperService.getParticipantBySocketId(client.id);
 
             if (!peerId) {
                 client.emit('sfu:error', {
@@ -623,9 +628,11 @@ export class GatewayGateway
     ) {
         try {
             const peerId =
-                data.peerId || this.getParticipantBySocketId(client.id);
+                data.peerId ||
+                this.helperService.getParticipantBySocketId(client.id);
             const roomId =
-                data.roomId || (await this.getRoomIdBySocketId(client.id));
+                data.roomId ||
+                (await this.helperService.getRoomIdBySocketId(client.id));
 
             if (!peerId || !roomId) {
                 client.emit('sfu:error', {
@@ -669,9 +676,11 @@ export class GatewayGateway
     ) {
         try {
             const peerId =
-                data.peerId || this.getParticipantBySocketId(client.id);
+                data.peerId ||
+                this.helperService.getParticipantBySocketId(client.id);
             const roomId =
-                data.roomId || (await this.getRoomIdBySocketId(client.id));
+                data.roomId ||
+                (await this.helperService.getRoomIdBySocketId(client.id));
 
             if (!peerId || !roomId) {
                 client.emit('sfu:error', {
@@ -786,9 +795,11 @@ export class GatewayGateway
             }
 
             const peerId =
-                data.peerId || this.getParticipantBySocketId(client.id);
+                data.peerId ||
+                this.helperService.getParticipantBySocketId(client.id);
             const roomId =
-                data.roomId || (await this.getRoomIdBySocketId(client.id));
+                data.roomId ||
+                (await this.helperService.getRoomIdBySocketId(client.id));
 
             if (!peerId || !roomId) {
                 console.error('[Gateway] Missing peerId or roomId for consume');
@@ -903,9 +914,11 @@ export class GatewayGateway
     ) {
         try {
             const peerId =
-                data.participantId || this.getParticipantBySocketId(client.id);
+                data.participantId ||
+                this.helperService.getParticipantBySocketId(client.id);
             const roomId =
-                data.roomId || (await this.getRoomIdBySocketId(client.id));
+                data.roomId ||
+                (await this.helperService.getRoomIdBySocketId(client.id));
 
             if (!peerId || !roomId) {
                 console.error(
@@ -1034,7 +1047,10 @@ export class GatewayGateway
         const peerId = data.peerId;
 
         // Verify participant exists
-        const participant = await this.getParticipantByPeerId(roomId, peerId);
+        const participant = await this.helperService.getParticipantByPeerId(
+            roomId,
+            peerId,
+        );
         if (!participant) {
             console.error(
                 `[Gateway] Participant ${peerId} not found in room ${roomId}`,
@@ -1043,7 +1059,9 @@ export class GatewayGateway
         }
 
         // Verify the room exists for this socket
-        const socketRoomId = await this.getRoomIdBySocketId(client.id);
+        const socketRoomId = await this.helperService.getRoomIdBySocketId(
+            client.id,
+        );
         if (!socketRoomId || socketRoomId !== roomId) {
             console.error(
                 `[Gateway] Socket room mismatch. Expected: ${roomId}, Got: ${socketRoomId}`,
@@ -1122,7 +1140,10 @@ export class GatewayGateway
         const peerId = data.peerId;
 
         // Verify participant exists
-        const participant = await this.getParticipantByPeerId(roomId, peerId);
+        const participant = await this.helperService.getParticipantByPeerId(
+            roomId,
+            peerId,
+        );
         if (!participant) {
             console.error(
                 `[Gateway] Participant ${peerId} not found in room ${roomId}`,
@@ -1131,7 +1152,9 @@ export class GatewayGateway
         }
 
         // Verify the room exists for this socket
-        const socketRoomId = await this.getRoomIdBySocketId(client.id);
+        const socketRoomId = await this.helperService.getRoomIdBySocketId(
+            client.id,
+        );
         if (!socketRoomId || socketRoomId !== roomId) {
             console.error(
                 `[Gateway] Socket room mismatch. Expected: ${roomId}, Got: ${socketRoomId}`,
@@ -1218,7 +1241,7 @@ export class GatewayGateway
         );
 
         // Verify participant exists in room
-        let participant = await this.getParticipantByPeerId(
+        let participant = await this.helperService.getParticipantByPeerId(
             data.roomId,
             data.userId,
         );
@@ -1440,166 +1463,11 @@ export class GatewayGateway
         userId: string,
         roomId: string,
     ): Promise<boolean> {
-        try {
-            // Check if socket is mapped to this user
-            const mappedPeerId = this.connectionMap.get(socketId);
-            if (mappedPeerId !== userId) {
-                console.warn(
-                    `[Gateway] Socket ${socketId} not mapped to user ${userId}`,
-                );
-                return false;
-            }
-
-            // Verify user is participant in room
-            const participant = await this.roomClient.getParticipantByPeerId(
-                roomId,
-                userId,
-            );
-            if (!participant) {
-                console.warn(
-                    `[Gateway] User ${userId} not found in room ${roomId}`,
-                );
-                return false;
-            }
-
-            // Check if participant's socket matches
-            if (participant.socket_id !== socketId) {
-                console.warn(
-                    `[Gateway] Socket mismatch for user ${userId} in room ${roomId}`,
-                );
-                return false;
-            }
-
-            return true;
-        } catch (error) {
-            console.error(`[Gateway] Error verifying user in room:`, error);
-            return false;
-        }
-    }
-
-    // HELPER METHODS
-    private storeParticipantMapping(
-        socketId: string,
-        peerId: string,
-        roomId: string,
-        participantData?: any,
-    ): void {
-        this.connectionMap.set(socketId, peerId);
-        this.participantSocketMap.set(peerId, socketId);
-        this.roomParticipantMap.set(peerId, roomId);
-
-        // Cache participant data if provided
-        if (participantData) {
-            this.participantCache.set(peerId, participantData);
-        }
-    }
-
-    private cleanupParticipantMapping(socketId: string): void {
-        const peerId = this.connectionMap.get(socketId);
-        if (peerId) {
-            this.connectionMap.delete(socketId);
-            this.participantSocketMap.delete(peerId);
-            this.roomParticipantMap.delete(peerId);
-            this.participantCache.delete(peerId);
-        }
-    }
-
-    private getParticipantBySocketId(socketId: string): string | null {
-        return this.connectionMap.get(socketId) || null;
-    }
-
-    private async getRoomIdBySocketId(
-        socketId: string,
-    ): Promise<string | null> {
-        const peerId = this.connectionMap.get(socketId);
-        if (peerId) {
-            const roomId = this.roomParticipantMap.get(peerId);
-            return roomId || null;
-        }
-        return null;
-    }
-
-    private async getParticipantByPeerId(
-        roomId: string,
-        peerId: string,
-    ): Promise<any> {
-        try {
-            // First check if we have cached participant data
-            const cachedParticipant = this.participantCache.get(peerId);
-            if (cachedParticipant) {
-                return cachedParticipant;
-            }
-
-            // Check if we have this peerId in our local mappings
-            const mappedRoomId = this.roomParticipantMap.get(peerId);
-            const socketId = this.participantSocketMap.get(peerId);
-            // If we have local mapping for this peerId and it matches the requested roomId
-            if (mappedRoomId === roomId && socketId) {
-                // Return a minimal participant object from mappings
-                const participant = {
-                    peer_id: peerId,
-                    socket_id: socketId,
-                    is_creator: false, // We don't cache this, but it's not critical for audio validation
-                    room_id: roomId,
-                };
-
-                // Cache this minimal participant data
-                this.participantCache.set(peerId, participant);
-                return participant;
-            }
-
-            // Fallback to room service
-            const participant = await this.roomClient.getParticipantByPeerId(
-                roomId,
-                peerId,
-            );
-
-            if (participant) {
-                // Update our local cache and mappings
-                this.storeParticipantMapping(
-                    participant.socket_id,
-                    peerId,
-                    roomId,
-                    participant,
-                );
-            } else {
-                console.log(
-                    `[Gateway] Participant ${peerId} not found via room service`,
-                );
-            }
-
-            return participant;
-        } catch (error) {
-            console.error(
-                `[Gateway] Error getting participant ${peerId} in room ${roomId}:`,
-                error,
-            );
-            return null;
-        }
-    }
-
-    private async getAllRoomsWithParticipants(): Promise<Map<string, any[]>> {
-        try {
-            // This is a simplified version - you might need to implement actual room scanning
-            const roomsMap = new Map<string, any[]>();
-
-            // Scan through existing participant mappings
-            for (const [peerId, roomId] of this.roomParticipantMap) {
-                if (!roomsMap.has(roomId)) {
-                    roomsMap.set(roomId, []);
-                }
-                roomsMap.get(roomId)?.push({
-                    peer_id: peerId,
-                    peerId: peerId,
-                    socket_id: this.participantSocketMap.get(peerId),
-                });
-            }
-
-            return roomsMap;
-        } catch (error) {
-            console.error('[Gateway] Error getting all rooms:', error);
-            return new Map();
-        }
+        return await this.helperService.verifyUserInRoom(
+            socketId,
+            userId,
+            roomId,
+        );
     }
 
     /**
@@ -1638,9 +1506,9 @@ export class GatewayGateway
 
             // Step 3: For each other participant, ensure they consume the speaking user's streams
             for (const participant of otherParticipants) {
-                const socketId = this.participantSocketMap.get(
-                    participant.peer_id,
-                );
+                const socketId = this.helperService
+                    .getParticipantSocketMap()
+                    .get(participant.peer_id);
                 if (!socketId) continue;
 
                 const socket = this.io.sockets.sockets.get(socketId);
@@ -1752,8 +1620,6 @@ export class GatewayGateway
         }
     }
 
-    // ==================== SFU HANDLERS ====================
-
     @SubscribeMessage('sfu:unpublish')
     async handleUnpublish(
         @ConnectedSocket() client: Socket,
@@ -1761,9 +1627,12 @@ export class GatewayGateway
     ) {
         try {
             // Get participant info from socket mapping
-            const peerId = this.getParticipantBySocketId(client.id);
+            const peerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
             const roomId =
-                data.roomId || (await this.getRoomIdBySocketId(client.id));
+                data.roomId ||
+                (await this.helperService.getRoomIdBySocketId(client.id));
 
             if (!peerId || !roomId) {
                 client.emit('sfu:error', {
@@ -1850,9 +1719,12 @@ export class GatewayGateway
     ) {
         try {
             // Get participant info from socket mapping
-            const peerId = this.getParticipantBySocketId(client.id);
+            const peerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
             const roomId =
-                data.roomId || (await this.getRoomIdBySocketId(client.id));
+                data.roomId ||
+                (await this.helperService.getRoomIdBySocketId(client.id));
 
             if (!peerId || !roomId) {
                 client.emit('sfu:error', {
@@ -1985,7 +1857,9 @@ export class GatewayGateway
         },
     ) {
         try {
-            const peerId = this.connectionMap.get(client.id);
+            const peerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
             if (!peerId) {
                 client.emit('sfu:pin-user-response', {
                     success: false,
@@ -1999,7 +1873,9 @@ export class GatewayGateway
             );
 
             // Get participant data for RTP capabilities
-            const participant = this.participantCache.get(peerId);
+            const participant = this.helperService
+                .getParticipantCache()
+                .get(peerId);
             const rtpCapabilities = participant?.rtpCapabilities || {};
 
             const result = (await this.sfuClient.pinUser(
@@ -2053,7 +1929,9 @@ export class GatewayGateway
         },
     ) {
         try {
-            const peerId = this.connectionMap.get(client.id);
+            const peerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
             if (!peerId) {
                 client.emit('sfu:unpin-user-response', {
                     success: false,
@@ -2104,6 +1982,72 @@ export class GatewayGateway
         }
     }
 
+    // ==================== VOTING HANDLERS ====================
+
+    @SubscribeMessage('sfu:create-vote')
+    async handleCreateVote(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            question: string;
+            options: { id: string; text: string }[];
+            creatorId: string;
+        },
+    ) {
+        return this.votingHandler.handleCreateVote(client, data);
+    }
+
+    @SubscribeMessage('sfu:submit-vote')
+    async handleSubmitVote(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            voteId: string;
+            optionId: string;
+            voterId: string;
+        },
+    ) {
+        return this.votingHandler.handleSubmitVote(client, data);
+    }
+
+    @SubscribeMessage('sfu:get-vote-results')
+    async handleGetVoteResults(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            voteId: string;
+        },
+    ) {
+        return this.votingHandler.handleGetVoteResults(client, data);
+    }
+
+    @SubscribeMessage('sfu:end-vote')
+    async handleEndVote(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            voteId: string;
+            creatorId: string;
+        },
+    ) {
+        return this.votingHandler.handleEndVote(client, data);
+    }
+
+    @SubscribeMessage('sfu:get-active-vote')
+    async handleGetActiveVote(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+        },
+    ) {
+        return this.votingHandler.handleGetActiveVote(client, data);
+    }
+
     // Helper methods for parsing stream data
     private parseStreamMetadata(metadata: any): any {
         try {
@@ -2128,7 +2072,9 @@ export class GatewayGateway
         },
     ) {
         try {
-            const requesterPeerId = this.connectionMap.get(client.id);
+            const requesterPeerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
             if (!requesterPeerId) {
                 client.emit('sfu:kick-user-response', {
                     success: false,
