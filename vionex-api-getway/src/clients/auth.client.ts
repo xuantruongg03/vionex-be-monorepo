@@ -34,6 +34,23 @@ export class AuthClientService implements OnModuleInit {
         };
     }
 
+    async googleAuth(data: {
+        email: string;
+        name: string;
+        avatar?: string;
+        googleId: string;
+    }) {
+        const response = await firstValueFrom(
+            this.authService.googleAuth(data),
+        );
+        return {
+            success: response.success,
+            message: response.message,
+            accessToken: response.access_token,
+            refreshToken: response.refresh_token,
+        };
+    }
+
     async logout(data: { access_token: string }) {
         const response = await firstValueFrom(this.authService.logout(data));
         return {
@@ -54,6 +71,21 @@ export class AuthClientService implements OnModuleInit {
     async verifyToken(token: string) {
         const response = await firstValueFrom(
             this.authService.verifyToken({ token }),
+        );
+        return {
+            success: response.success,
+            message: response.message,
+            user: response.user,
+        };
+    }
+
+    async updateProfile(data: {
+        access_token: string;
+        name: string;
+        avatar: string;
+    }) {
+        const response = await firstValueFrom(
+            this.authService.updateProfile(data),
         );
         return {
             success: response.success,

@@ -17,6 +17,13 @@ export interface Participant {
     // Organization room context
     organizationId?: string;
     roomId?: string;
+    // User info for sharing with other participants
+    user_info?: {
+        id: string;
+        email: string;
+        name: string;
+        avatar?: string;
+    };
 }
 
 export interface ChatMessage {

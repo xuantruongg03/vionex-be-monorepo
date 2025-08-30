@@ -209,7 +209,12 @@ export class GatewayGateway
     async handleJoin(
         @ConnectedSocket() client: Socket,
         @MessageBody()
-        data: { roomId: string; peerId: string; password?: string },
+        data: {
+            roomId: string;
+            peerId: string;
+            password?: string;
+            userInfo?: any;
+        },
     ) {
         // Check if room is password protected
         const isRoomLocked = await this.roomClient.isRoomLocked(data.roomId);
@@ -359,6 +364,7 @@ export class GatewayGateway
             consumers: new Map(),
             is_creator: isCreator,
             time_arrive: new Date(),
+            user_info: data.userInfo, // Add user info to participant
         };
         try {
             await this.roomClient.setParticipant(data.roomId, participant);
@@ -403,6 +409,7 @@ export class GatewayGateway
                     peerId: participant.peer_id,
                     isCreator: participant.is_creator,
                     timeArrive: participant.time_arrive,
+                    userInfo: participant.user_info, // Add user info to broadcast
                 },
             );
 
@@ -415,6 +422,7 @@ export class GatewayGateway
                             peerId: p.peer_id,
                             isCreator: p.is_creator,
                             timeArrive: p.time_arrive,
+                            userInfo: p.user_info, // Add user info to users list
                         }),
                     );
 

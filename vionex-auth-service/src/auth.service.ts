@@ -15,6 +15,9 @@ import {
     LogoutDto,
     RegisterDto,
     UserInfo,
+    GoogleAuthDto,
+    UpdateProfileDto,
+    UpdateProfileResponse,
 } from './dto/auth.dto';
 import { User } from './entities/user.entity';
 import { Organization } from './entities/organization.entity';
@@ -328,6 +331,125 @@ export class AuthService {
             return {
                 success: false,
                 message: error.message || 'Failed to retrieve user information',
+            };
+        }
+    }
+
+    async googleAuth(data: GoogleAuthDto): Promise<AuthResponse> {
+        try {
+            const { email, name, avatar, googleId } = data;
+
+            // Check if user already exists with this Google ID
+            let user = await this.userRepository.findOne({
+                where: { googleId },
+            });
+
+            // If not found by Google ID, check by email (for existing users)
+            if (!user) {
+                user = await this.userRepository.findOne({
+                    where: { email },
+                });
+
+                if (user) {
+                    // User exists with this email but different provider
+                    // Update user to link Google account
+                    await this.userRepository.update(user.id, {
+                        googleId,
+                        provider: 'google',
+                        avatar: avatar || user.avatar, // Update avatar if provided
+                        name: name || user.name, // Update name if different
+                    });
+                } else {
+                    // Create new user with Google account
+                    user = this.userRepository.create({
+                        email,
+                        name,
+                        avatar,
+                        googleId,
+                        provider: 'google',
+                        // password: undefined, // No password for Google users
+                        orgId: undefined, // Regular users start without organization
+                        role: 'member', // Default role
+                        isActive: true, // Google users are automatically active
+                    });
+
+                    user = await this.userRepository.save(user);
+                }
+            }
+
+            // Generate tokens
+            const tokens = await generateTokens(user);
+
+            // Update refresh token in database
+            await this.userRepository.update(user.id, {
+                refreshToken: tokens.refresh_token,
+            });
+
+            return {
+                success: true,
+                message: 'Google authentication successful',
+                access_token: tokens.access_token,
+                refresh_token: tokens.refresh_token,
+            };
+        } catch (error) {
+            return {
+                success: false,
+                message: error.message || 'Google authentication failed',
+            };
+        }
+    }
+
+    async updateProfile(
+        data: UpdateProfileDto,
+    ): Promise<UpdateProfileResponse> {
+        try {
+            const { access_token, name, avatar } = data;
+
+            // Decode token to get user ID
+            const decoded = decodeToken(access_token);
+            if (!decoded) {
+                throw new UnauthorizedException('Invalid access token');
+            }
+            const userId = decoded.userId;
+
+            // Fetch current user
+            const user = await this.userRepository.findOne({
+                where: { id: userId },
+            });
+
+            if (!user) {
+                throw new NotFoundException('User not found');
+            }
+
+            // Update user profile
+            await this.userRepository.update(userId, {
+                name: name.trim(),
+                avatar: avatar || user.avatar, // Keep current avatar if not provided
+            });
+
+            // Fetch updated user
+            const updatedUser = await this.userRepository.findOne({
+                where: { id: userId },
+            });
+
+            if (!updatedUser) {
+                throw new NotFoundException('User not found after update');
+            }
+
+            return {
+                success: true,
+                message: 'Profile updated successfully',
+                user: {
+                    id: updatedUser.id,
+                    email: updatedUser.email,
+                    name: updatedUser.name,
+                    avatar: updatedUser.avatar,
+                },
+            };
+        } catch (error) {
+            return {
+                success: false,
+                message: error.message || 'Profile update failed',
             };
         }
     }

@@ -9,6 +9,13 @@ export interface Participant {
     consumers: Map<string, mediasoupTypes.Consumer>;
     is_creator: boolean;
     time_arrive: Date;
+    // User info for sharing with other participants
+    user_info?: {
+        id: string;
+        email: string;
+        name: string;
+        avatar?: string;
+    };
 }
 
 export interface RoomPassword {

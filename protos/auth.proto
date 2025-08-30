@@ -6,9 +6,11 @@ service AuthService {
     // Authentication methods
     rpc Login(LoginRequest) returns (LoginResponse);
     rpc Register(RegisterRequest) returns (RegisterResponse);
+    rpc GoogleAuth(GoogleAuthRequest) returns (GoogleAuthResponse);
     rpc Logout(LogoutRequest) returns (LogoutResponse);
     rpc GetInfo(GetInfoRequest) returns (GetInfoResponse);
     rpc VerifyToken(VerifyTokenRequest) returns (VerifyTokenResponse);
+    rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
     
     // Organization methods
     rpc CreateOrganization(CreateOrganizationRequest) returns (CreateOrganizationResponse);
@@ -79,6 +81,32 @@ message VerifyTokenRequest {
 }
 
 message VerifyTokenResponse {
+    bool success = 1;
+    string message = 2;
+    User user = 3;
+}
+
+message GoogleAuthRequest {
+    string email = 1;
+    string name = 2;
+    string avatar = 3;
+    string googleId = 4;
+}
+
+message GoogleAuthResponse {
+    bool success = 1;
+    string message = 2;
+    string access_token = 3;
+    string refresh_token = 4;
+}
+
+message UpdateProfileRequest {
+    string access_token = 1;
+    string name = 2;
+    string avatar = 3;
+}
+
+message UpdateProfileResponse {
     bool success = 1;
     string message = 2;
     User user = 3;

@@ -81,15 +81,13 @@ message AddParticipantResponse {
   ParticipantData participant = 3;
 }
 
-// Organization Session Verification Messages - REMOVED
-// Users should use VerifyRoomAccess instead
-
 message ParticipantData {
   string peer_id = 1;
   string socket_id = 2;
   bool isAudioEnabled = 3;
   bool isVideoEnabled = 4;
   bool isHost = 5;
+  UserInfo user_info = 6;
 }
 
 message OrgRoom {
@@ -241,6 +239,15 @@ message Participant {
   bool is_creator = 6;
   int64 time_arrive = 7; // timestamp in milliseconds
   string rtp_capabilities = 8; // JSON string
+  UserInfo user_info = 9; // User information for sharing with other participants
+}
+
+// User information for sharing with other participants
+message UserInfo {
+  string id = 1;
+  string email = 2;
+  string name = 3;
+  string avatar = 4; // Optional avatar URL
 }
 
 // Messages for SetParticipant
