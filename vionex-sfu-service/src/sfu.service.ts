@@ -585,9 +585,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     speakingThreshold
                 ) {
                     prioritizedUsers.add(peerId);
-                    console.log(
-                        `[SFU] Added speaking user ${peerId} to priority list`,
-                    );
                 }
             });
         }
@@ -602,7 +599,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         });
         specialUsers.forEach((userId) => {
             prioritizedUsers.add(userId);
-            console.log(`[SFU] Added special user ${userId} to priority list`);
         });
 
         // Step 3: Fill remaining slots with streams based on priority
