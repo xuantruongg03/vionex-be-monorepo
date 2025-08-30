@@ -437,9 +437,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             prioritizedUsers.has(stream.publisherId),
         );
 
-        console.log(
-            `[SFU] Priority streams for room ${roomId}: ${priorityStreams.length} streams from ${prioritizedUsers.size} users`,
-        );
         return priorityStreams;
     }
 
@@ -531,17 +528,11 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         
         // PRIORITY 0: Pinned users always consume (highest priority)
         if (this.isPinnedUser(roomId, consumerId, publisherId)) {
-            console.log(
-                `[SFU] User ${consumerId} consuming PINNED stream from ${publisherId}`,
-            );
             return true;
         }
 
         // For small rooms (≤10 users), consume all streams
         if (totalUsers <= 10) {
-            console.log(
-                `[SFU] Small room (${totalUsers} users) - ${consumerId} consuming all streams from ${publisherId}`,
-            );
             return true;
         }
 
@@ -550,9 +541,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             this.isUserSpeaking(roomId, publisherId);
 
         if (isPriorityStream) {
-            console.log(
-                `[SFU] User ${consumerId} (11+) consuming priority stream from ${publisherId}`,
-            );
             return true;
         }
 
@@ -561,9 +549,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         const isInPriorityList = prioritizedUsers.has(publisherId);
 
         if (isInPriorityList) {
-            console.log(
-                `[SFU] User ${consumerId} consuming prioritized stream from ${publisherId}`,
-            );
             return true;
         }
         return false;
@@ -621,16 +606,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 if (!addedUsers.has(stream.publisherId)) {
                     prioritizedUsers.add(stream.publisherId);
                     addedUsers.add(stream.publisherId);
-                    console.log(
-                        `[SFU] Added priority user ${stream.publisherId} to fill remaining slots`,
-                    );
                 }
             }
         }
-
-        console.log(
-            `[SFU] Total prioritized users for room ${roomId}: ${prioritizedUsers.size}`,
-        );
         return prioritizedUsers;
     }
 
@@ -1127,9 +1105,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
             // Case 2: Not pinned but already in priority - just update pin state, no new consumers
             if (isAlreadyPriority && !wasAlreadyPinned) {
-                console.log(
-                    `[SFU] User ${pinnedPeerId} added to pin list but already in priority - no new consumers needed`,
-                );
                 return {
                     success: true,
                     message: `User ${pinnedPeerId} pinned (already in priority view)`,
@@ -1165,10 +1140,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                             producerId: consumerResult.producerId,
                             reused: false, // Always consider as new for pin functionality
                         });
-
-                        console.log(
-                            `[SFU] Pin: Created/ensured consumer for ${pinnerPeerId} -> ${pinnedPeerId} (${stream.streamId})`,
-                        );
                     }
                 } catch (error) {
                     console.error(
@@ -1178,9 +1149,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 }
             }
 
-            console.log(
-                `[SFU] Successfully pinned ${pinnedPeerId} for ${pinnerPeerId}, ${consumersCreated.length} consumers`,
-            );
             return {
                 success: true,
                 message: `Successfully pinned user ${pinnedPeerId}`,
@@ -1250,11 +1218,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 priorityStreams.some((p) => p.streamId === stream.streamId),
             );
 
-            // DON'T remove consumers - let shouldUserReceiveStream logic handle it
-            console.log(
-                `[SFU] Unpinned ${unpinnedPeerId} from ${unpinnerPeerId} - consumers continue normally`,
-            );
-
             if (wasRemoved) {
                 return {
                     success: true,
@@ -1283,9 +1246,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     ): Promise<T.HandleSpeakingResponse> {
         const roomId = request.room_id;
         const peerId = request.peer_id;
-        console.log(
-            `[SFU] ENHANCED: Handling speaking for ${peerId} in room ${roomId} with priority logic`,
-        );
         try {
             // ORIGINAL LOGIC: Track active speakers - KEPT
             if (!this.activeSpeakers.has(roomId)) {
@@ -1295,13 +1255,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             const roomSpeakers = this.activeSpeakers.get(roomId);
             if (roomSpeakers) {
                 roomSpeakers.set(peerId, new Date());
-                console.log(
-                    `[SFU] Updated speaker ${peerId} in room ${roomId}`,
-                );
             }
-
-            // ENHANCED: Handle priority streaming for speaking user
-            // This replaces the old simple speaker tracking with dynamic stream prioritization
             await this.handleSpeakingUserStreamPriority(roomId, peerId);
 
             return {
@@ -1326,9 +1280,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     ): Promise<T.HandleStopSpeakingResponse> {
         const roomId = request.room_id;
         const peerId = request.peer_id;
-        console.log(
-            `[SFU] ENHANCED: Handling stop speaking for ${peerId} in room ${roomId} with priority rebalancing`,
-        );
         try {
             // ORIGINAL LOGIC: Remove from active speakers - KEPT
             if (this.activeSpeakers.has(roomId)) {
@@ -1336,9 +1287,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 if (roomSpeakers && roomSpeakers.has(peerId)) {
                     // Remove the peer from the speaking list
                     roomSpeakers.delete(peerId);
-                    console.log(
-                        `[SFU] Removed ${peerId} from active speakers in room ${roomId}`,
-                    );
                 }
             }
 
@@ -1490,28 +1438,14 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 roomSpeakers.delete(peerId);
                 totalCleaned++;
             });
-
-            // Delete room if no one is speaking
-            // if (roomSpeakers.size === 0) {
-            //   this.activeSpeakers.delete(roomId);
-            //   roomsCleaned++;
-            // }
         });
     }
 
-    /**
-     * ENHANCED: Handle stream priority for speaking user
-     * This implements voice activity detection-based stream prioritization
-     * When user speaks, ensure their streams are prioritized for consumption
-     */
     private async handleSpeakingUserStreamPriority(
         roomId: string,
         speakingPeerId: string,
     ): Promise<void> {
         try {
-            console.log(
-                `[SFU] Handling stream priority for speaking user ${speakingPeerId} in room ${roomId}`,
-            );
 
             // Step 1: Get the media room
             const mediaRoom = this.mediaRooms.get(roomId);
@@ -1545,10 +1479,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 roomId,
                 speakingPeerId,
                 speakingUserStreams,
-            );
-
-            console.log(
-                `[SFU] Successfully handled stream priority for speaking user ${speakingPeerId}`,
             );
         } catch (error) {
             console.error(
@@ -1601,10 +1531,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
             // Update the stored stream
             this.streams.set(stream.streamId, stream);
-
-            console.log(
-                `[SFU] Marked stream ${stream.streamId} as speaking priority`,
-            );
         });
     }
 
@@ -1629,10 +1555,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         // Define threshold - this replaces the old hardcoded 10 stream limit
         const CONSUMER_THRESHOLD = 20; // Allow more consumers but manage dynamically
 
-        console.log(
-            `[SFU] Current active consumers: ${totalActiveConsumers}, threshold: ${CONSUMER_THRESHOLD}`,
-        );
-
         if (totalActiveConsumers >= CONSUMER_THRESHOLD) {
             // Need to pause some low-priority streams to make room for speaking user
             await this.pauseLowPriorityStreamsForSpeaker(
@@ -1654,10 +1576,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     ): Promise<void> {
         const mediaRoom = this.mediaRooms.get(roomId);
         if (!mediaRoom) return;
-
-        console.log(
-            `[SFU] Looking for low-priority streams to pause for speaking user ${speakingPeerId}`,
-        );
 
         // Get all streams in room sorted by priority (speaking users first, then by age)
         const allRoomStreams = this.getStreamsByRoom(roomId);
@@ -1687,9 +1605,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
         for (const stream of streamsToPause) {
             await this.pauseStreamConsumers(stream.streamId, roomId);
-            console.log(
-                `[SFU] Paused low-priority stream ${stream.streamId} for speaking user ${speakingPeerId}`,
-            );
         }
     }
 
@@ -1840,9 +1755,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 // Update the stored stream
                 this.streams.set(stream.streamId, stream);
 
-                console.log(
-                    `[SFU] Cleared speaking priority from stream ${stream.streamId}`,
-                );
             }
         });
     }
@@ -1856,9 +1768,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         stoppedSpeakingPeerId: string,
     ): Promise<void> {
         try {
-            console.log(
-                `[SFU] Rebalancing stream priorities after ${stoppedSpeakingPeerId} stopped speaking`,
-            );
 
             const mediaRoom = this.mediaRooms.get(roomId);
             if (!mediaRoom) return;
@@ -1893,9 +1802,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 }
             }
 
-            console.log(
-                `[SFU] Completed stream priority rebalancing for room ${roomId}`,
-            );
         } catch (error) {
             console.error(`[SFU] Error rebalancing stream priorities:`, error);
         }
@@ -2001,21 +1907,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
                 // Save user source to user consumer
                 existing?.consumers.add(sourceUserId);
-
-                // Ensure streamId is properly set (fallback generation if missing)
-                // let existingStreamId = existing?.streamId;
-                // if (!existingStreamId) {
-                //     existingStreamId = `translated_${targetUserId}_${sourceLanguage}_${targetLanguage}`;
-                //     console.log(
-                //         `[SFU Service] Generated missing streamId: ${existingStreamId}`,
-                //     );
-
-                //     // Update the cabin with the generated streamId
-                //     if (existing) {
-                //         existing.streamId = existingStreamId;
-                //         this.translationCabins.set(cabinId, existing);
-                //     }
-                // }
 
                 return {
                     success: true,
@@ -2256,10 +2147,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     message: 'Translation cabin is still in use',
                 };
             }
-
-            console.log(
-                `[SFU Service] Destroying translation cabin ${cabinId}`,
-            );
 
             // Close transports
             if (cabin.receiveTransport) {

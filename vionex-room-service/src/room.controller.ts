@@ -155,6 +155,7 @@ export class RoomGrpcController {
                         ? participant.rtp_capabilities
                         : JSON.stringify(participant.rtp_capabilities)
                     : '',
+                user_info: participant.user_info, // Include user_info in response
             }));
 
             const response = {
@@ -243,6 +244,7 @@ export class RoomGrpcController {
                         ? participant.rtp_capabilities
                         : JSON.stringify(participant.rtp_capabilities)
                     : '',
+                user_info: participant.user_info, // Include user_info in response
             };
 
             return { participant: serializedParticipant as any };

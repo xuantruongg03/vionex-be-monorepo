@@ -565,7 +565,6 @@ export class SfuController {
         rtp_capabilities: string;
     }): Promise<{ status: string; pin_data: string }> {
         try {
-            console.log(`[SFU Controller] Pin user request:`, data);
 
             if (!data.room_id || !data.pinner_peer_id || !data.pinned_peer_id) {
                 throw new RpcException('Missing required fields for pin user');
@@ -607,7 +606,6 @@ export class SfuController {
         unpinned_peer_id: string;
     }): Promise<{ status: string; unpin_data: string }> {
         try {
-            console.log(`[SFU Controller] Unpin user request:`, data);
 
             if (
                 !data.room_id ||
@@ -642,7 +640,6 @@ export class SfuController {
         port: number; // Optional port for audio service
     }): Promise<{ status: string; message: string }> {
         try {
-            console.log(`[SFU Controller] Handle speaking request:`, data);
 
             if (!data.room_id || !data.peer_id) {
                 throw new RpcException(
@@ -671,8 +668,6 @@ export class SfuController {
         peer_id: string;
     }): Promise<{ status: string; message: string }> {
         try {
-            console.log(`[SFU Controller] Handle stop speaking request:`, data);
-
             if (!data.room_id || !data.peer_id) {
                 throw new RpcException(
                     'Missing required fields for handling stop speaking',
@@ -779,10 +774,6 @@ export class SfuController {
         message?: string;
     }> {
         try {
-            console.log(
-                `[SFU Controller] Handle list translation cabin request:`,
-                data,
-            );
 
             if (!data.room_id || !data.user_id) {
                 throw new RpcException(

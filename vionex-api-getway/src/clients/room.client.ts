@@ -129,6 +129,7 @@ export class RoomClientService implements OnModuleInit {
                                 ? participant.rtp_capabilities
                                 : JSON.stringify(participant.rtp_capabilities)
                             : '',
+                        user_info: participant.user_info, // Add user_info to the request
                     },
                 }),
             );
@@ -159,6 +160,7 @@ export class RoomClientService implements OnModuleInit {
                 rtp_capabilities: this.safeParseRtpCapabilities(
                     p.rtp_capabilities || p.rtpCapabilities,
                 ),
+                user_info: p.user_info, // Include user_info in the mapping
             }));
         } catch (error) {
             console.error(
@@ -195,6 +197,7 @@ export class RoomClientService implements OnModuleInit {
                 rtp_capabilities: this.safeParseRtpCapabilities(
                     participant.rtp_capabilities,
                 ),
+                user_info: participant.user_info, // Include user_info
             };
         } catch (error) {
             console.error(

@@ -213,7 +213,7 @@ export class GatewayGateway
             roomId: string;
             peerId: string;
             password?: string;
-            userInfo?: any;
+            userInfo: any;
         },
     ) {
         // Check if room is password protected

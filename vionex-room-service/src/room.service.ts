@@ -327,6 +327,11 @@ export class RoomService {
             existingParticipant.socket_id = participant.socket_id;
             existingParticipant.is_creator = participant.is_creator;
 
+            // Update user_info if provided
+            if (participant.user_info) {
+                existingParticipant.user_info = participant.user_info;
+            }
+
             // Keep existing Maps if they exist, otherwise use new ones
             if (!existingParticipant.transports)
                 existingParticipant.transports = participant.transports;

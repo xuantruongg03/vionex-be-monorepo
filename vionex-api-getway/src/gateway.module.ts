@@ -16,6 +16,7 @@ import { ChatService } from './services/chat.service';
 import { HttpBroadcastService } from './services/http-broadcast.service';
 import { WebSocketEventService } from './services/websocket-event.service';
 import { StreamService } from './services/stream.service';
+import { ServiceErrorService } from './services/service-error.service';
 import { ChatBotClientService } from './clients/chatbot.client';
 import { AuthController } from './auth.controller';
 import { AuthClientService } from './clients/auth.client';
@@ -160,6 +161,7 @@ import { ChatHandler } from './handlers/chat.handler';
         OrganizationClientService,
         ChatHandler,
         StreamService,
+        ServiceErrorService,
     ],
 })
 export class GatewayModule {}
