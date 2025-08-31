@@ -44,34 +44,12 @@ def get_default_speaker_embedding():
         print(f"Error getting default speaker embedding: {e}")
         return None
 
-# def _resample_to_16k(wav: np.ndarray, src_sr: int) -> np.ndarray:
-#     if src_sr == TARGET_SR:
-#         return wav
-    
-#     # Sử dụng anti-aliasing filter tốt hơn để tránh ringing
-#     from scipy.signal import butter, sosfilt
-    
-#     # Design anti-aliasing filter
-#     nyquist_src = src_sr / 2
-#     nyquist_target = TARGET_SR / 2
-#     cutoff = min(nyquist_target * 0.9, nyquist_src * 0.9)  # 90% of Nyquist
-    
-#     # Apply anti-aliasing filter trước khi resample
-#     if src_sr > TARGET_SR:  # Downsampling case
-#         sos = butter(6, cutoff / nyquist_src, btype='low', output='sos')
-#         wav_filtered = sosfilt(sos, wav)
-#     else:
-#         wav_filtered = wav
-    
-#     # Sử dụng resample_poly với window để giảm artifacts
-#     resampled = resample_poly(wav_filtered, TARGET_SR, src_sr, window='hann')
-#     return resampled
-
-def tts(text: str, speaker_embedding: np.ndarray = None, speaker_wav_path: str = None, return_format: str = "wav") -> bytes:
+def tts(text: str, language: str = "en", speaker_embedding: np.ndarray = None, speaker_wav_path: str = None, return_format: str = "wav") -> bytes:
     """
     Convert text to speech using a text-to-speech model.
     Args:
         text (str): The text to convert to speech.
+        language (str): Target language for TTS (en, vi, lo, etc.)
         speaker_embedding (np.ndarray, optional): Speaker embedding for personalized voice synthesis.
         speaker_wav_path (str, optional): Path to speaker audio file for voice cloning.
             If both are None, uses a default approach.
@@ -83,15 +61,24 @@ def tts(text: str, speaker_embedding: np.ndarray = None, speaker_wav_path: str =
         if not text or not text.strip():
             raise ValueError("Text input is empty or None")
         
+        # Language mapping for XTTS
+        xtts_lang_map = {
+            "vi": "vi",
+            "en": "en", 
+            "lo": "en"  # Fallback to English for Lao (XTTS may not support Lao directly)
+        }
+        
+        xtts_language = xtts_lang_map.get(language, "en")
+        
         # Generate waveform từ text
         if speaker_embedding is not None:
-            wav = tts_model.tts(text=text, speaker_embedding=speaker_embedding)
+            wav = tts_model.tts(text=text, speaker_embedding=speaker_embedding, language=xtts_language)
         else:
             # Check if default speaker file exists
             if not os.path.exists(DEFAULT_SPEAKER_WAV):
                 raise FileNotFoundError(f"Default speaker audio file not found: {DEFAULT_SPEAKER_WAV}")
             
-            wav = tts_model.tts(text=text, speaker_wav=DEFAULT_SPEAKER_WAV, language="en")
+            wav = tts_model.tts(text=text, speaker_wav=DEFAULT_SPEAKER_WAV, language=xtts_language)
 
         if wav is None:
             raise RuntimeError("TTS model returned None")

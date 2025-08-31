@@ -5,8 +5,16 @@ from core.model import whisper_model
 import subprocess
 
 class STTPipeline:
-    def __init__(self):
+    def __init__(self, source_language: str = "vi"):
         self.prev_text = ""
+        self.source_language = source_language
+        
+        # Language mapping for Whisper
+        self.whisper_lang_map = {
+            "vi": "vi",
+            "en": "en", 
+            "lo": "lo"  # Whisper supports Lao
+        }
 
     def remove_overlap(self, curr: str, prev: str, min_words=2) -> str:
         """Enhanced overlap removal using difflib for better accuracy"""
@@ -44,8 +52,11 @@ class STTPipeline:
 
             audio_array = decode_audio_to_array(audio_data)
 
+            # Use dynamic language or auto-detection
+            whisper_lang = self.whisper_lang_map.get(self.source_language, "vi")
+            
             result = await asyncio.get_event_loop().run_in_executor(
-                None, _transcribe, audio_array
+                None, _transcribe, audio_array, whisper_lang
             )
 
             if result and result["text"]:
@@ -86,7 +97,7 @@ async def _speech_to_text(audio_data: bytes) -> Optional[Dict[str, Any]]:
 
         # Run transcription in thread
         result = await asyncio.get_event_loop().run_in_executor(
-            None, _transcribe, audio_array
+            None, _transcribe, audio_array, "vi"  # Default to Vietnamese
         )
         return result
 
@@ -95,12 +106,12 @@ async def _speech_to_text(audio_data: bytes) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _transcribe(audio_array: np.ndarray) -> Dict[str, Any]:
+def _transcribe(audio_array: np.ndarray, language: str = "vi") -> Dict[str, Any]:
     """Synchronous Whisper transcription using faster-whisper with enhanced config"""
     try:
         segments, info = whisper_model.transcribe(
             audio_array,
-            language='vi',
+            language=language,  # Use dynamic language
             task='transcribe',
             beam_size=5,
             temperature=0.0,
@@ -111,7 +122,7 @@ def _transcribe(audio_array: np.ndarray) -> Dict[str, Any]:
         full_text = ' '.join([segment.text for segment in segments_list])
         return {
             'text': full_text.strip(),
-            'language': info.language if hasattr(info, 'language') else 'vi',
+            'language': info.language if hasattr(info, 'language') else language,
             'segments': [
                 {
                     'text': segment.text,
@@ -123,4 +134,4 @@ def _transcribe(audio_array: np.ndarray) -> Dict[str, Any]:
         }
 
     except Exception as e:
-        return {'text': '', 'language': 'vi', 'segments': []}
+        return {'text': '', 'language': language, 'segments': []}

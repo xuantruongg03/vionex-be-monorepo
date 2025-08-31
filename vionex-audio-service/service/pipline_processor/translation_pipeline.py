@@ -32,12 +32,13 @@ class TranslationPipeline:
         self.source_language = source_language
         self.target_language = target_language
         self.translator = TranslateProcess()
-        self.stt = STTPipeline()
+        self.stt = STTPipeline(source_language=source_language)  # Pass source language to STT
         self.text_to_speech = tts
 
         self.language_map = {
             "vi": "vietnamese",
             "en": "english",
+            "lo": "lao",
         }
         
         logger.info(f"Translation pipeline: {source_language} → {target_language}")
@@ -136,8 +137,17 @@ class TranslationPipeline:
                 return text
 
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, self.translator.translate_vi_to_en, text)
-            return result[0] 
+            
+            # Use the generic translate method instead of specific methods
+            result = await loop.run_in_executor(
+                None, 
+                self.translator.translate, 
+                text, 
+                self.source_language, 
+                self.target_language
+            )
+                    
+            return result[0] if result and len(result) > 0 else None
         except Exception as e:
             logger.error(f"Translation error: {e}")
             return None
@@ -147,9 +157,9 @@ class TranslationPipeline:
         try:
             logger.info(f"Starting TTS for text: '{text[:50]}...' ({len(text)} chars)")
             
-            # Implement TTS
+            # Implement TTS with target language
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, self.text_to_speech, text)
+            result = await loop.run_in_executor(None, self.text_to_speech, text, self.target_language)
 
             if result:
                 logger.info(f"TTS successful, generated {len(result)} bytes")
