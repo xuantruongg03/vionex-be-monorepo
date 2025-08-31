@@ -13,7 +13,6 @@ import {
 } from '@nestjs/common';
 import * as mediasoupTypes from 'mediasoup/node/lib/types';
 import { AudioClientService } from './clients/audio.client';
-import { ChatBotClientService } from './clients/chatbot.client';
 import { RoomClientService } from './clients/room.client';
 import { SfuClientService } from './clients/sfu.client';
 import { Participant } from './interfaces/interface';
@@ -27,7 +26,6 @@ export class GatewayController {
         private readonly roomClient: RoomClientService,
         private readonly broadcastService: HttpBroadcastService,
         private readonly sfuClient: SfuClientService,
-        private readonly chatbotClient: ChatBotClientService,
         private readonly audioClient: AudioClientService,
     ) {}
 
@@ -159,43 +157,6 @@ export class GatewayController {
             throw new HttpException(
                 'Error checking room status',
                 HttpStatus.INTERNAL_SERVER_ERROR,
-            );
-        }
-    }
-
-    @Post('/chatbot/ask')
-    async askChatBot(
-        @Body() data: { question: string; roomId: string },
-        @Headers('authorization') authorization?: string,
-    ) {
-        try {
-            const participant =
-                await this.getParticipantFromHeader(authorization);
-            const { question, roomId } = data;
-
-            if (!question || question.trim().length === 0) {
-                throw new HttpException(
-                    'Question cannot be empty',
-                    HttpStatus.BAD_REQUEST,
-                );
-            }
-
-            // Call the chatbot service
-            const response = await this.chatbotClient.askChatBot({
-                question,
-                room_id: roomId,
-            });
-
-            return {
-                success: true,
-                answer: response,
-                participant: participant.peer_id,
-            };
-        } catch (error) {
-            console.error('Error asking chatbot:', error);
-            throw new HttpException(
-                error.message || 'Failed to ask chatbot',
-                error.status || HttpStatus.INTERNAL_SERVER_ERROR,
             );
         }
     }

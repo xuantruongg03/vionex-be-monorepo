@@ -5,6 +5,8 @@ load_dotenv()
 
 # Server configuration
 GRPC_PORT = int(os.getenv("CHATBOT_GRPC_PORT", 30007))
+SEMANTIC_SERVICE_HOST = os.getenv("SEMANTIC_SERVICE_HOST", "localhost")
+SEMANTIC_SERVICE_PORT = int(os.getenv("SEMANTIC_SERVICE_PORT", 30006))
 
 # Logging configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

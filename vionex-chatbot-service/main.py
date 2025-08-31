@@ -37,7 +37,7 @@ except Exception as e:
     sys.exit(1)
 
 
-class VionexChatBotService(chatbot_pb2_grpc.SemanticServiceServicer):
+class VionexChatBotService(chatbot_pb2_grpc.ChatbotServiceServicer):
     """
     Main gRPC chat bot service
     """
@@ -67,6 +67,7 @@ class VionexChatBotService(chatbot_pb2_grpc.SemanticServiceServicer):
 
             # Process the question using the chat bot processor
             response = self.chatbot_processor.ask(request.question, request.room_id)
+            # response = "Hello, this is test message"
 
             return chatbot_pb2.AskChatBotResponse(
                 answer=response
@@ -88,7 +89,7 @@ def serve():
         
         # Add service
         semantic_service = VionexChatBotService()
-        chatbot_pb2_grpc.add_SemanticServiceServicer_to_server(semantic_service, server)
+        chatbot_pb2_grpc.add_ChatbotServiceServicer_to_server(semantic_service, server)
 
         # Start server
         listen_addr = f'[::]:{GRPC_PORT}'

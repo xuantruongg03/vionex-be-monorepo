@@ -44,16 +44,6 @@ export class InteractionController {
 
                         return fullElement;
                     } catch (parseError) {
-                        console.error(
-                            '[InteractionController] Error parsing element data:',
-                            {
-                                elementId: element.id,
-                                elementType: element.type,
-                                dataLength: element.data?.length || 0,
-                                parseError: parseError.message,
-                            },
-                        );
-
                         // Return basic structure if parsing fails
                         return {
                             id: element.id,
@@ -83,10 +73,6 @@ export class InteractionController {
                 },
             };
         } catch (error) {
-            console.error(
-                '[InteractionController] UpdateWhiteboard error:',
-                error,
-            );
             return {
                 success: false,
                 error: error.message,
@@ -100,12 +86,13 @@ export class InteractionController {
             const whiteboardData = this.whiteboardService.getWhiteboardData(
                 data.room_id,
             );
+
             const permissions = this.whiteboardService.getPermissions(
                 data.room_id,
             );
 
             // Convert elements to gRPC proto structure
-            let serializedElements = [];
+            let serializedElements: any[] = [];
             if (
                 whiteboardData?.elements &&
                 Array.isArray(whiteboardData.elements)
@@ -125,7 +112,8 @@ export class InteractionController {
                     return protoElement;
                 });
             }
-            return {
+
+            const response = {
                 success: true,
                 whiteboard_data: whiteboardData
                     ? {
@@ -134,7 +122,7 @@ export class InteractionController {
                           state: JSON.stringify(whiteboardData.state || {}),
                           allowed_users: permissions.allowed_users || [],
                           updated_at:
-                              whiteboardData.updatedAt ||
+                              whiteboardData.timestamp ||
                               new Date().toISOString(),
                       }
                     : {
@@ -145,11 +133,9 @@ export class InteractionController {
                           updated_at: new Date().toISOString(),
                       },
             };
+
+            return response;
         } catch (error) {
-            console.error(
-                '[InteractionController] GetWhiteboardData error:',
-                error,
-            );
             return {
                 success: false,
                 whiteboard_data: {
@@ -876,9 +862,9 @@ export class InteractionController {
                 question.options?.map((option: any) => ({
                     id: option.id,
                     text: option.text,
-                    is_correct: false, // NEVER send correct answers to client
+                    is_correct: false,
                 })) || [],
-            correct_answers: [], // NEVER send correct answers to client
+            correct_answers: [],
             answer: question.answer || '',
         }));
         return {
