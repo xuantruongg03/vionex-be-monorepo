@@ -81,6 +81,12 @@ COPY service/ ./service/
 COPY core/ ./core/
 COPY clients/ ./clients/
 COPY models/Helsinki-NLP-opus-mt-vi-en /app/models/Helsinki-NLP-opus-mt-vi-en
+COPY models/Helsinki-NLP-opus-mt-en-vi /app/models/Helsinki-NLP-opus-mt-en-vi
+# COPY models/Helsinki-NLP-opus-mt-vi-lo /app/models/Helsinki-NLP-opus-mt-vi-lo
+# COPY models/Helsinki-NLP-opus-mt-lo-vi /app/models/Helsinki-NLP-opus-mt-lo-vi
+# COPY models/Helsinki-NLP-opus-mt-en-lo /app/models/Helsinki-NLP-opus-mt-en-lo
+# COPY models/Helsinki-NLP-opus-mt-lo-en /app/models/Helsinki-NLP-opus-mt-lo-en
+
 # Create directory structure and copy XTTS-v2 samples for speaker voice reference
 RUN mkdir -p /app/models/XTTS-v2
 COPY models/XTTS-v2/samples /app/models/XTTS-v2/samples

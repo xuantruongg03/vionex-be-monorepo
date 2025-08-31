@@ -19,15 +19,47 @@ whisper_model = WhisperModel(WHISPER_MODEL, device=TYPE_ENGINE, compute_type=WHI
 
 from transformers import MarianTokenizer, MarianMTModel
 
-# Load translation model from local directory in container
+# Load translation models from local directory in container
+# Vietnamese to English (existing)
 model_vi_en_link = "/app/models/Helsinki-NLP-opus-mt-vi-en"
 # model_vi_en_link = "models/Helsinki-NLP-opus-mt-vi-en"
 tokenizer = MarianTokenizer.from_pretrained(model_vi_en_link)
 model_vi_en = MarianMTModel.from_pretrained(model_vi_en_link)
 
-# Move translation model to GPU for faster inference
+# English to Vietnamese
+model_en_vi_link = "/app/models/Helsinki-NLP-opus-mt-en-vi"
+tokenizer_en_vi = MarianTokenizer.from_pretrained(model_en_vi_link)
+model_en_vi = MarianMTModel.from_pretrained(model_en_vi_link)
+
+# Vietnamese to Lao
+model_vi_lo_link = "/app/models/Helsinki-NLP-opus-mt-vi-lo"
+tokenizer_vi_lo = MarianTokenizer.from_pretrained(model_vi_lo_link)
+model_vi_lo = MarianMTModel.from_pretrained(model_vi_lo_link)
+
+# Lao to Vietnamese
+model_lo_vi_link = "/app/models/Helsinki-NLP-opus-mt-lo-vi"
+tokenizer_lo_vi = MarianTokenizer.from_pretrained(model_lo_vi_link)
+model_lo_vi = MarianMTModel.from_pretrained(model_lo_vi_link)
+
+# English to Lao
+model_en_lo_link = "/app/models/Helsinki-NLP-opus-mt-en-lo"
+tokenizer_en_lo = MarianTokenizer.from_pretrained(model_en_lo_link)
+model_en_lo = MarianMTModel.from_pretrained(model_en_lo_link)
+
+# Lao to English
+model_lo_en_link = "/app/models/Helsinki-NLP-opus-mt-lo-en"
+tokenizer_lo_en = MarianTokenizer.from_pretrained(model_lo_en_link)
+model_lo_en = MarianMTModel.from_pretrained(model_lo_en_link)
+
+# Move all translation models to GPU for faster inference
 if TYPE_ENGINE == "cuda":
     model_vi_en = model_vi_en.to("cuda")
+    model_en_vi = model_en_vi.to("cuda")
+    model_vi_lo = model_vi_lo.to("cuda")
+    model_lo_vi = model_lo_vi.to("cuda")
+    model_en_lo = model_en_lo.to("cuda")
+    model_lo_en = model_lo_en.to("cuda")
+    print("All translation models moved to CUDA")
 
 # Load model tts
 from TTS.api import TTS
