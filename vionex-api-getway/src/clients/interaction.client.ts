@@ -652,6 +652,40 @@ export class InteractionClientService implements OnModuleInit {
         }
     }
 
+    async storeBehaviorLogs(
+        roomId: string,
+        peerId: string,
+        behaviorLogs: Array<{
+            type: string;
+            value: any;
+            time: Date;
+        }>,
+    ) {
+        try {
+            // Convert logs to gRPC format
+            const events = behaviorLogs.map((log) => ({
+                type: log.type,
+                value: String(log.value),
+                time: log.time.toISOString(),
+            }));
+
+            const observable = this.behaviorService.saveUserBehavior({
+                user_id: peerId,
+                room_id: roomId,
+                events: events,
+            });
+            const result = await firstValueFrom(observable);
+
+            return result;
+        } catch (error) {
+            console.error(
+                '[InteractionClient] Error storing behavior logs:',
+                error,
+            );
+            throw error;
+        }
+    }
+
     async generateRoomLogExcel(roomId: string) {
         try {
             const observable = this.behaviorService.generateRoomLogExcel({

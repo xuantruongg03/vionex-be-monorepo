@@ -2109,6 +2109,213 @@ export class GatewayGateway
         return this.quizHandler.handleGetActiveQuiz(client, data);
     }
 
+    // ==================== BEHAVIOR MONITORING HANDLERS ====================
+
+    @SubscribeMessage('sfu:send-behavior-logs')
+    async handleSendBehaviorLogs(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            peerId: string;
+            roomId: string;
+            behaviorLogs: Array<{
+                type: string;
+                value: any;
+                time: Date;
+            }>;
+        },
+    ) {
+        try {
+            console.log(
+                `[Gateway] Received behavior logs from ${data.peerId} in room ${data.roomId}`,
+            );
+
+            // Validate input
+            if (
+                !data.peerId ||
+                !data.roomId ||
+                !Array.isArray(data.behaviorLogs)
+            ) {
+                client.emit('sfu:behavior-logs-error', {
+                    message: 'Invalid behavior logs data',
+                });
+                return;
+            }
+
+            // Forward to interaction service for storage
+            await this.interactionClient.storeBehaviorLogs(
+                data.roomId,
+                data.peerId,
+                data.behaviorLogs,
+            );
+
+            // For now, just acknowledge receipt
+            client.emit('sfu:behavior-logs-received', {
+                success: true,
+                logsCount: data.behaviorLogs.length,
+            });
+
+            console.log(
+                `[Gateway] Stored ${data.behaviorLogs.length} behavior logs for ${data.peerId}`,
+            );
+        } catch (error) {
+            console.error('[Gateway] Error handling behavior logs:', error);
+            client.emit('sfu:behavior-logs-error', {
+                message: error.message || 'Failed to store behavior logs',
+            });
+        }
+    }
+
+    @SubscribeMessage('sfu:toggle-behavior-monitor')
+    async handleToggleBehaviorMonitor(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            peerId: string;
+            isActive: boolean;
+        },
+    ) {
+        try {
+            console.log(
+                `[Gateway] Toggling behavior monitor for room ${data.roomId}: ${data.isActive}`,
+            );
+
+            // Validate room creator permission
+            const participant = await this.roomClient.getParticipantByPeerId(
+                data.roomId,
+                data.peerId,
+            );
+            if (!participant || !participant.is_creator) {
+                client.emit('sfu:behavior-monitor-error', {
+                    message: 'Only room creator can toggle behavior monitoring',
+                });
+                return;
+            }
+
+            // Broadcast monitor state to all participants in room
+            this.io.to(data.roomId).emit('sfu:behavior-monitor-state', {
+                isActive: data.isActive,
+                triggeredBy: data.peerId,
+            });
+
+            // Store monitor state in interaction service
+            await this.interactionClient.setBehaviorMonitorState(
+                data.roomId,
+                data.isActive,
+            );
+
+            console.log(
+                `[Gateway] Behavior monitoring ${data.isActive ? 'started' : 'stopped'} for room ${data.roomId}`,
+            );
+        } catch (error) {
+            console.error('[Gateway] Error toggling behavior monitor:', error);
+            client.emit('sfu:behavior-monitor-error', {
+                message: error.message || 'Failed to toggle behavior monitor',
+            });
+        }
+    }
+
+    @SubscribeMessage('sfu:request-user-log')
+    async handleRequestUserLog(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            peerId: string;
+            targetPeerId: string;
+        },
+    ) {
+        try {
+            console.log(
+                `[Gateway] Requesting logs from ${data.targetPeerId} for room ${data.roomId}`,
+            );
+
+            // Validate room creator permission
+            const participant = await this.roomClient.getParticipantByPeerId(
+                data.roomId,
+                data.peerId,
+            );
+            if (!participant || !participant.is_creator) {
+                client.emit('sfu:request-user-log-error', {
+                    message: 'Only room creator can request user logs',
+                });
+                return;
+            }
+
+            // Send request to specific user
+            this.io.to(data.roomId).emit('sfu:request-user-log', {
+                peerId: data.targetPeerId,
+                requestedBy: data.peerId,
+            });
+
+            console.log(`[Gateway] Log request sent to ${data.targetPeerId}`);
+        } catch (error) {
+            console.error('[Gateway] Error requesting user log:', error);
+            client.emit('sfu:request-user-log-error', {
+                message: error.message || 'Failed to request user log',
+            });
+        }
+    }
+
+    @SubscribeMessage('sfu:download-room-log')
+    async handleDownloadRoomLog(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            peerId: string;
+        },
+        callback?: (response: any) => void,
+    ) {
+        try {
+            console.log(`[Gateway] Downloading room logs for ${data.roomId}`);
+
+            // Validate room creator permission
+            const participant = await this.roomClient.getParticipantByPeerId(
+                data.roomId,
+                data.peerId,
+            );
+            if (!participant || !participant.is_creator) {
+                const errorResponse = {
+                    success: false,
+                    error: 'Only room creator can download room logs',
+                };
+                if (callback) callback(errorResponse);
+                else client.emit('sfu:download-room-log-error', errorResponse);
+                return;
+            }
+
+            // Generate Excel file from interaction service
+            const excelResult =
+                await this.interactionClient.generateRoomLogExcel(data.roomId);
+
+            const response = {
+                success: true,
+                file:
+                    (excelResult as any)?.file ||
+                    Buffer.from('No logs available').toString('base64'),
+                filename: `behavior-logs-${data.roomId}-${new Date().toISOString().slice(0, 10)}.xlsx`,
+            };
+
+            if (callback) {
+                callback(response);
+            } else {
+                client.emit('sfu:download-room-log-success', response);
+            }
+
+            console.log(`[Gateway] Room logs generated for ${data.roomId}`);
+        } catch (error) {
+            console.error('[Gateway] Error downloading room log:', error);
+            const errorResponse = {
+                success: false,
+                error: error.message || 'Failed to download room log',
+            };
+            if (callback) callback(errorResponse);
+            else client.emit('sfu:download-room-log-error', errorResponse);
+        }
+    }
+
     // Helper methods for parsing stream data
     private parseStreamMetadata(metadata: any): any {
         try {

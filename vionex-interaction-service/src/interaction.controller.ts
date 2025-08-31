@@ -876,9 +876,9 @@ export class InteractionController {
                 question.options?.map((option: any) => ({
                     id: option.id,
                     text: option.text,
-                    is_correct: false, // NEVER send correct answers to client
+                    is_correct: false,
                 })) || [],
-            correct_answers: [], // NEVER send correct answers to client
+            correct_answers: [],
             answer: question.answer || '',
         }));
         return {
