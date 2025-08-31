@@ -25,7 +25,7 @@ if _version_not_supported:
     )
 
 
-class SemanticServiceStub(object):
+class ChatbotServiceStub(object):
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -35,13 +35,13 @@ class SemanticServiceStub(object):
             channel: A grpc.Channel.
         """
         self.AskChatBot = channel.unary_unary(
-                '/chatbot.SemanticService/AskChatBot',
+                '/chatbot.ChatbotService/AskChatBot',
                 request_serializer=chatbot__pb2.AskChatBotRequest.SerializeToString,
                 response_deserializer=chatbot__pb2.AskChatBotResponse.FromString,
                 _registered_method=True)
 
 
-class SemanticServiceServicer(object):
+class ChatbotServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def AskChatBot(self, request, context):
@@ -51,7 +51,7 @@ class SemanticServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
 
-def add_SemanticServiceServicer_to_server(servicer, server):
+def add_ChatbotServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'AskChatBot': grpc.unary_unary_rpc_method_handler(
                     servicer.AskChatBot,
@@ -60,13 +60,13 @@ def add_SemanticServiceServicer_to_server(servicer, server):
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'chatbot.SemanticService', rpc_method_handlers)
+            'chatbot.ChatbotService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('chatbot.SemanticService', rpc_method_handlers)
+    server.add_registered_method_handlers('chatbot.ChatbotService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
-class SemanticService(object):
+class ChatbotService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
@@ -83,7 +83,7 @@ class SemanticService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/chatbot.SemanticService/AskChatBot',
+            '/chatbot.ChatbotService/AskChatBot',
             chatbot__pb2.AskChatBotRequest.SerializeToString,
             chatbot__pb2.AskChatBotResponse.FromString,
             options,

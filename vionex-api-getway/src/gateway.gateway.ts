@@ -10,6 +10,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { AudioClientService } from './clients/audio.client';
+import { ChatBotClientService } from './clients/chatbot.client';
 import { InteractionClientService } from './clients/interaction.client';
 import { RoomClientService } from './clients/room.client';
 import { SfuClientService } from './clients/sfu.client';
@@ -48,6 +49,7 @@ export class GatewayGateway
         private readonly quizHandler: QuizHandler,
         private readonly helperService: GatewayHelperService,
         private readonly streamService: StreamService,
+        private readonly chatbotClient: ChatBotClientService,
     ) {}
 
     afterInit(server: Server) {
@@ -2427,6 +2429,112 @@ export class GatewayGateway
             client.emit('sfu:kick-user-response', {
                 success: false,
                 message: error.message || 'Failed to kick user',
+            });
+        }
+    }
+
+    // ==================== CHATBOT HANDLERS ====================
+
+    @SubscribeMessage('chatbot:ask')
+    async handleChatbotAsk(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: { id: string; roomId: string; text: string },
+    ) {
+        try {
+            console.log(`[Chatbot] Request from ${client.id}:`, {
+                requestId: data.id,
+                roomId: data.roomId,
+                question: data.text?.substring(0, 100) + '...',
+            });
+
+            // 🛡️ Security: Validate user is in the room
+            const socketRooms = Array.from(client.rooms);
+            if (!socketRooms.includes(data.roomId)) {
+                console.warn(
+                    `[Chatbot] Access denied - client ${client.id} not in room ${data.roomId}`,
+                );
+                client.emit('chatbot:error', {
+                    requestId: data.id,
+                    message: 'Access denied: You are not in this room',
+                });
+                return;
+            }
+
+            // Validate input
+            if (!data.text || data.text.trim().length === 0) {
+                client.emit('chatbot:error', {
+                    requestId: data.id,
+                    message: 'Question cannot be empty',
+                });
+                return;
+            }
+
+            if (data.text.length > 2000) {
+                client.emit('chatbot:error', {
+                    requestId: data.id,
+                    message: 'Question too long (max 2000 characters)',
+                });
+                return;
+            }
+
+            // Get peerId from socket data (set during join)
+            const peerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
+            if (!peerId) {
+                client.emit('chatbot:error', {
+                    requestId: data.id,
+                    message: 'User not authenticated',
+                });
+                return;
+            }
+
+            // Rate limiting check (optional - can implement later)
+            // const canProceed = await this.rateLimitCheck(peerId);
+            // if (!canProceed) { ... }
+
+            // 🚀 Call chatbot service
+            console.log(
+                `[Chatbot] Processing request for user ${peerId} in room ${data.roomId}`,
+            );
+
+            const response = await this.chatbotClient.askChatBot({
+                question: data.text.trim(),
+                room_id: data.roomId,
+            });
+
+            // 📤 Send final response (for now, no streaming)
+            client.emit('chatbot:final', {
+                requestId: data.id,
+                text:
+                    response.answer ||
+                    'I apologize, but I could not generate a response.',
+            });
+
+            console.log(`[Chatbot] Response sent for request ${data.id}`);
+        } catch (error) {
+            console.error(
+                `[Chatbot] Error processing request ${data.id}:`,
+                error,
+            );
+
+            let errorMessage =
+                'Sorry, I encountered an error while processing your request.';
+
+            // Handle specific error types
+            if (error.message?.includes('timeout')) {
+                errorMessage = 'Request timed out. Please try again.';
+            } else if (error.message?.includes('rate limit')) {
+                errorMessage =
+                    'Too many requests. Please wait a moment before asking again.';
+            } else if (error.message?.includes('service unavailable')) {
+                errorMessage =
+                    'AI service is temporarily unavailable. Please try again later.';
+            }
+
+            client.emit('chatbot:error', {
+                requestId: data.id,
+                message: errorMessage,
             });
         }
     }
