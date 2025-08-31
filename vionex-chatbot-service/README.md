@@ -1,4 +1,4 @@
-# 🔍 Vionex Semantic Service
+# Vionex Chatbot Service
 
 <div align="center">
   <img src="https://res.cloudinary.com/dcweof28t/image/upload/v1751123716/image_products/logo_o34pnk.png" alt="Vionex Logo" width="200"/>
@@ -13,309 +13,212 @@
 
 ---
 
-## 🚀 Overview
+AI-powered chatbot service with GPU support for the Vionex video conferencing platform.
 
-The **Vionex Semantic Service** is a cutting-edge AI-powered microservice that provides semantic search and analysis capabilities for meeting transcripts. Built with modern NLP technologies, it enables intelligent content discovery, conversation insights, and advanced vector-based search across all meeting content.
+## Features
 
-### ✨ Key Features
+- **GPU-accelerated inference** using CUDA
+- **Hugging Face integration** for model loading
+- **Private model support** with authentication
+- **gRPC API** for high-performance communication
+- **Docker containerization** with multi-stage builds
+- **Automatic model downloading** at runtime
 
--   🔍 **Vector-based Search** - Semantic similarity search using advanced embeddings
--   🤖 **AI-Powered Analysis** - Natural language processing with Sentence Transformers
--   📊 **Real-time Indexing** - Instant transcript vectorization and storage
--   🌐 **Multi-language Support** - Global accessibility with language detection
--   ⚡ **High Performance** - Optimized for real-time meeting analysis
--   🔒 **Secure Storage** - Enterprise-grade vector database with Qdrant
--   📈 **Scalable Architecture** - Microservice design for horizontal scaling
--   🎯 **Intelligent Insights** - Meeting intelligence and conversation analytics
-
----
-
-## 🏗️ Architecture
-
-```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Audio Service │ ── │  Semantic Service │ ── │ Qdrant Vector DB │
-│  (Transcripts)  │    │   (Processing)   │    │   (Storage)     │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                                │
-                    ┌───────────▼───────────┐
-                    │     API Gateway      │
-                    │   (Search Queries)   │
-                    └─────────────────────┘
-```
-
-### 🔄 Processing Flow
-
-1. **Transcript Input** → Audio Service sends text via gRPC
-2. **Text Vectorization** → Sentence Transformers encode semantic meaning
-3. **Vector Storage** → Qdrant database stores embeddings with metadata
-4. **Search Queries** → API Gateway requests semantic search
-5. **Similarity Matching** → Vector similarity calculation
-6. **Ranked Results** → Intelligent content discovery
-
----
-
-## 🛠️ Technology Stack
-
-### **AI & NLP**
-
--   **Sentence Transformers** - State-of-the-art text embeddings
--   **Hugging Face Transformers** - Pre-trained language models
--   **Multi-language Models** - Support for global languages
-
-### **Vector Database**
-
--   **Qdrant** - High-performance vector search engine
--   **Vector Indexing** - Efficient similarity search
--   **Metadata Filtering** - Advanced query capabilities
-
-### **Backend Framework**
-
--   **Python 3.8+** - Modern Python runtime
--   **gRPC** - High-performance RPC communication
--   **Protocol Buffers** - Efficient data serialization
--   **AsyncIO** - Asynchronous processing
-
-### **Development Tools**
-
--   **Poetry** - Dependency management
--   **Black** - Code formatting
--   **pytest** - Testing framework
--   **Docker** - Containerization
-
----
-
-## 📁 Project Structure
-
-```
-vionex-semantic-service/
-├── services/
-│   └── semantic_processor.py     # Core semantic processing logic
-├── core/
-│   ├── config.py                 # Service configuration
-│   ├── model.py                  # AI model initialization
-│   └── vectordb.py               # Qdrant database client
-├── proto/
-│   ├── semantic_pb2.py           # Generated protobuf classes
-│   └── semantic_pb2_grpc.py      # Generated gRPC stubs
-├── main.py                       # gRPC server entry point
-├── requirements.txt              # Python dependencies
-├── Dockerfile                    # Container configuration
-└── README.md                     # This file
-```
-
----
-
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
--   **Python** 3.8.0 or higher
--   **pip** for package management
--   **Qdrant** vector database (local or cloud)
--   **Git** for version control
+- Docker with GPU support (NVIDIA Docker)
+- NVIDIA GPU with CUDA 11.8+ support
+- Hugging Face account (for private models)
 
-### Installation
+### Pull and Run
 
 ```bash
-# Clone the repository
-git clone https://github.com/xuantruongg03/vionex-backend.git
-cd vionex-backend/vionex-semantic-service
+# Pull the latest image
+docker pull lexuantruong098/vionex-chatbot-service-gpu:latest
 
-# Install dependencies
-pip install -r requirements.txt
+# Run with GPU support
+docker run --gpus all \
+  -p 30007:30007 \
+  -e HUGGINGFACE_TOKEN=your_hf_token_here \
+  -e BASE_MODEL_REPO=your-username/your-model \
+  -e LORA_MODEL_REPO=your-username/your-lora \
+  lexuantruong098/vionex-chatbot-service-gpu:latest
+```
 
-# Set environment variables
+### Using Docker Compose
+
+```bash
+# Create .env file
 cp .env.example .env
-# Edit .env with your configuration
+# Edit .env with your configurations
+
+# Run with docker-compose
+docker-compose up -d
 ```
 
-### Configuration
-
-Create a `.env` file with the following variables:
-
-```env
-# Service Configuration
-GRPC_PORT=50056
-NODE_ENV=development
-
-# Vector Database
-QDRANT_HOST=localhost
-QDRANT_PORT=6333
-COLLECTION_NAME=transcripts
-
-# AI Model Configuration
-MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
-MODEL_DEVICE=cpu
-```
-
-### Running the Service
-
-```bash
-# Start the service
-python main.py
-
-# Or with specific configuration
-GRPC_PORT=50056 python main.py
-```
-
-### Docker Deployment
-
-```bash
-# Build Docker image
-docker build -t vionex-semantic-service .
-
-# Run container
-docker run -p 50056:50056 \
-  -e QDRANT_HOST=localhost \
-  -e QDRANT_PORT=6333 \
-  vionex-semantic-service
-```
-
----
-
-## 🔧 API Reference
-
-### gRPC Service Definition
-
-```protobuf
-service SemanticService {
-    rpc SaveTranscript(SaveTranscriptRequest) returns (SaveTranscriptResponse);
-    rpc SearchTranscripts(SearchTranscriptsRequest) returns (SearchTranscriptsResponse);
-}
-```
-
-### SaveTranscript
-
-Save a transcript with semantic vectorization.
-
-**Request:**
-
-```protobuf
-message SaveTranscriptRequest {
-    string room_id = 1;
-    string speaker = 2;
-    string text = 3;
-    optional string timestamp = 4;
-    optional string language = 5;
-}
-```
-
-**Response:**
-
-```protobuf
-message SaveTranscriptResponse {
-    bool success = 1;
-    string message = 2;
-}
-```
-
-### SearchTranscripts
-
-Search transcripts using semantic similarity.
-
-**Request:**
-
-```protobuf
-message SearchTranscriptsRequest {
-    string query = 1;
-    string room_id = 2;
-    optional int32 limit = 3;
-}
-```
-
-**Response:**
-
-```protobuf
-message SearchTranscriptsResponse {
-    repeated TranscriptResult results = 1;
-}
-```
-
----
-
-## 🎯 Core Features
-
-### 🔍 Semantic Search
-
-```python
-# Example search query
-query = "discussion about project deadlines"
-results = semantic_processor.search(query, room_id="room123", limit=10)
-
-# Results include:
-# - Semantically similar content
-# - Relevance scores
-# - Speaker information
-# - Timestamps
-```
-
-### 📊 Vector Storage
-
-```python
-# Automatic vectorization and storage
-semantic_processor.save(
-    room_id="room123",
-    speaker="John Doe",
-    text="We need to discuss the project timeline",
-    timestamp="2025-01-15T10:30:00Z",
-    language="en"
-)
-```
-
-## 📊 Performance Metrics
-
-### Throughput
-
--   **Indexing Speed**: 1,000+ documents/second
--   **Search Latency**: < 50ms average response time
--   **Concurrent Queries**: 100+ simultaneous searches
--   **Vector Dimensions**: 384 (optimized for speed/accuracy)
-
-### Accuracy
-
--   **Semantic Similarity**: 90%+ relevance for related content
--   **Language Detection**: 95%+ accuracy across supported languages
--   **Search Precision**: 85%+ for domain-specific queries
--   **Recall Rate**: 90%+ for comprehensive search coverage
-
-### Scalability
-
--   **Database Size**: Supports millions of vectors
--   **Memory Usage**: Optimized for production environments
--   **Horizontal Scaling**: Stateless service design
--   **Load Balancing**: Multiple instance support
-
----
-
-## 🔧 Configuration
+## Configuration
 
 ### Environment Variables
 
-| Variable          | Default          | Description                  |
-| ----------------- | ---------------- | ---------------------------- |
-| `GRPC_PORT`       | 50056            | gRPC server port             |
-| `QDRANT_HOST`     | localhost        | Qdrant database host         |
-| `QDRANT_PORT`     | 6333             | Qdrant database port         |
-| `COLLECTION_NAME` | transcripts      | Vector collection name       |
-| `MODEL_NAME`      | all-MiniLM-L6-v2 | Sentence transformer model   |
-| `MODEL_DEVICE`    | cpu              | Processing device (cpu/cuda) |
-| `LOG_LEVEL`       | INFO             | Logging level                |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CHATBOT_GRPC_PORT` | gRPC server port | `30007` |
+| `HUGGINGFACE_TOKEN` | HF access token for private models | - |
+| `BASE_MODEL_REPO` | Base model repository ID | - |
+| `LORA_MODEL_REPO` | LoRA adapter repository ID | - |
+| `MODEL_CACHE_DIR` | Model cache directory | `/app/models/.cache` |
+| `CUDA_VISIBLE_DEVICES` | GPU device selection | `0` |
 
-## 🚀 Deployment
+### Model Configuration
 
-### Production Deployment
+1. **Public Models**: Use repository ID directly
+   ```
+   BASE_MODEL_REPO=microsoft/DialoGPT-medium
+   ```
+
+2. **Private Models**: Require authentication token
+   ```
+   HUGGINGFACE_TOKEN=hf_xxxxxxxxxxxxx
+   BASE_MODEL_REPO=your-username/private-model
+   ```
+
+## Development
+
+### Local Build
 
 ```bash
-# Build optimized Docker image
-docker build -f Dockerfile.prod -t vionex-semantic-service:latest .
+# Build image
+docker build -t vionex-chatbot-gpu .
 
-# Run in production mode
-docker run -d \
-  --name vionex-semantic-service \
-  -p 50056:50056 \
-  -e NODE_ENV=production \
-  -e QDRANT_HOST=your-qdrant-host \
-  --restart unless-stopped \
-  vionex-semantic-service:latest
+# Run locally
+docker run --gpus all -p 30007:30007 vionex-chatbot-gpu
 ```
+
+### Model Requirements
+
+- Model must be compatible with `transformers` library
+- CUDA 11.8 compatible
+- Supports LoRA adapters via `peft` library
+
+## API Usage
+
+### gRPC Endpoint
+
+```
+Service: ChatbotService
+Method: AskChatBot
+Port: 30007
+```
+
+### Example Request
+
+```python
+import grpc
+from proto import chatbot_pb2, chatbot_pb2_grpc
+
+channel = grpc.insecure_channel('localhost:30007')
+stub = chatbot_pb2_grpc.ChatbotServiceStub(channel)
+
+response = stub.AskChatBot(chatbot_pb2.AskChatBotRequest(
+    question="What is the weather like?",
+    room_id="room123"
+))
+
+print(response.answer)
+```
+
+## Performance
+
+- **GPU Memory**: Requires 8-16GB VRAM depending on model size
+- **RAM**: 4-8GB recommended
+- **Storage**: 2-4GB for cached models
+- **First Startup**: 2-5 minutes (model download time)
+
+## Troubleshooting
+
+### Common Issues
+
+1. **CUDA not found**: Ensure NVIDIA Docker runtime is installed
+2. **Model download fails**: Check internet connection and HF token
+3. **Out of memory**: Reduce model size or increase GPU memory
+4. **Permission denied**: Check file permissions in cache directory
+
+### Logs
+
+```bash
+# View container logs
+docker logs <container_id>
+
+# Follow logs in real-time
+docker logs -f <container_id>
+```
+
+## Production Deployment
+
+### Resource Requirements
+
+```yaml
+resources:
+  limits:
+    nvidia.com/gpu: 1
+    memory: "16Gi"
+  requests:
+    memory: "8Gi"
+```
+
+### Health Checks
+
+The container includes built-in health checks:
+- Port 30007 connectivity
+- gRPC service readiness
+- Model loading status
+
+## Docker Commands
+
+### Build and Push
+
+```bash
+# Build the image
+docker build -t vionex-chatbot-gpu .
+
+# Tag for registry
+docker tag vionex-chatbot-gpu lexuantruong098/vionex-chatbot-service-gpu:latest
+
+# Push to Docker Hub
+docker push lexuantruong098/vionex-chatbot-service-gpu:latest
+
+# Optional: Push with version tag
+docker tag vionex-chatbot-gpu lexuantruong098/vionex-chatbot-service-gpu:v$(date +%Y%m%d)
+docker push lexuantruong098/vionex-chatbot-service-gpu:v$(date +%Y%m%d)
+```
+
+### Pull and Run on Production
+
+```bash
+# Pull latest image
+docker pull lexuantruong098/vionex-chatbot-service-gpu:latest
+
+# Run with GPU support
+docker run -d \
+  --name vionex-chatbot-service \
+  --gpus all \
+  --restart unless-stopped \
+  -p 30007:30007 \
+  -e HUGGINGFACE_TOKEN=your_token_here \
+  -e BASE_MODEL_REPO=your-username/your-model \
+  -v chatbot_cache:/app/models/.cache \
+  lexuantruong098/vionex-chatbot-service-gpu:latest
+
+# View logs
+docker logs -f vionex-chatbot-service
+```
+
+## License
+
+This software is licensed for non-commercial use only.
+
+## Support
+
+For issues and questions, contact: lexuantruong098@gmail.com

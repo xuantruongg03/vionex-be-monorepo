@@ -83,6 +83,74 @@ check_pm2() {
     fi
 }
 
+# Check if Python is installed
+check_python() {
+    if command -v python3 &> /dev/null; then
+        PYTHON_VERSION=$(python3 --version)
+        print_success "Python is installed: $PYTHON_VERSION"
+        return 0
+    elif command -v python &> /dev/null; then
+        PYTHON_VERSION=$(python --version)
+        print_success "Python is installed: $PYTHON_VERSION"
+        return 0
+    else
+        print_error "Python is not installed. Please install Python first."
+        return 1
+    fi
+}
+
+# Check if Docker is installed
+check_docker() {
+    if command -v docker &> /dev/null; then
+        DOCKER_VERSION=$(docker --version)
+        print_success "Docker is installed: $DOCKER_VERSION"
+        return 0
+    else
+        print_error "Docker is not installed. Please install Docker first."
+        return 1
+    fi
+}
+
+# Install and start Qdrant
+setup_qdrant() {
+    print_header "Setting up Qdrant Vector Database"
+    
+    # Check if Qdrant container is already running
+    if docker ps --format "table {{.Names}}" | grep -q "qdrant"; then
+        print_success "Qdrant is already running"
+        return 0
+    fi
+    
+    # Check if Qdrant container exists but stopped
+    if docker ps -a --format "table {{.Names}}" | grep -q "qdrant"; then
+        print_info "Starting existing Qdrant container..."
+        docker start qdrant
+        sleep 5
+        print_success "Qdrant container started"
+        return 0
+    fi
+    
+    # Create and start new Qdrant container
+    print_info "Pulling and starting Qdrant container..."
+    docker run -d \
+        --name qdrant \
+        -p 6333:6333 \
+        -p 6334:6334 \
+        -v qdrant_storage:/qdrant/storage \
+        qdrant/qdrant:latest
+    
+    # Wait for Qdrant to be ready
+    print_info "Waiting for Qdrant to be ready..."
+    sleep 10
+    
+    # Test Qdrant connection
+    if curl -f http://localhost:6333/health &> /dev/null; then
+        print_success "Qdrant is running and healthy"
+    else
+        print_warning "Qdrant may not be fully ready yet, continuing..."
+    fi
+}
+
 # Create or update environment files
 setup_env_files() {
     print_header "Setting up Environment Files"
@@ -241,6 +309,32 @@ NODE_ENV=$MODE
 EOF
         print_success "Created/Updated environment file for vionex-chat-service"
     fi
+    
+    # Semantic Service .env
+    if [ -d "vionex-semantic-service" ]; then
+        if [ -f "vionex-semantic-service/.env" ]; then
+            print_warning "Backing up existing .env for vionex-semantic-service"
+            cp "vionex-semantic-service/.env" "vionex-semantic-service/.env.backup"
+        fi
+        
+        cat > vionex-semantic-service/.env << EOF
+SEMANTIC_GRPC_PORT=30006
+
+# Qdrant Configuration
+URL_QDRANT=http://localhost:6333
+API_KEY_QDRANT=localkey
+COLLECTION_NAME=conversations
+
+# Model Configuration
+MODEL_VECTOR=intfloat/e5-small-v2
+
+# Other configurations
+MAX_SEARCH_RESULTS=10
+LOG_LEVEL=INFO
+NODE_ENV=$MODE
+EOF
+        print_success "Created/Updated environment file for vionex-semantic-service"
+    fi
 }
 
 # Install dependencies for all services
@@ -260,6 +354,30 @@ install_dependencies() {
             print_warning "Directory $service not found, skipping..."
         fi
     done
+    
+    # Install Python dependencies for semantic service
+    if [ -d "vionex-semantic-service" ]; then
+        print_info "Installing Python dependencies for vionex-semantic-service..."
+        cd "vionex-semantic-service"
+        
+        # Check if virtual environment exists
+        if [ ! -d "venv" ]; then
+            print_info "Creating Python virtual environment..."
+            python3 -m venv venv || python -m venv venv
+        fi
+        
+        # Activate virtual environment and install dependencies
+        if [ -f "venv/bin/activate" ]; then
+            source venv/bin/activate
+        elif [ -f "venv/Scripts/activate" ]; then
+            source venv/Scripts/activate
+        fi
+        
+        pip install -r requirements.txt
+        deactivate
+        cd ..
+        print_success "Python dependencies installed for vionex-semantic-service"
+    fi
 }
 
 # Build all services
@@ -277,6 +395,11 @@ build_services() {
             print_success "Built $service successfully"
         fi
     done
+    
+    # Semantic service doesn't need building (Python)
+    if [ -d "vionex-semantic-service" ]; then
+        print_success "vionex-semantic-service ready (Python service - no build required)"
+    fi
 }
 
 # Create PM2 ecosystem file
@@ -375,6 +498,25 @@ module.exports = {
       env_production: {
         NODE_ENV: 'production'
       }
+    },
+    {
+      name: 'vionex-semantic-service',
+      cwd: './vionex-semantic-service',
+      script: 'venv/bin/python',
+      args: 'main.py',
+      interpreter: '',
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '2G',
+      env: {
+        PYTHONPATH: '.',
+        NODE_ENV: 'development'
+      },
+      env_production: {
+        PYTHONPATH: '.',
+        NODE_ENV: 'production'
+      }
     }
   ]
 }
@@ -386,6 +528,9 @@ EOF
 # Start services with PM2
 start_services() {
     print_header "Starting All Services with PM2"
+    
+    # Setup Qdrant first
+    setup_qdrant
     
     if [ "$MODE" = "prod" ]; then
         pm2 start ecosystem.config.js --env production
@@ -422,6 +567,14 @@ main() {
     
     # Check prerequisites
     if ! check_nodejs; then
+        exit 1
+    fi
+    
+    if ! check_python; then
+        exit 1
+    fi
+    
+    if ! check_docker; then
         exit 1
     fi
     

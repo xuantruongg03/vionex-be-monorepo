@@ -1,3 +1,19 @@
 python-dotenv
 grpcio
 grpcio-tools
+
+# ML and AI libraries - let pip resolve versions
+transformers
+accelerate
+peft
+bitsandbytes
+datasets
+tokenizers
+sentencepiece
+safetensors
+huggingface-hub
+
+# Utility libraries
+numpy
+requests
+packaging
