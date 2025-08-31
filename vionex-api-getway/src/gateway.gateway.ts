@@ -17,6 +17,7 @@ import { SfuClientService } from './clients/sfu.client';
 import { ChatHandler } from './handlers/chat.handler';
 import { QuizHandler } from './handlers/quiz.handler';
 import { VotingHandler } from './handlers/voting.handler';
+import { WhiteboardHandler } from './handlers/whiteboard.handler';
 import { GatewayHelperService } from './helpers/gateway.helper';
 import { Participant } from './interfaces/interface';
 import { HttpBroadcastService } from './services/http-broadcast.service';
@@ -47,6 +48,7 @@ export class GatewayGateway
         private readonly chatHandler: ChatHandler,
         private readonly votingHandler: VotingHandler,
         private readonly quizHandler: QuizHandler,
+        private readonly whiteboardHandler: WhiteboardHandler,
         private readonly helperService: GatewayHelperService,
         private readonly streamService: StreamService,
         private readonly chatbotClient: ChatBotClientService,
@@ -2537,6 +2539,63 @@ export class GatewayGateway
                 message: errorMessage,
             });
         }
+    }
+
+    // Whiteboard Events
+    @SubscribeMessage('whiteboard:update')
+    async handleWhiteboardUpdate(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: any,
+    ) {
+        return this.whiteboardHandler.handleUpdateWhiteboard(client, data);
+    }
+
+    @SubscribeMessage('whiteboard:get-data')
+    async handleGetWhiteboardData(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: any,
+    ) {
+        return this.whiteboardHandler.handleGetWhiteboardData(client, data);
+    }
+
+    @SubscribeMessage('whiteboard:clear')
+    async handleClearWhiteboard(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: any,
+    ) {
+        return this.whiteboardHandler.handleClearWhiteboard(client, data);
+    }
+
+    @SubscribeMessage('whiteboard:update-permissions')
+    async handleUpdateWhiteboardPermissions(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: any,
+    ) {
+        return this.whiteboardHandler.handleUpdatePermissions(client, data);
+    }
+
+    @SubscribeMessage('whiteboard:get-permissions')
+    async handleGetWhiteboardPermissions(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: any,
+    ) {
+        return this.whiteboardHandler.handleGetPermissions(client, data);
+    }
+
+    @SubscribeMessage('whiteboard:pointer')
+    async handleWhiteboardPointer(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: any,
+    ) {
+        return this.whiteboardHandler.handlePointerUpdate(client, data);
+    }
+
+    @SubscribeMessage('whiteboard:pointer-leave')
+    async handleWhiteboardPointerLeave(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: any,
+    ) {
+        return this.whiteboardHandler.handlePointerLeave(client, data);
     }
 
     private parseStreamRtpParameters(rtpParameters: any): any {
