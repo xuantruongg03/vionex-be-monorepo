@@ -18,48 +18,69 @@ from core.config import (
 whisper_model = WhisperModel(WHISPER_MODEL, device=TYPE_ENGINE, compute_type=WHISPER_COMPUTE_TYPE)
 
 from transformers import MarianTokenizer, MarianMTModel
+import os
 
-# Load translation models from local directory in container
-# Vietnamese to English (existing)
-model_vi_en_link = "/app/models/Helsinki-NLP-opus-mt-vi-en"
-# model_vi_en_link = "models/Helsinki-NLP-opus-mt-vi-en"
-tokenizer = MarianTokenizer.from_pretrained(model_vi_en_link)
-model_vi_en = MarianMTModel.from_pretrained(model_vi_en_link)
+# Dictionary to store loaded models and tokenizers
+translation_models = {}
+translation_tokenizers = {}
 
-# English to Vietnamese
-model_en_vi_link = "/app/models/Helsinki-NLP-opus-mt-en-vi"
-tokenizer_en_vi = MarianTokenizer.from_pretrained(model_en_vi_link)
-model_en_vi = MarianMTModel.from_pretrained(model_en_vi_link)
+# Define model paths
+model_paths = {
+    "vi_en": "/app/models/Helsinki-NLP-opus-mt-vi-en",
+    "en_vi": "/app/models/Helsinki-NLP-opus-mt-en-vi", 
+    "vi_lo": "/app/models/Helsinki-NLP-opus-mt-vi-lo",
+    "lo_vi": "/app/models/Helsinki-NLP-opus-mt-lo-vi",
+    "en_lo": "/app/models/Helsinki-NLP-opus-mt-en-lo",
+    "lo_en": "/app/models/Helsinki-NLP-opus-mt-lo-en"
+}
 
-# Vietnamese to Lao
-model_vi_lo_link = "/app/models/Helsinki-NLP-opus-mt-vi-lo"
-tokenizer_vi_lo = MarianTokenizer.from_pretrained(model_vi_lo_link)
-model_vi_lo = MarianMTModel.from_pretrained(model_vi_lo_link)
+# Load models with error handling
+for model_key, model_path in model_paths.items():
+    try:
+        if os.path.exists(model_path):
+            print(f"Loading translation model: {model_key}")
+            tokenizer = MarianTokenizer.from_pretrained(model_path)
+            model = MarianMTModel.from_pretrained(model_path)
+            
+            # Move to GPU if available
+            if TYPE_ENGINE == "cuda":
+                model = model.to("cuda")
+                
+            translation_tokenizers[model_key] = tokenizer
+            translation_models[model_key] = model
+            print(f"Successfully loaded {model_key} translation model")
+        else:
+            print(f"Warning: Model not found at {model_path} - {model_key} translation will be unavailable")
+    except Exception as e:
+        print(f"Error loading {model_key} model: {e}")
 
-# Lao to Vietnamese
-model_lo_vi_link = "/app/models/Helsinki-NLP-opus-mt-lo-vi"
-tokenizer_lo_vi = MarianTokenizer.from_pretrained(model_lo_vi_link)
-model_lo_vi = MarianMTModel.from_pretrained(model_lo_vi_link)
+# Legacy variables for backward compatibility (only for existing models)
+if "vi_en" in translation_models:
+    tokenizer = translation_tokenizers["vi_en"]
+    model_vi_en = translation_models["vi_en"]
 
-# English to Lao
-model_en_lo_link = "/app/models/Helsinki-NLP-opus-mt-en-lo"
-tokenizer_en_lo = MarianTokenizer.from_pretrained(model_en_lo_link)
-model_en_lo = MarianMTModel.from_pretrained(model_en_lo_link)
+if "en_vi" in translation_models:
+    tokenizer_en_vi = translation_tokenizers["en_vi"] 
+    model_en_vi = translation_models["en_vi"]
 
-# Lao to English
-model_lo_en_link = "/app/models/Helsinki-NLP-opus-mt-lo-en"
-tokenizer_lo_en = MarianTokenizer.from_pretrained(model_lo_en_link)
-model_lo_en = MarianMTModel.from_pretrained(model_lo_en_link)
+# New Lao models (only if available)
+if "vi_lo" in translation_models:
+    tokenizer_vi_lo = translation_tokenizers["vi_lo"]
+    model_vi_lo = translation_models["vi_lo"]
 
-# Move all translation models to GPU for faster inference
-if TYPE_ENGINE == "cuda":
-    model_vi_en = model_vi_en.to("cuda")
-    model_en_vi = model_en_vi.to("cuda")
-    model_vi_lo = model_vi_lo.to("cuda")
-    model_lo_vi = model_lo_vi.to("cuda")
-    model_en_lo = model_en_lo.to("cuda")
-    model_lo_en = model_lo_en.to("cuda")
-    print("All translation models moved to CUDA")
+if "lo_vi" in translation_models:
+    tokenizer_lo_vi = translation_tokenizers["lo_vi"]
+    model_lo_vi = translation_models["lo_vi"]
+
+if "en_lo" in translation_models:
+    tokenizer_en_lo = translation_tokenizers["en_lo"]
+    model_en_lo = translation_models["en_lo"]
+
+if "lo_en" in translation_models:
+    tokenizer_lo_en = translation_tokenizers["lo_en"]
+    model_lo_en = translation_models["lo_en"]
+
+print(f"Loaded {len(translation_models)} translation models successfully")
 
 # Load model tts
 from TTS.api import TTS
