@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Headers } from '@nestjs/common';
+import { Body, Controller, Get, Post, Put, Headers } from '@nestjs/common';
 import { AuthClientService } from './clients/auth.client';
 
 @Controller('api/auth')
@@ -44,6 +44,32 @@ export class AuthController {
     }
 
     /**
+     * Google OAuth authentication
+     * @param body - Google user data
+     * @returns JWT token
+     */
+    @Post('google')
+    async googleAuth(
+        @Body()
+        body: {
+            email: string;
+            name: string;
+            avatar?: string;
+            googleId: string;
+        },
+    ) {
+        const response = await this.authClient.googleAuth(body);
+        return {
+            data: {
+                success: response.success,
+                message: response.message,
+                accessToken: response.accessToken,
+                refreshToken: response.refreshToken,
+            },
+        };
+    }
+
+    /**
      * User logout
      * @param body - Logout details
      * @returns Success message
@@ -65,6 +91,31 @@ export class AuthController {
         // Get token from header
         const access_token = authHeader?.split(' ')[1] || '';
         const response = await this.authClient.getInfo({ access_token });
+        return {
+            data: {
+                success: response.success,
+                message: response.message,
+                user: response.user,
+            },
+        };
+    }
+
+    /**
+     * Update user profile
+     * @param body - Profile update data
+     * @param authHeader - Authorization header
+     * @returns Success message with updated user data
+     */
+    @Put('update-profile')
+    async updateProfile(
+        @Body() body: { name: string; avatar: string },
+        @Headers('authorization') authHeader: string,
+    ) {
+        const access_token = authHeader?.split(' ')[1] || '';
+        const response = await this.authClient.updateProfile({
+            access_token,
+            ...body,
+        });
         return {
             data: {
                 success: response.success,

@@ -14,8 +14,12 @@ import { InteractionClientService } from './clients/interaction.client';
 import { RoomClientService } from './clients/room.client';
 import { SfuClientService } from './clients/sfu.client';
 import { ChatHandler } from './handlers/chat.handler';
+import { QuizHandler } from './handlers/quiz.handler';
+import { VotingHandler } from './handlers/voting.handler';
+import { GatewayHelperService } from './helpers/gateway.helper';
 import { Participant } from './interfaces/interface';
 import { HttpBroadcastService } from './services/http-broadcast.service';
+import { StreamService } from './services/stream.service';
 import { WebSocketEventService } from './services/websocket-event.service';
 
 @WebSocketGateway({
@@ -31,10 +35,6 @@ export class GatewayGateway
     implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
     @WebSocketServer() io: Server;
-    private connectionMap = new Map<string, string>(); // socketId -> peerId
-    private participantSocketMap = new Map<string, string>(); // peerId -> socketId
-    private roomParticipantMap = new Map<string, string>(); // peerId -> roomId
-    private participantCache = new Map<string, any>(); // peerId -> participant object
 
     constructor(
         private readonly eventService: WebSocketEventService,
@@ -44,6 +44,10 @@ export class GatewayGateway
         private readonly interactionClient: InteractionClientService,
         private readonly audioService: AudioClientService,
         private readonly chatHandler: ChatHandler,
+        private readonly votingHandler: VotingHandler,
+        private readonly quizHandler: QuizHandler,
+        private readonly helperService: GatewayHelperService,
+        private readonly streamService: StreamService,
     ) {}
 
     afterInit(server: Server) {
@@ -59,8 +63,10 @@ export class GatewayGateway
 
     async handleDisconnect(client: Socket) {
         // Get participant info before cleanup
-        let peerId = this.connectionMap.get(client.id);
-        let roomId = peerId ? this.roomParticipantMap.get(peerId) : null;
+        let peerId = this.helperService.getParticipantBySocketId(client.id);
+        let roomId = peerId
+            ? this.helperService.getRoomParticipantMap().get(peerId)
+            : null;
 
         if (!peerId || !roomId) {
             try {
@@ -80,7 +86,7 @@ export class GatewayGateway
                     // If still not found, do full scan
                     if (!peerId || !roomId) {
                         const allRooms =
-                            await this.getAllRoomsWithParticipants();
+                            await this.helperService.getAllRoomsWithParticipants();
 
                         for (const [currentRoomId, participants] of allRooms) {
                             const participant = participants.find(
@@ -147,10 +153,7 @@ export class GatewayGateway
 
                 this.io.to(roomId).emit('sfu:peer-left', {
                     peerId: peerId,
-                });
-
-                this.io.to(roomId).emit('sfu:user-removed', {
-                    peerId: peerId,
+                    reason: 'voluntary', // User left voluntarily (disconnect)
                 });
 
                 // If this was the creator and there's a new creator, send the creator-changed event
@@ -169,57 +172,53 @@ export class GatewayGateway
                     });
                 }
 
-                // Broadcast updated users list to all remaining clients in room
-                // Add delay to ensure Room service has time to update after leave request
-                setTimeout(async () => {
-                    try {
-                        const updatedRoom =
-                            await this.roomClient.getRoom(roomId);
+                try {
+                    const updatedRoom = await this.roomClient.getRoom(roomId);
 
-                        if (
-                            updatedRoom &&
-                            updatedRoom.data &&
-                            updatedRoom.data.participants
-                        ) {
-                            const users = updatedRoom.data.participants.map(
-                                (participant: any) => ({
-                                    peerId: participant.peer_id,
-                                    isCreator: participant.is_creator,
-                                    timeArrive: participant.time_arrive,
-                                }),
-                            );
-                            this.io.to(roomId).emit('sfu:users-updated', {
-                                users: users,
-                            });
-                        }
-                    } catch (error) {
-                        console.error(
-                            '[BACKEND] Error broadcasting updated users list:',
-                            error,
+                    if (
+                        updatedRoom &&
+                        updatedRoom.data &&
+                        updatedRoom.data.participants
+                    ) {
+                        const users = updatedRoom.data.participants.map(
+                            (participant: any) => ({
+                                peerId: participant.peer_id,
+                                isCreator: participant.is_creator,
+                                timeArrive: participant.time_arrive,
+                            }),
                         );
+                        this.io.to(roomId).emit('sfu:users-updated', {
+                            users: users,
+                        });
                     }
-                }, 2000); // Increase delay to 2 seconds
+                } catch (error) {
+                    console.error(
+                        '[BACKEND] Error broadcasting updated users list:',
+                        error,
+                    );
+                }
             } catch (error) {
                 console.error(
                     '[BACKEND] Error calling room service leave room:',
                     error,
                 );
             }
-        } else {
-            console.log(
-                `[Gateway] No participant found for disconnect - socketId: ${client.id}`,
-            );
         }
 
         // Clean up connection mapping
-        this.cleanupParticipantMapping(client.id);
+        this.helperService.cleanupParticipantMapping(client.id);
     }
 
     @SubscribeMessage('sfu:join')
     async handleJoin(
         @ConnectedSocket() client: Socket,
         @MessageBody()
-        data: { roomId: string; peerId: string; password?: string },
+        data: {
+            roomId: string;
+            peerId: string;
+            password?: string;
+            userInfo: any;
+        },
     ) {
         // Check if room is password protected
         const isRoomLocked = await this.roomClient.isRoomLocked(data.roomId);
@@ -293,28 +292,63 @@ export class GatewayGateway
 
         const isCreator = !hasExistingCreator && isRoomEmpty;
 
-        // Check if this is a legitimate participant trying to connect via WebSocket
-        // (participant exists from HTTP join but needs socket_id update)
-        let isExistingParticipantWithPendingSocket = false;
+        // Check if participant already exists
+        const existingParticipant =
+            await this.roomClient.getParticipantByPeerId(
+                data.roomId,
+                data.peerId,
+            );
 
+        if (existingParticipant) {
+            // Update socket ID for reconnecting participant
+            existingParticipant.socket_id = client.id;
+            await this.roomClient.setParticipant(
+                data.roomId,
+                existingParticipant,
+            );
+
+            this.helperService.storeParticipantMapping(
+                client.id,
+                data.peerId,
+                data.roomId,
+                existingParticipant,
+            );
+
+            // Emit join success with existing participant data
+            this.eventService.emitToClient(client, 'sfu:join-success', {
+                peerId: existingParticipant.peer_id,
+                isCreator: existingParticipant.is_creator,
+                roomId: data.roomId,
+            });
+
+            // Send router capabilities
+            try {
+                const routerCapabilities =
+                    await this.sfuClient.getRouterRtpCapabilities(data.roomId);
+                this.eventService.emitToClient(
+                    client,
+                    'sfu:router-capabilities',
+                    {
+                        routerRtpCapabilities: routerCapabilities,
+                    },
+                );
+            } catch (error) {
+                console.error('Failed to get router capabilities:', error);
+                this.eventService.emitError(
+                    client,
+                    'Failed to get router capabilities',
+                    'ROUTER_ERROR',
+                );
+                return;
+            }
+
+            return; // Exit early for existing participant
+        }
+
+        // Check for duplicate peerId
         if (
-            room &&
-            room.data?.participants?.some((p) => {
-                const participantId = p.peerId || p.peer_id;
-                const socketId = p.socket_id || p.socketId || '';
-                const matches = participantId === data.peerId;
-                const hasPendingSocket = socketId.startsWith('pending-ws-');
-
-                return matches && hasPendingSocket;
-            })
-        ) {
-            isExistingParticipantWithPendingSocket = true;
-        } else if (
-            room &&
             room.data?.participants?.some(
-                (p) =>
-                    p.peerId === data.peerId ||
-                    (p.peer_id && p.peer_id === data.peerId),
+                (p) => (p.peerId || p.peer_id) === data.peerId,
             )
         ) {
             this.eventService.emitError(
@@ -323,242 +357,6 @@ export class GatewayGateway
                 'USERNAME_TAKEN',
             );
             return;
-        }
-
-        // Check if participant already exists (from HTTP join)
-        let existingParticipant: Participant | null = null;
-        try {
-            existingParticipant = await this.roomClient.getParticipantByPeerId(
-                data.roomId,
-                data.peerId,
-            );
-        } catch (error) {
-            console.log(`[Gateway] getParticipantByPeerId threw error:`, error);
-        }
-
-        if (existingParticipant) {
-            existingParticipant.socket_id = client.id;
-
-            try {
-                await this.roomClient.setParticipant(
-                    data.roomId,
-                    existingParticipant,
-                );
-
-                // Store the mapping for gateway routing - IMPORTANT for disconnect handling
-                this.storeParticipantMapping(
-                    client.id,
-                    data.peerId,
-                    data.roomId,
-                    existingParticipant,
-                );
-
-                // Emit join success with existing participant data
-                this.eventService.emitToClient(client, 'sfu:join-success', {
-                    peerId: existingParticipant.peer_id,
-                    isCreator: existingParticipant.is_creator,
-                    roomId: data.roomId,
-                });
-
-                // Send router capabilities to client for WebRTC setup
-                try {
-                    const routerCapabilities =
-                        await this.sfuClient.getRouterRtpCapabilities(
-                            data.roomId,
-                        );
-                    this.eventService.emitToClient(
-                        client,
-                        'sfu:router-capabilities',
-                        {
-                            routerRtpCapabilities: routerCapabilities,
-                        },
-                    );
-                } catch (error) {
-                    console.error('Failed to get router capabilities:', error);
-                    this.eventService.emitError(
-                        client,
-                        'Failed to get router capabilities',
-                        'ROUTER_ERROR',
-                    );
-                    return;
-                }
-
-                // Don't broadcast new-peer-join since this user already joined via HTTP
-                // Just get updated users list and broadcast it
-                try {
-                    const updatedRoom = await this.roomClient.getRoom(
-                        data.roomId,
-                    );
-                    if (
-                        updatedRoom &&
-                        updatedRoom.data &&
-                        updatedRoom.data.participants
-                    ) {
-                        const users = updatedRoom.data.participants.map(
-                            (participant: any) => ({
-                                peerId: participant.peer_id,
-                                isCreator: participant.is_creator,
-                                timeArrive: participant.time_arrive,
-                            }),
-                        );
-
-                        this.eventService.broadcastToRoom(
-                            client,
-                            data.roomId,
-                            'sfu:users-updated',
-                            {
-                                users,
-                                roomId: data.roomId,
-                            },
-                        );
-                    }
-                } catch (error) {
-                    console.error(
-                        'Failed to broadcast updated users list:',
-                        error,
-                    );
-                }
-
-                // Send existing streams to the existing client connecting via WebSocket
-                try {
-                    const existingStreamsResponse =
-                        await this.sfuClient.getStreams(data.roomId);
-
-                    // Extract streams array from response - handle both possible structures
-                    const existingStreams =
-                        (existingStreamsResponse as any)?.streams || [];
-
-                    if (
-                        existingStreams &&
-                        Array.isArray(existingStreams) &&
-                        existingStreams.length > 0
-                    ) {
-                        // Filter streams from other users (not from the current client)
-                        const otherUserStreams = existingStreams.filter(
-                            (stream) => {
-                                const isFromOtherUser =
-                                    stream.publisher_id &&
-                                    stream.publisher_id !== data.peerId;
-                                const hasValidStreamId =
-                                    stream.stream_id &&
-                                    stream.stream_id !== 'undefined';
-
-                                return isFromOtherUser && hasValidStreamId;
-                            },
-                        );
-
-                        if (otherUserStreams.length > 0) {
-                            // Send bulk streams to existing client
-                            this.eventService.emitToClient(
-                                client,
-                                'sfu:streams',
-                                otherUserStreams,
-                            );
-
-                            // Also send individual stream-added events for each stream
-                            for (const stream of otherUserStreams) {
-                                if (stream.stream_id && stream.publisher_id) {
-                                    // Safely parse metadata
-                                    let parsedMetadata = {};
-                                    try {
-                                        if (stream.metadata) {
-                                            if (
-                                                typeof stream.metadata ===
-                                                'string'
-                                            ) {
-                                                parsedMetadata = JSON.parse(
-                                                    stream.metadata,
-                                                );
-                                            } else {
-                                                parsedMetadata =
-                                                    stream.metadata;
-                                            }
-                                        }
-                                    } catch (metadataError) {
-                                        console.error(
-                                            `[Gateway] Failed to parse metadata for existing client stream ${stream.stream_id}:`,
-                                            metadataError,
-                                            'Raw metadata:',
-                                            stream.metadata,
-                                        );
-                                        // Default metadata if parsing fails
-                                        parsedMetadata = {
-                                            video: true,
-                                            audio: true,
-                                            type: 'webcam',
-                                        };
-                                    }
-
-                                    // Safely parse rtpParameters
-                                    let parsedRtpParameters = {};
-                                    try {
-                                        if (stream.rtp_parameters) {
-                                            if (
-                                                typeof stream.rtp_parameters ===
-                                                'string'
-                                            ) {
-                                                parsedRtpParameters =
-                                                    JSON.parse(
-                                                        stream.rtp_parameters,
-                                                    );
-                                            } else {
-                                                parsedRtpParameters =
-                                                    stream.rtp_parameters;
-                                            }
-                                        }
-                                    } catch (rtpError) {
-                                        console.error(
-                                            `[Gateway] Failed to parse rtp_parameters for existing client stream ${stream.stream_id}:`,
-                                            rtpError,
-                                        );
-                                        parsedRtpParameters = {};
-                                    }
-                                    this.eventService.emitToClient(
-                                        client,
-                                        'sfu:stream-added',
-                                        {
-                                            streamId: stream.stream_id,
-                                            publisherId: stream.publisher_id,
-                                            metadata: parsedMetadata,
-                                            rtpParameters: parsedRtpParameters,
-                                        },
-                                    );
-                                }
-                            }
-                        } else {
-                            // Send empty streams array
-                            this.eventService.emitToClient(
-                                client,
-                                'sfu:streams',
-                                [],
-                            );
-                        }
-                    } else {
-                        // Send empty streams array
-                        this.eventService.emitToClient(
-                            client,
-                            'sfu:streams',
-                            [],
-                        );
-                    }
-                } catch (error) {
-                    console.error(
-                        'Failed to get existing streams for existing client:',
-                        error,
-                    );
-                    // Don't fail the join process, just log the error
-                }
-
-                return; // Exit early since we updated existing participant
-            } catch (error) {
-                console.error(`Failed to update existing participant:`, error);
-                this.eventService.emitError(
-                    client,
-                    'Failed to update participant',
-                    'UPDATE_PARTICIPANT_ERROR',
-                );
-                return;
-            }
         }
 
         // Create new participant object only if no existing participant found
@@ -570,12 +368,13 @@ export class GatewayGateway
             consumers: new Map(),
             is_creator: isCreator,
             time_arrive: new Date(),
+            user_info: data.userInfo, // Add user info to participant
         };
         try {
             await this.roomClient.setParticipant(data.roomId, participant);
 
             // Track the connection mapping for disconnect cleanup - IMPORTANT
-            this.storeParticipantMapping(
+            this.helperService.storeParticipantMapping(
                 client.id,
                 data.peerId,
                 data.roomId,
@@ -605,8 +404,7 @@ export class GatewayGateway
                 roomId: data.roomId,
             });
 
-            // Immediately broadcast to existing clients that a new peer joined
-            // This ensures all existing clients are notified before the new client gets streams
+            // Broadcast new peer joined to existing clients
             this.eventService.broadcastToRoom(
                 client,
                 data.roomId,
@@ -615,44 +413,29 @@ export class GatewayGateway
                     peerId: participant.peer_id,
                     isCreator: participant.is_creator,
                     timeArrive: participant.time_arrive,
+                    userInfo: participant.user_info, // Add user info to broadcast
                 },
             );
 
-            // Get updated users list and send to all clients (including new client)
+            // Send updated users list to all clients
             try {
                 const updatedRoom = await this.roomClient.getRoom(data.roomId);
-                if (
-                    updatedRoom &&
-                    updatedRoom.data &&
-                    updatedRoom.data.participants
-                ) {
+                if (updatedRoom?.data?.participants) {
                     const users = updatedRoom.data.participants.map(
-                        (participant: any) => ({
-                            peerId: participant.peer_id,
-                            isCreator: participant.is_creator,
-                            timeArrive: participant.time_arrive,
+                        (p: any) => ({
+                            peerId: p.peer_id,
+                            isCreator: p.is_creator,
+                            timeArrive: p.time_arrive,
+                            userInfo: p.user_info, // Add user info to users list
                         }),
                     );
 
-                    // Send to all clients in room (including new client)
                     this.io
                         .to(data.roomId)
                         .emit('sfu:users-updated', { users });
-
-                    // Also send directly to new client to ensure they get it
-                    this.eventService.emitToClient(
-                        client,
-                        'sfu:users-updated',
-                        {
-                            users,
-                        },
-                    );
                 }
             } catch (error) {
-                console.error(
-                    'Error broadcasting updated users list on join:',
-                    error,
-                );
+                console.error('Error broadcasting updated users list:', error);
             }
         } catch (error) {
             console.error('Error setting participant:', error);
@@ -685,113 +468,55 @@ export class GatewayGateway
             const existingStreamsResponse = await this.sfuClient.getStreams(
                 data.roomId,
             );
-
-            // Extract streams array from response - handle both possible structures
             const existingStreams =
                 (existingStreamsResponse as any)?.streams || [];
 
-            if (
-                existingStreams &&
-                Array.isArray(existingStreams) &&
-                existingStreams.length > 0
-            ) {
-                // Filter streams from other users (not from the new joining user)
-                const otherUserStreams = existingStreams.filter((stream) => {
-                    const isFromOtherUser =
-                        stream.publisher_id &&
-                        stream.publisher_id !== data.peerId;
-                    const hasValidStreamId =
-                        stream.stream_id && stream.stream_id !== 'undefined';
-
-                    return isFromOtherUser && hasValidStreamId;
-                });
+            if (existingStreams?.length > 0) {
+                const otherUserStreams = existingStreams.filter(
+                    (stream) =>
+                        stream.publisher_id !== data.peerId &&
+                        stream.stream_id &&
+                        stream.stream_id !== 'undefined',
+                );
 
                 if (otherUserStreams.length > 0) {
-                    // Send bulk streams to new client
+                    // Send streams to new client
                     this.eventService.emitToClient(
                         client,
                         'sfu:streams',
                         otherUserStreams,
                     );
 
-                    // Also send individual stream-added events for each stream
+                    // Send individual stream-added events
                     for (const stream of otherUserStreams) {
                         if (stream.stream_id && stream.publisher_id) {
-                            // Safely parse metadata
-                            let parsedMetadata = {};
-                            try {
-                                if (stream.metadata) {
-                                    if (typeof stream.metadata === 'string') {
-                                        parsedMetadata = JSON.parse(
-                                            stream.metadata,
-                                        );
-                                    } else {
-                                        parsedMetadata = stream.metadata;
-                                    }
-                                }
-                            } catch (metadataError) {
-                                console.error(
-                                    `[Gateway] Failed to parse metadata for stream ${stream.stream_id}:`,
-                                    metadataError,
-                                    'Raw metadata:',
-                                    stream.metadata,
-                                );
-                                // Default metadata if parsing fails
-                                parsedMetadata = {
-                                    video: true,
-                                    audio: true,
-                                    type: 'webcam',
-                                };
-                            }
+                            const metadata = this.parseStreamMetadata(
+                                stream.metadata,
+                            );
+                            const rtpParameters = this.parseStreamRtpParameters(
+                                stream.rtp_parameters,
+                            );
 
-                            // Safely parse rtpParameters
-                            let parsedRtpParameters = {};
-                            try {
-                                if (stream.rtp_parameters) {
-                                    if (
-                                        typeof stream.rtp_parameters ===
-                                        'string'
-                                    ) {
-                                        parsedRtpParameters = JSON.parse(
-                                            stream.rtp_parameters,
-                                        );
-                                    } else {
-                                        parsedRtpParameters =
-                                            stream.rtp_parameters;
-                                    }
-                                }
-                            } catch (rtpError) {
-                                console.error(
-                                    `[Gateway] Failed to parse rtp_parameters for stream ${stream.stream_id}:`,
-                                    rtpError,
-                                );
-                                parsedRtpParameters = {};
-                            }
                             this.eventService.emitToClient(
                                 client,
                                 'sfu:stream-added',
                                 {
                                     streamId: stream.stream_id,
                                     publisherId: stream.publisher_id,
-                                    metadata: parsedMetadata,
-                                    rtpParameters: parsedRtpParameters,
+                                    metadata,
+                                    rtpParameters,
                                 },
                             );
                         }
                     }
                 } else {
-                    // Send empty streams array
                     this.eventService.emitToClient(client, 'sfu:streams', []);
                 }
             } else {
-                // Send empty streams array
                 this.eventService.emitToClient(client, 'sfu:streams', []);
             }
         } catch (error) {
-            console.error(
-                'Failed to get existing streams for new client:',
-                error,
-            );
+            console.error('Failed to get existing streams:', error);
             this.eventService.emitToClient(client, 'sfu:streams', []);
         }
     }
@@ -805,9 +530,11 @@ export class GatewayGateway
         try {
             // Extract peerId from socket mapping
             const peerId =
-                data.peerId || this.getParticipantBySocketId(client.id);
+                data.peerId ||
+                this.helperService.getParticipantBySocketId(client.id);
             const roomId =
-                data.roomId || (await this.getRoomIdBySocketId(client.id));
+                data.roomId ||
+                (await this.helperService.getRoomIdBySocketId(client.id));
 
             if (!peerId || !roomId) {
                 client.emit('sfu:error', {
@@ -839,11 +566,10 @@ export class GatewayGateway
         @MessageBody()
         data: { roomId: string; isProducer: boolean; peerId?: string },
     ) {
-        console.log('CREATE TRANSPORT');
-
         try {
             const peerId =
-                data.peerId || this.getParticipantBySocketId(client.id);
+                data.peerId ||
+                this.helperService.getParticipantBySocketId(client.id);
 
             if (!peerId) {
                 client.emit('sfu:error', {
@@ -904,9 +630,11 @@ export class GatewayGateway
     ) {
         try {
             const peerId =
-                data.peerId || this.getParticipantBySocketId(client.id);
+                data.peerId ||
+                this.helperService.getParticipantBySocketId(client.id);
             const roomId =
-                data.roomId || (await this.getRoomIdBySocketId(client.id));
+                data.roomId ||
+                (await this.helperService.getRoomIdBySocketId(client.id));
 
             if (!peerId || !roomId) {
                 client.emit('sfu:error', {
@@ -950,9 +678,11 @@ export class GatewayGateway
     ) {
         try {
             const peerId =
-                data.peerId || this.getParticipantBySocketId(client.id);
+                data.peerId ||
+                this.helperService.getParticipantBySocketId(client.id);
             const roomId =
-                data.roomId || (await this.getRoomIdBySocketId(client.id));
+                data.roomId ||
+                (await this.helperService.getRoomIdBySocketId(client.id));
 
             if (!peerId || !roomId) {
                 client.emit('sfu:error', {
@@ -1067,9 +797,11 @@ export class GatewayGateway
             }
 
             const peerId =
-                data.peerId || this.getParticipantBySocketId(client.id);
+                data.peerId ||
+                this.helperService.getParticipantBySocketId(client.id);
             const roomId =
-                data.roomId || (await this.getRoomIdBySocketId(client.id));
+                data.roomId ||
+                (await this.helperService.getRoomIdBySocketId(client.id));
 
             if (!peerId || !roomId) {
                 console.error('[Gateway] Missing peerId or roomId for consume');
@@ -1184,9 +916,11 @@ export class GatewayGateway
     ) {
         try {
             const peerId =
-                data.participantId || this.getParticipantBySocketId(client.id);
+                data.participantId ||
+                this.helperService.getParticipantBySocketId(client.id);
             const roomId =
-                data.roomId || (await this.getRoomIdBySocketId(client.id));
+                data.roomId ||
+                (await this.helperService.getRoomIdBySocketId(client.id));
 
             if (!peerId || !roomId) {
                 console.error(
@@ -1315,7 +1049,10 @@ export class GatewayGateway
         const peerId = data.peerId;
 
         // Verify participant exists
-        const participant = await this.getParticipantByPeerId(roomId, peerId);
+        const participant = await this.helperService.getParticipantByPeerId(
+            roomId,
+            peerId,
+        );
         if (!participant) {
             console.error(
                 `[Gateway] Participant ${peerId} not found in room ${roomId}`,
@@ -1324,7 +1061,9 @@ export class GatewayGateway
         }
 
         // Verify the room exists for this socket
-        const socketRoomId = await this.getRoomIdBySocketId(client.id);
+        const socketRoomId = await this.helperService.getRoomIdBySocketId(
+            client.id,
+        );
         if (!socketRoomId || socketRoomId !== roomId) {
             console.error(
                 `[Gateway] Socket room mismatch. Expected: ${roomId}, Got: ${socketRoomId}`,
@@ -1333,11 +1072,34 @@ export class GatewayGateway
         }
 
         try {
-            // Step 5: Emit to all clients in the room (excluding sender)
+            // ENHANCED: Call SFU to handle speaking priority logic instead of just emitting event
+            // This replaces the old simple emit logic with full priority management
+            try {
+                const speakingResult = await this.sfuClient.handleSpeaking(
+                    roomId,
+                    peerId,
+                    0, // port not used for priority logic
+                );
+                console.log(`[Gateway] SFU speaking result:`, speakingResult);
+
+                // ENHANCED: Check if speaking user needs to be prioritized for consumption
+                // This triggers dynamic stream consumption based on voice activity
+                if (
+                    speakingResult &&
+                    (speakingResult as any).status === 'success'
+                ) {
+                    await this.handleSpeakingUserPriority(roomId, peerId);
+                }
+            } catch (sfuError) {
+                console.error(`[Gateway] SFU speaking error:`, sfuError);
+                // Continue with basic emit if SFU fails
+            }
+
+            // Step 5: Emit to all clients in the room (excluding sender) - KEPT ORIGINAL LOGIC
             client.to(roomId).emit('sfu:user-speaking', { peerId });
 
             console.log(
-                `[Gateway] User ${peerId} pipeline ready - waiting for buffered audio + live stream`,
+                `[Gateway] User ${peerId} speaking handled with priority check`,
             );
         } catch (error) {
             console.error('[Gateway] Error handling speaking event:', error);
@@ -1380,7 +1142,10 @@ export class GatewayGateway
         const peerId = data.peerId;
 
         // Verify participant exists
-        const participant = await this.getParticipantByPeerId(roomId, peerId);
+        const participant = await this.helperService.getParticipantByPeerId(
+            roomId,
+            peerId,
+        );
         if (!participant) {
             console.error(
                 `[Gateway] Participant ${peerId} not found in room ${roomId}`,
@@ -1389,7 +1154,9 @@ export class GatewayGateway
         }
 
         // Verify the room exists for this socket
-        const socketRoomId = await this.getRoomIdBySocketId(client.id);
+        const socketRoomId = await this.helperService.getRoomIdBySocketId(
+            client.id,
+        );
         if (!socketRoomId || socketRoomId !== roomId) {
             console.error(
                 `[Gateway] Socket room mismatch. Expected: ${roomId}, Got: ${socketRoomId}`,
@@ -1476,7 +1243,7 @@ export class GatewayGateway
         );
 
         // Verify participant exists in room
-        let participant = await this.getParticipantByPeerId(
+        let participant = await this.helperService.getParticipantByPeerId(
             data.roomId,
             data.userId,
         );
@@ -1698,166 +1465,317 @@ export class GatewayGateway
         userId: string,
         roomId: string,
     ): Promise<boolean> {
-        try {
-            // Check if socket is mapped to this user
-            const mappedPeerId = this.connectionMap.get(socketId);
-            if (mappedPeerId !== userId) {
-                console.warn(
-                    `[Gateway] Socket ${socketId} not mapped to user ${userId}`,
-                );
-                return false;
-            }
-
-            // Verify user is participant in room
-            const participant = await this.roomClient.getParticipantByPeerId(
-                roomId,
-                userId,
-            );
-            if (!participant) {
-                console.warn(
-                    `[Gateway] User ${userId} not found in room ${roomId}`,
-                );
-                return false;
-            }
-
-            // Check if participant's socket matches
-            if (participant.socket_id !== socketId) {
-                console.warn(
-                    `[Gateway] Socket mismatch for user ${userId} in room ${roomId}`,
-                );
-                return false;
-            }
-
-            return true;
-        } catch (error) {
-            console.error(`[Gateway] Error verifying user in room:`, error);
-            return false;
-        }
+        return await this.helperService.verifyUserInRoom(
+            socketId,
+            userId,
+            roomId,
+        );
     }
 
-    // HELPER METHODS
-    private storeParticipantMapping(
-        socketId: string,
-        peerId: string,
+    /**
+     * ENHANCED: Handle priority streaming for speaking user
+     * This method implements the voice activity detection-based stream prioritization
+     * When a user speaks, we ensure their stream is consumed by other participants
+     */
+    private async handleSpeakingUserPriority(
         roomId: string,
-        participantData?: any,
-    ): void {
-        this.connectionMap.set(socketId, peerId);
-        this.participantSocketMap.set(peerId, socketId);
-        this.roomParticipantMap.set(peerId, roomId);
-
-        // Cache participant data if provided
-        if (participantData) {
-            this.participantCache.set(peerId, participantData);
-            console.log(`[Gateway] Cached participant data for ${peerId}`);
-        }
-    }
-
-    private cleanupParticipantMapping(socketId: string): void {
-        const peerId = this.connectionMap.get(socketId);
-        if (peerId) {
-            this.connectionMap.delete(socketId);
-            this.participantSocketMap.delete(peerId);
-            this.roomParticipantMap.delete(peerId);
-            this.participantCache.delete(peerId);
-        }
-    }
-
-    private getParticipantBySocketId(socketId: string): string | null {
-        return this.connectionMap.get(socketId) || null;
-    }
-
-    private async getRoomIdBySocketId(
-        socketId: string,
-    ): Promise<string | null> {
-        const peerId = this.connectionMap.get(socketId);
-        if (peerId) {
-            const roomId = this.roomParticipantMap.get(peerId);
-            return roomId || null;
-        }
-        return null;
-    }
-
-    private async getParticipantByPeerId(
-        roomId: string,
-        peerId: string,
-    ): Promise<any> {
+        speakingPeerId: string,
+    ) {
         try {
-            // First check if we have cached participant data
-            const cachedParticipant = this.participantCache.get(peerId);
-            if (cachedParticipant) {
-                return cachedParticipant;
-            }
-
-            // Check if we have this peerId in our local mappings
-            const mappedRoomId = this.roomParticipantMap.get(peerId);
-            const socketId = this.participantSocketMap.get(peerId);
-            // If we have local mapping for this peerId and it matches the requested roomId
-            if (mappedRoomId === roomId && socketId) {
-                // Return a minimal participant object from mappings
-                const participant = {
-                    peer_id: peerId,
-                    socket_id: socketId,
-                    is_creator: false, // We don't cache this, but it's not critical for audio validation
-                    room_id: roomId,
-                };
-
-                // Cache this minimal participant data
-                this.participantCache.set(peerId, participant);
-                return participant;
-            }
-
-            // Fallback to room service
-            const participant = await this.roomClient.getParticipantByPeerId(
-                roomId,
-                peerId,
+            console.log(
+                `[Gateway] Handling speaking priority for ${speakingPeerId} in room ${roomId}`,
             );
 
-            if (participant) {
-                // Update our local cache and mappings
-                this.storeParticipantMapping(
-                    participant.socket_id,
-                    peerId,
-                    roomId,
-                    participant,
-                );
-            } else {
+            // Step 1: Get all participants in the room (except the speaking user)
+            const roomParticipants =
+                await this.getAllParticipantsInRoom(roomId);
+            const otherParticipants = roomParticipants.filter(
+                (p) => p.peer_id !== speakingPeerId,
+            );
+
+            // Step 2: Get streams from the speaking user that need to be prioritized
+            const speakingUserStreams = await this.getSpeakingUserStreams(
+                roomId,
+                speakingPeerId,
+            );
+
+            if (speakingUserStreams.length === 0) {
                 console.log(
-                    `[Gateway] Participant ${peerId} not found via room service`,
+                    `[Gateway] No streams found for speaking user ${speakingPeerId}`,
                 );
+                return;
             }
 
-            return participant;
+            // Step 3: For each other participant, ensure they consume the speaking user's streams
+            for (const participant of otherParticipants) {
+                const socketId = this.helperService
+                    .getParticipantSocketMap()
+                    .get(participant.peer_id);
+                if (!socketId) continue;
+
+                const socket = this.io.sockets.sockets.get(socketId);
+                if (!socket) continue;
+
+                // Step 4: Trigger stream consumption for speaking user
+                for (const stream of speakingUserStreams) {
+                    // Emit stream-added event to trigger consumption
+                    socket.emit('sfu:stream-added', {
+                        streamId: stream.streamId,
+                        stream_id: stream.streamId,
+                        publisherId: speakingPeerId,
+                        publisher_id: speakingPeerId,
+                        metadata: stream.metadata || {
+                            isFromSpeaking: true, // Mark as priority from speaking
+                            priority: true,
+                        },
+                        rtpParameters: stream.rtpParameters,
+                    });
+
+                    console.log(
+                        `[Gateway] Sent priority stream ${stream.streamId} to ${participant.peer_id}`,
+                    );
+                }
+            }
+
+            console.log(
+                `[Gateway] Successfully handled speaking priority for ${speakingPeerId}`,
+            );
+        } catch (error) {
+            console.error(`[Gateway] Error handling speaking priority:`, error);
+        }
+    }
+
+    /**
+     * ENHANCED: Get all participants in a room
+     * Reuses existing logic from room service
+     */
+    private async getAllParticipantsInRoom(roomId: string): Promise<any[]> {
+        try {
+            const updatedRoom = await this.roomClient.getRoom(roomId);
+            if (
+                updatedRoom &&
+                updatedRoom.data &&
+                updatedRoom.data.participants
+            ) {
+                return updatedRoom.data.participants.map(
+                    (participant: any) => ({
+                        peer_id: participant.peer_id,
+                        peerId: participant.peer_id,
+                        is_creator: participant.is_creator,
+                        time_arrive: participant.time_arrive,
+                    }),
+                );
+            }
+            return [];
         } catch (error) {
             console.error(
-                `[Gateway] Error getting participant ${peerId} in room ${roomId}:`,
+                `[Gateway] Error getting participants for room ${roomId}:`,
                 error,
             );
-            return null;
+            return [];
         }
     }
 
-    private async getAllRoomsWithParticipants(): Promise<Map<string, any[]>> {
+    /**
+     * ENHANCED: Get streams from speaking user that should be prioritized
+     * This method filters for audio/video streams that need priority consumption
+     */
+    private async getSpeakingUserStreams(
+        roomId: string,
+        speakingPeerId: string,
+    ): Promise<any[]> {
         try {
-            // This is a simplified version - you might need to implement actual room scanning
-            const roomsMap = new Map<string, any[]>();
+            // Get all streams from SFU for this room
+            const allStreams = await this.sfuClient.getStreams(roomId);
 
-            // Scan through existing participant mappings
-            for (const [peerId, roomId] of this.roomParticipantMap) {
-                if (!roomsMap.has(roomId)) {
-                    roomsMap.set(roomId, []);
-                }
-                roomsMap.get(roomId)?.push({
-                    peer_id: peerId,
-                    peerId: peerId,
-                    socket_id: this.participantSocketMap.get(peerId),
-                });
+            if (!allStreams) {
+                return [];
             }
 
-            return roomsMap;
+            // Cast to any to handle dynamic response structure
+            const streamsData = allStreams as any;
+            const streams = streamsData.streams || streamsData.data || [];
+
+            // Filter streams from the speaking user (audio/video, not screen share)
+            const userStreams = streams.filter((stream: any) => {
+                const streamId = stream.streamId || stream.stream_id;
+                const publisherId = stream.publisherId || stream.publisher_id;
+
+                // Must be from speaking user
+                if (publisherId !== speakingPeerId) return false;
+
+                // Parse stream ID to determine type
+                const parts = streamId.split('_');
+                const mediaType = parts[1]; // video, audio, screen, screen_audio
+
+                // Only prioritize regular audio/video streams, not screen shares
+                return mediaType === 'video' || mediaType === 'audio';
+            });
+
+            return userStreams;
         } catch (error) {
-            console.error('[Gateway] Error getting all rooms:', error);
-            return new Map();
+            console.error(
+                `[Gateway] Error getting speaking user streams:`,
+                error,
+            );
+            return [];
+        }
+    }
+
+    @SubscribeMessage('sfu:unpublish')
+    async handleUnpublish(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() data: { streamId: string; roomId?: string },
+    ) {
+        try {
+            // Get participant info from socket mapping
+            const peerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
+            const roomId =
+                data.roomId ||
+                (await this.helperService.getRoomIdBySocketId(client.id));
+
+            if (!peerId || !roomId) {
+                client.emit('sfu:error', {
+                    message: 'Invalid participant or room information',
+                    code: 'INVALID_CONTEXT',
+                });
+                return {
+                    success: false,
+                    error: 'Invalid participant or room information',
+                };
+            }
+
+            console.log(
+                `[Gateway] Handling unpublish for stream ${data.streamId} from ${peerId} in room ${roomId}`,
+            );
+
+            // Verify stream ownership for security
+            const isOwner = await this.streamService.verifyStreamOwnership(
+                data.streamId,
+                peerId,
+                roomId,
+            );
+
+            if (!isOwner) {
+                console.warn(
+                    `[Gateway] Unauthorized unpublish attempt: ${peerId} trying to unpublish ${data.streamId}`,
+                );
+                client.emit('sfu:error', {
+                    message: 'You can only unpublish your own streams',
+                    code: 'UNAUTHORIZED_UNPUBLISH',
+                });
+                return { success: false, error: 'Unauthorized' };
+            }
+
+            // Unpublish the stream
+            const result = await this.streamService.unpublishStream({
+                streamId: data.streamId,
+                roomId: roomId,
+                participantId: peerId,
+            });
+
+            if (result.success) {
+                // Send success confirmation to the requesting client
+                client.emit('sfu:unpublish-success', {
+                    streamId: data.streamId,
+                    message: result.message,
+                });
+
+                console.log(
+                    `[Gateway] Successfully unpublished stream ${data.streamId} for ${peerId}`,
+                );
+            } else {
+                // Send error to the requesting client
+                client.emit('sfu:error', {
+                    message: result.message,
+                    code: 'UNPUBLISH_FAILED',
+                });
+
+                console.error(
+                    `[Gateway] Failed to unpublish stream ${data.streamId}: ${result.message}`,
+                );
+            }
+
+            return result;
+        } catch (error) {
+            console.error('[Gateway] Error in handleUnpublish:', error);
+            client.emit('sfu:error', {
+                message: 'Internal server error during unpublish',
+                code: 'INTERNAL_ERROR',
+            });
+            return { success: false, error: error.message };
+        }
+    }
+
+    @SubscribeMessage('sfu:update-stream-metadata')
+    async handleUpdateStreamMetadata(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            streamId: string;
+            metadata: any;
+            roomId?: string;
+        },
+    ) {
+        try {
+            // Get participant info from socket mapping
+            const peerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
+            const roomId =
+                data.roomId ||
+                (await this.helperService.getRoomIdBySocketId(client.id));
+
+            if (!peerId || !roomId) {
+                client.emit('sfu:error', {
+                    message: 'Invalid participant or room information',
+                    code: 'INVALID_CONTEXT',
+                });
+                return {
+                    success: false,
+                    error: 'Invalid participant or room information',
+                };
+            }
+
+            // Call SFU service to update stream metadata
+            await this.sfuClient.updateStream({
+                stream_id: data.streamId,
+                participant_id: peerId,
+                metadata: JSON.stringify(data.metadata),
+                room_id: roomId,
+            });
+
+            // Broadcast the metadata update to all clients in the room
+            this.io.to(roomId).emit('sfu:stream-metadata-updated', {
+                streamId: data.streamId,
+                publisherId: peerId,
+                metadata: data.metadata,
+                roomId: roomId,
+            });
+
+            // Confirm to the sender
+            client.emit('sfu:stream-metadata-updated-ack', {
+                success: true,
+                streamId: data.streamId,
+                metadata: data.metadata,
+            });
+
+            return {
+                success: true,
+                message: 'Stream metadata updated successfully',
+            };
+        } catch (error) {
+            console.error('[Gateway] Error updating stream metadata:', error);
+            client.emit('sfu:error', {
+                message: error.message || 'Failed to update stream metadata',
+                code: 'UPDATE_STREAM_METADATA_FAILED',
+            });
+            return {
+                success: false,
+                error: error.message || 'Failed to update stream metadata',
+            };
         }
     }
 
@@ -1926,5 +1844,396 @@ export class GatewayGateway
         },
     ) {
         return this.chatHandler.handleSendFileMessage(client, data);
+    }
+
+    // ==================== PIN/UNPIN USER HANDLERS ====================
+
+    @SubscribeMessage('sfu:pin-user')
+    async handlePinUser(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            pinnedPeerId: string;
+            transportId: string;
+        },
+    ) {
+        try {
+            const peerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
+            if (!peerId) {
+                client.emit('sfu:pin-user-response', {
+                    success: false,
+                    message: 'User not authenticated',
+                });
+                return;
+            }
+
+            console.log(
+                `[Gateway] Pin user request from ${peerId} to pin ${data.pinnedPeerId}`,
+            );
+
+            // Get participant data for RTP capabilities
+            const participant = this.helperService
+                .getParticipantCache()
+                .get(peerId);
+            const rtpCapabilities = participant?.rtpCapabilities || {};
+
+            const result = (await this.sfuClient.pinUser(
+                data.roomId,
+                peerId, // pinnerPeerId
+                data.pinnedPeerId, // pinnedPeerId
+                data.transportId,
+                rtpCapabilities,
+            )) as any;
+
+            const parsedResult =
+                typeof result.pin_data === 'string'
+                    ? JSON.parse(result.pin_data)
+                    : result.pin_data;
+
+            // Emit response to pinner
+            client.emit('sfu:pin-user-response', {
+                success: parsedResult.success,
+                message: parsedResult.message,
+                consumersCreated: parsedResult.consumersCreated || [],
+                alreadyPriority: parsedResult.alreadyPriority,
+                existingConsumer: parsedResult.existingConsumer,
+            });
+
+            // Broadcast pin event to room (for UI updates)
+            client.to(data.roomId).emit('sfu:user-pinned', {
+                pinnerPeerId: peerId,
+                pinnedPeerId: data.pinnedPeerId,
+                roomId: data.roomId,
+            });
+
+            console.log(
+                `[Gateway] Pin user successful: ${peerId} pinned ${data.pinnedPeerId}`,
+            );
+        } catch (error) {
+            console.error(`[Gateway] Error pinning user:`, error);
+            client.emit('sfu:pin-user-response', {
+                success: false,
+                message: error.message || 'Failed to pin user',
+            });
+        }
+    }
+
+    @SubscribeMessage('sfu:unpin-user')
+    async handleUnpinUser(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            unpinnedPeerId: string;
+        },
+    ) {
+        try {
+            const peerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
+            if (!peerId) {
+                client.emit('sfu:unpin-user-response', {
+                    success: false,
+                    message: 'User not authenticated',
+                });
+                return;
+            }
+
+            console.log(
+                `[Gateway] Unpin user request from ${peerId} to unpin ${data.unpinnedPeerId}`,
+            );
+
+            const result = (await this.sfuClient.unpinUser(
+                data.roomId,
+                peerId, // unpinnerPeerId
+                data.unpinnedPeerId, // unpinnedPeerId
+            )) as any;
+
+            const parsedResult =
+                typeof result.unpin_data === 'string'
+                    ? JSON.parse(result.unpin_data)
+                    : result.unpin_data;
+
+            // Emit response to unpinner
+            client.emit('sfu:unpin-user-response', {
+                success: parsedResult.success,
+                message: parsedResult.message,
+                consumersRemoved: parsedResult.consumersRemoved || [],
+                stillInPriority: parsedResult.stillInPriority,
+            });
+
+            // Broadcast unpin event to room (for UI updates)
+            client.to(data.roomId).emit('sfu:user-unpinned', {
+                unpinnerPeerId: peerId,
+                unpinnedPeerId: data.unpinnedPeerId,
+                roomId: data.roomId,
+            });
+
+            console.log(
+                `[Gateway] Unpin user successful: ${peerId} unpinned ${data.unpinnedPeerId}`,
+            );
+        } catch (error) {
+            console.error(`[Gateway] Error unpinning user:`, error);
+            client.emit('sfu:unpin-user-response', {
+                success: false,
+                message: error.message || 'Failed to unpin user',
+            });
+        }
+    }
+
+    // ==================== VOTING HANDLERS ====================
+
+    @SubscribeMessage('sfu:create-vote')
+    async handleCreateVote(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            question: string;
+            options: { id: string; text: string }[];
+            creatorId: string;
+        },
+    ) {
+        return this.votingHandler.handleCreateVote(client, data);
+    }
+
+    @SubscribeMessage('sfu:submit-vote')
+    async handleSubmitVote(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            voteId: string;
+            optionId: string;
+            voterId: string;
+        },
+    ) {
+        return this.votingHandler.handleSubmitVote(client, data);
+    }
+
+    @SubscribeMessage('sfu:get-vote-results')
+    async handleGetVoteResults(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            voteId: string;
+        },
+    ) {
+        return this.votingHandler.handleGetVoteResults(client, data);
+    }
+
+    @SubscribeMessage('sfu:end-vote')
+    async handleEndVote(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            voteId: string;
+            creatorId: string;
+        },
+    ) {
+        return this.votingHandler.handleEndVote(client, data);
+    }
+
+    @SubscribeMessage('sfu:get-active-vote')
+    async handleGetActiveVote(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+        },
+    ) {
+        return this.votingHandler.handleGetActiveVote(client, data);
+    }
+
+    // ==================== QUIZ HANDLERS ====================
+
+    @SubscribeMessage('quiz:create')
+    async handleCreateQuiz(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            title: string;
+            questions: any[];
+            creatorId: string;
+        },
+    ) {
+        return this.quizHandler.handleCreateQuiz(client, data);
+    }
+
+    @SubscribeMessage('quiz:submit')
+    async handleSubmitQuiz(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            quizId: string;
+            participantId: string;
+            answers: Array<{
+                questionId: string;
+                selectedOptions: string[];
+                essayAnswer: string;
+            }>;
+        },
+    ) {
+        return this.quizHandler.handleSubmitQuiz(client, data);
+    }
+
+    @SubscribeMessage('quiz:end')
+    async handleEndQuiz(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            quizId: string;
+            creatorId: string;
+        },
+    ) {
+        return this.quizHandler.handleEndQuiz(client, data);
+    }
+
+    @SubscribeMessage('quiz:get-active')
+    async handleGetActiveQuiz(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            requesterId: string;
+        },
+    ) {
+        return this.quizHandler.handleGetActiveQuiz(client, data);
+    }
+
+    // Helper methods for parsing stream data
+    private parseStreamMetadata(metadata: any): any {
+        try {
+            if (!metadata) return { video: true, audio: true, type: 'webcam' };
+            if (typeof metadata === 'string') {
+                return JSON.parse(metadata);
+            }
+            return metadata;
+        } catch (error) {
+            console.error('Failed to parse stream metadata:', error);
+            return { video: true, audio: true, type: 'webcam' };
+        }
+    }
+
+    @SubscribeMessage('sfu:kick-user')
+    async handleKickUser(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            participantId: string;
+        },
+    ) {
+        try {
+            const requesterPeerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
+            if (!requesterPeerId) {
+                client.emit('sfu:kick-user-response', {
+                    success: false,
+                    message: 'User not authenticated',
+                });
+                return;
+            }
+
+            console.log('=== Kick User WebSocket ===');
+            console.log('Room ID:', data.roomId);
+            console.log('Participant ID to kick:', data.participantId);
+            console.log('Requester:', requesterPeerId);
+
+            // Check if requester is the creator (has permission to kick)
+            const roomResponse = await this.roomClient.getRoom(data.roomId);
+            const roomData = roomResponse?.data;
+
+            // Find requester participant to check if they are creator
+            const participants = await this.roomClient.getParticipants(
+                data.roomId,
+            );
+            const requesterParticipant = participants.find(
+                (p) => p.peer_id === requesterPeerId,
+            );
+
+            if (!requesterParticipant || !requesterParticipant.is_creator) {
+                client.emit('sfu:kick-user-response', {
+                    success: false,
+                    message: 'Only room creator can kick users',
+                });
+                return;
+            }
+
+            // Call room service to leave room
+            const leaveRoomResponse = await this.roomClient.leaveRoom({
+                roomId: data.roomId,
+                participantId: data.participantId,
+                socketId: '', // WebSocket kick doesn't have specific socketId
+            });
+
+            // Broadcast leave events to all clients in the room
+            this.eventService.broadcastToRoom(
+                client,
+                data.roomId,
+                'sfu:peer-left',
+                {
+                    peerId: data.participantId,
+                    reason: 'kicked',
+                },
+            );
+
+            this.eventService.broadcastToRoom(
+                client,
+                data.roomId,
+                'sfu:user-removed',
+                {
+                    peerId: data.participantId,
+                    reason: 'kicked',
+                },
+            );
+
+            // If this was the creator and there's a new creator, send the creator-changed event
+            if (leaveRoomResponse?.data?.newCreator) {
+                this.eventService.broadcastToRoom(
+                    client,
+                    data.roomId,
+                    'sfu:creator-changed',
+                    {
+                        peerId: leaveRoomResponse.data.newCreator,
+                        isCreator: true,
+                    },
+                );
+            }
+
+            console.log('User kicked successfully:', data.participantId);
+            client.emit('sfu:kick-user-response', {
+                success: true,
+                message: 'User kicked successfully',
+            });
+        } catch (error) {
+            console.error('Error kicking user:', error);
+            client.emit('sfu:kick-user-response', {
+                success: false,
+                message: error.message || 'Failed to kick user',
+            });
+        }
+    }
+
+    private parseStreamRtpParameters(rtpParameters: any): any {
+        try {
+            if (!rtpParameters) return {};
+            if (typeof rtpParameters === 'string') {
+                return JSON.parse(rtpParameters);
+            }
+            return rtpParameters;
+        } catch (error) {
+            console.error('Failed to parse stream RTP parameters:', error);
+            return {};
+        }
     }
 }

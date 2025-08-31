@@ -47,3 +47,27 @@ export interface UserInfo {
         };
     };
 }
+
+export interface GoogleAuthDto {
+    email: string;
+    name: string;
+    avatar?: string;
+    googleId: string;
+}
+
+export interface UpdateProfileDto {
+    access_token: string;
+    name: string;
+    avatar: string;
+}
+
+export interface UpdateProfileResponse {
+    success: boolean;
+    message: string;
+    user?: {
+        id: string;
+        email: string;
+        name: string;
+        avatar: string;
+    };
+}

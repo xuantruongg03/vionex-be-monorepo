@@ -18,7 +18,7 @@ export class User {
     @Column({ unique: true })
     email: string;
 
-    @Column()
+    @Column({ nullable: true })
     password: string;
 
     @Column({ nullable: true })
@@ -26,6 +26,12 @@ export class User {
 
     @Column({ nullable: true })
     avatar: string;
+
+    @Column({ nullable: true })
+    googleId: string;
+
+    @Column({ default: 'local' })
+    provider: string; // 'local' | 'google'
 
     @Column({ nullable: true })
     otp: string;

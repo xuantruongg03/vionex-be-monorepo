@@ -15,10 +15,15 @@ import { OrganizationController } from './organization.controller';
 import { ChatService } from './services/chat.service';
 import { HttpBroadcastService } from './services/http-broadcast.service';
 import { WebSocketEventService } from './services/websocket-event.service';
+import { StreamService } from './services/stream.service';
+import { ServiceErrorService } from './services/service-error.service';
 import { ChatBotClientService } from './clients/chatbot.client';
 import { AuthController } from './auth.controller';
 import { AuthClientService } from './clients/auth.client';
 import { ChatHandler } from './handlers/chat.handler';
+import { VotingHandler } from './handlers/voting.handler';
+import { QuizHandler } from './handlers/quiz.handler';
+import { GatewayHelperService } from './helpers/gateway.helper';
 
 @Module({
     imports: [
@@ -158,6 +163,11 @@ import { ChatHandler } from './handlers/chat.handler';
         AuthClientService,
         OrganizationClientService,
         ChatHandler,
+        VotingHandler,
+        QuizHandler,
+        GatewayHelperService,
+        StreamService,
+        ServiceErrorService,
     ],
 })
 export class GatewayModule {}

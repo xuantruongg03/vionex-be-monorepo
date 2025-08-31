@@ -74,6 +74,39 @@ export class AuthGrpcController {
         return this.authService.getInfo(data);
     }
 
+    @GrpcMethod('AuthService', 'GoogleAuth')
+    googleAuth(data: {
+        email: string;
+        name: string;
+        avatar?: string;
+        googleId: string;
+    }): Promise<{
+        success: boolean;
+        message: string;
+        access_token?: string;
+        refresh_token?: string;
+    }> {
+        return this.authService.googleAuth(data);
+    }
+
+    @GrpcMethod('AuthService', 'UpdateProfile')
+    updateProfile(data: {
+        access_token: string;
+        name: string;
+        avatar: string;
+    }): Promise<{
+        success: boolean;
+        message: string;
+        user?: {
+            id: string;
+            email: string;
+            name: string;
+            avatar: string;
+        };
+    }> {
+        return this.authService.updateProfile(data);
+    }
+
     // Organization gRPC methods
     @GrpcMethod('AuthService', 'CreateOrganization')
     createOrganization(data: {
@@ -153,7 +186,6 @@ export class AuthGrpcController {
             data.memberId,
         );
     }
-
 
     @GrpcMethod('AuthService', 'VerifyOrgEmail')
     verifyOrgEmail(data: { email: string }): Promise<{

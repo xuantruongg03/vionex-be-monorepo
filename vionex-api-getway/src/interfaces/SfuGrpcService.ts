@@ -63,6 +63,12 @@ export default interface SfuGrpcService {
 
     removeStream(data: { stream_id: string }): any;
 
+    unpublishStream(data: {
+        room_id: string;
+        stream_id: string;
+        participant_id: string;
+    }): any;
+
     // Participant management
     removeParticipantMedia(data: {
         room_id: string;
