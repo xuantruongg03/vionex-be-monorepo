@@ -14,12 +14,13 @@ import { InteractionClientService } from './clients/interaction.client';
 import { RoomClientService } from './clients/room.client';
 import { SfuClientService } from './clients/sfu.client';
 import { ChatHandler } from './handlers/chat.handler';
+import { QuizHandler } from './handlers/quiz.handler';
 import { VotingHandler } from './handlers/voting.handler';
 import { GatewayHelperService } from './helpers/gateway.helper';
 import { Participant } from './interfaces/interface';
 import { HttpBroadcastService } from './services/http-broadcast.service';
-import { WebSocketEventService } from './services/websocket-event.service';
 import { StreamService } from './services/stream.service';
+import { WebSocketEventService } from './services/websocket-event.service';
 
 @WebSocketGateway({
     transports: ['websocket', 'polling'],
@@ -44,6 +45,7 @@ export class GatewayGateway
         private readonly audioService: AudioClientService,
         private readonly chatHandler: ChatHandler,
         private readonly votingHandler: VotingHandler,
+        private readonly quizHandler: QuizHandler,
         private readonly helperService: GatewayHelperService,
         private readonly streamService: StreamService,
     ) {}
@@ -2046,6 +2048,65 @@ export class GatewayGateway
         },
     ) {
         return this.votingHandler.handleGetActiveVote(client, data);
+    }
+
+    // ==================== QUIZ HANDLERS ====================
+
+    @SubscribeMessage('quiz:create')
+    async handleCreateQuiz(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            title: string;
+            questions: any[];
+            creatorId: string;
+        },
+    ) {
+        return this.quizHandler.handleCreateQuiz(client, data);
+    }
+
+    @SubscribeMessage('quiz:submit')
+    async handleSubmitQuiz(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            quizId: string;
+            participantId: string;
+            answers: Array<{
+                questionId: string;
+                selectedOptions: string[];
+                essayAnswer: string;
+            }>;
+        },
+    ) {
+        return this.quizHandler.handleSubmitQuiz(client, data);
+    }
+
+    @SubscribeMessage('quiz:end')
+    async handleEndQuiz(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            quizId: string;
+            creatorId: string;
+        },
+    ) {
+        return this.quizHandler.handleEndQuiz(client, data);
+    }
+
+    @SubscribeMessage('quiz:get-active')
+    async handleGetActiveQuiz(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            requesterId: string;
+        },
+    ) {
+        return this.quizHandler.handleGetActiveQuiz(client, data);
     }
 
     // Helper methods for parsing stream data

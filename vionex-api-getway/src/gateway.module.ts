@@ -22,6 +22,7 @@ import { AuthController } from './auth.controller';
 import { AuthClientService } from './clients/auth.client';
 import { ChatHandler } from './handlers/chat.handler';
 import { VotingHandler } from './handlers/voting.handler';
+import { QuizHandler } from './handlers/quiz.handler';
 import { GatewayHelperService } from './helpers/gateway.helper';
 
 @Module({
@@ -163,6 +164,7 @@ import { GatewayHelperService } from './helpers/gateway.helper';
         OrganizationClientService,
         ChatHandler,
         VotingHandler,
+        QuizHandler,
         GatewayHelperService,
         StreamService,
         ServiceErrorService,
