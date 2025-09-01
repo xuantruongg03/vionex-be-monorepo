@@ -1,172 +1,87 @@
 
-from core.model import (
-    model_vi_en, tokenizer,
-    # Import additional models
-    model_en_vi, tokenizer_en_vi,
-    model_vi_lo, tokenizer_vi_lo,
-    model_lo_vi, tokenizer_lo_vi,
-    model_en_lo, tokenizer_en_lo,
-    model_lo_en, tokenizer_lo_en
-)
+from core.model import translation_models, translation_tokenizers
 
 class TranslateProcess:
     """
         Class to handle translation between multiple languages using MarianMTModel.
         Supports: Vietnamese (vi), English (en), Lao (lo)
-        All translation directions are available.
+        Translation directions available based on loaded models.
     """
     def __init__(self):
-        # Vi-En models
-        self.tokenizer_vi_en = tokenizer
-        self.model_vi_en = model_vi_en
+        self.models = translation_models
+        self.tokenizers = translation_tokenizers
         
-        # En-Vi models
-        self.tokenizer_en_vi = tokenizer_en_vi
-        self.model_en_vi = model_en_vi
+        # Log available models
+        available_directions = list(self.models.keys())
+        print(f"[TranslateProcess] Available translation models: {available_directions}")
+
+    def _get_model_and_tokenizer(self, direction):
+        """Get model and tokenizer for a specific direction"""
+        if direction not in self.models or direction not in self.tokenizers:
+            return None, None
+        return self.models[direction], self.tokenizers[direction]
+
+    def _translate_generic(self, text, direction):
+        """Generic translation method for any direction"""
+        model, tokenizer = self._get_model_and_tokenizer(direction)
         
-        # Vi-Lo models
-        self.tokenizer_vi_lo = tokenizer_vi_lo
-        self.model_vi_lo = model_vi_lo
-        
-        # Lo-Vi models
-        self.tokenizer_lo_vi = tokenizer_lo_vi
-        self.model_lo_vi = model_lo_vi
-        
-        # En-Lo models
-        self.tokenizer_en_lo = tokenizer_en_lo
-        self.model_en_lo = model_en_lo
-        
-        # Lo-En models
-        self.tokenizer_lo_en = tokenizer_lo_en
-        self.model_lo_en = model_lo_en
+        if model is None or tokenizer is None:
+            print(f"[TranslateProcess] Model not available for direction: {direction}")
+            return [text] if isinstance(text, str) else text
+            
+        try:
+            # Handle both string and list inputs
+            text_input = text if isinstance(text, str) else ' '.join(text)
+            
+            # Tokenize input sentences
+            inputs = tokenizer(text_input, return_tensors="pt", padding=True, truncation=True)
+            
+            # Generate translations
+            translated = model.generate(**inputs)
+            
+            # Decode the generated tokens
+            result = [tokenizer.decode(t, skip_special_tokens=True) for t in translated]
+            
+            return result
+        except Exception as e:
+            print(f"[TranslateProcess] Error in {direction} translation: {e}")
+            return [text] if isinstance(text, str) else text
 
     def translate_vi_to_en(self, vietnamese_sentences):
         """Translate Vietnamese to English"""
-        try:
-            # Handle both string and list inputs
-            text_input = vietnamese_sentences if isinstance(vietnamese_sentences, str) else ' '.join(vietnamese_sentences)
-            
-            # Tokenize input sentences
-            inputs = self.tokenizer_vi_en(text_input, return_tensors="pt", padding=True, truncation=True)
-            
-            # Generate translations
-            translated = self.model_vi_en.generate(**inputs)
-            
-            # Decode the generated tokens to English sentences
-            english_sentences = [self.tokenizer_vi_en.decode(t, skip_special_tokens=True) for t in translated]
-            
-            return english_sentences
-        except Exception as e:
-            print(f"[TranslateProcess] Error in Vi→En translation: {e}")
-            return [vietnamese_sentences] if isinstance(vietnamese_sentences, str) else vietnamese_sentences
+        return self._translate_generic(vietnamese_sentences, "vi_en")
     
     def translate_en_to_vi(self, english_sentences):
         """Translate English to Vietnamese"""
-        try:
-            # Handle both string and list inputs
-            text_input = english_sentences if isinstance(english_sentences, str) else ' '.join(english_sentences)
-            
-            # Tokenize input sentences
-            inputs = self.tokenizer_en_vi(text_input, return_tensors="pt", padding=True, truncation=True)
-            
-            # Generate translations
-            translated = self.model_en_vi.generate(**inputs)
-            
-            # Decode the generated tokens to Vietnamese sentences
-            vietnamese_sentences = [self.tokenizer_en_vi.decode(t, skip_special_tokens=True) for t in translated]
-            
-            return vietnamese_sentences
-        except Exception as e:
-            print(f"[TranslateProcess] Error in En→Vi translation: {e}")
-            return [english_sentences] if isinstance(english_sentences, str) else english_sentences
+        return self._translate_generic(english_sentences, "en_vi")
     
     def translate_vi_to_lo(self, vietnamese_sentences):
         """Translate Vietnamese to Lao"""
-        try:
-            # Handle both string and list inputs
-            text_input = vietnamese_sentences if isinstance(vietnamese_sentences, str) else ' '.join(vietnamese_sentences)
-            
-            # Tokenize input sentences
-            inputs = self.tokenizer_vi_lo(text_input, return_tensors="pt", padding=True, truncation=True)
-            
-            # Generate translations
-            translated = self.model_vi_lo.generate(**inputs)
-            
-            # Decode the generated tokens to Lao sentences
-            lao_sentences = [self.tokenizer_vi_lo.decode(t, skip_special_tokens=True) for t in translated]
-            
-            return lao_sentences
-        except Exception as e:
-            print(f"[TranslateProcess] Error in Vi→Lo translation: {e}")
-            return [vietnamese_sentences] if isinstance(vietnamese_sentences, str) else vietnamese_sentences
+        return self._translate_generic(vietnamese_sentences, "vi_lo")
     
     def translate_lo_to_vi(self, lao_sentences):
         """Translate Lao to Vietnamese"""
-        try:
-            # Handle both string and list inputs
-            text_input = lao_sentences if isinstance(lao_sentences, str) else ' '.join(lao_sentences)
-            
-            # Tokenize input sentences
-            inputs = self.tokenizer_lo_vi(text_input, return_tensors="pt", padding=True, truncation=True)
-            
-            # Generate translations
-            translated = self.model_lo_vi.generate(**inputs)
-            
-            # Decode the generated tokens to Vietnamese sentences
-            vietnamese_sentences = [self.tokenizer_lo_vi.decode(t, skip_special_tokens=True) for t in translated]
-            
-            return vietnamese_sentences
-        except Exception as e:
-            print(f"[TranslateProcess] Error in Lo→Vi translation: {e}")
-            return [lao_sentences] if isinstance(lao_sentences, str) else lao_sentences
+        return self._translate_generic(lao_sentences, "lo_vi")
     
     def translate_en_to_lo(self, english_sentences):
         """Translate English to Lao"""
-        try:
-            # Handle both string and list inputs
-            text_input = english_sentences if isinstance(english_sentences, str) else ' '.join(english_sentences)
-            
-            # Tokenize input sentences
-            inputs = self.tokenizer_en_lo(text_input, return_tensors="pt", padding=True, truncation=True)
-            
-            # Generate translations
-            translated = self.model_en_lo.generate(**inputs)
-            
-            # Decode the generated tokens to Lao sentences
-            lao_sentences = [self.tokenizer_en_lo.decode(t, skip_special_tokens=True) for t in translated]
-            
-            return lao_sentences
-        except Exception as e:
-            print(f"[TranslateProcess] Error in En→Lo translation: {e}")
-            return [english_sentences] if isinstance(english_sentences, str) else english_sentences
+        return self._translate_generic(english_sentences, "en_lo")
     
     def translate_lo_to_en(self, lao_sentences):
         """Translate Lao to English"""
-        try:
-            # Handle both string and list inputs
-            text_input = lao_sentences if isinstance(lao_sentences, str) else ' '.join(lao_sentences)
-            
-            # Tokenize input sentences
-            inputs = self.tokenizer_lo_en(text_input, return_tensors="pt", padding=True, truncation=True)
-            
-            # Generate translations
-            translated = self.model_lo_en.generate(**inputs)
-            
-            # Decode the generated tokens to English sentences
-            english_sentences = [self.tokenizer_lo_en.decode(t, skip_special_tokens=True) for t in translated]
-            
-            return english_sentences
-        except Exception as e:
-            print(f"[TranslateProcess] Error in Lo→En translation: {e}")
-            return [lao_sentences] if isinstance(lao_sentences, str) else lao_sentences
+        return self._translate_generic(lao_sentences, "lo_en")
     
     def get_supported_directions(self):
-        """Get list of all supported translation directions"""
-        return [
-            "vi→en", "en→vi",
-            "vi→lo", "lo→vi", 
-            "en→lo", "lo→en"
-        ]
+        """Get list of all supported translation directions based on available models"""
+        direction_map = {
+            "vi_en": "vi→en",
+            "en_vi": "en→vi", 
+            "vi_lo": "vi→lo",
+            "lo_vi": "lo→vi",
+            "en_lo": "en→lo", 
+            "lo_en": "lo→en"
+        }
+        return [direction_map[key] for key in self.models.keys() if key in direction_map]
     
     def translate(self, text, source_lang, target_lang):
         """
@@ -181,18 +96,11 @@ class TranslateProcess:
         if source_lang == target_lang:
             return [text] if isinstance(text, str) else text
             
-        translation_map = {
-            ("vi", "en"): self.translate_vi_to_en,
-            ("en", "vi"): self.translate_en_to_vi,
-            ("vi", "lo"): self.translate_vi_to_lo,
-            ("lo", "vi"): self.translate_lo_to_vi,
-            ("en", "lo"): self.translate_en_to_lo,
-            ("lo", "en"): self.translate_lo_to_en,
-        }
+        # Map language codes to model direction keys
+        direction_key = f"{source_lang}_{target_lang}"
         
-        translate_func = translation_map.get((source_lang, target_lang))
-        if translate_func:
-            return translate_func(text)
+        if direction_key in self.models:
+            return self._translate_generic(text, direction_key)
         else:
-            print(f"[TranslateProcess] Unsupported translation direction: {source_lang}→{target_lang}")
+            print(f"[TranslateProcess] Model not available for direction: {source_lang}→{target_lang}")
             return [text] if isinstance(text, str) else text

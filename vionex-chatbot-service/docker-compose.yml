@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  vionex-chatbot-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vionex-chatbot-service-gpu
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    environment:
+      - CHATBOT_GRPC_PORT=30007
+      - BASE_MODEL_REPO=your-username/your-private-openchat-model
+      - LORA_MODEL_REPO=your-username/your-private-lora-adapter
+      - MODEL_CACHE_DIR=/app/models/.cache
+      - HUGGINGFACE_TOKEN=your_hf_token_here
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+      - TRANSFORMERS_CACHE=/app/models/.cache
+      - HF_HOME=/app/models/.cache
+    ports:
+      - "30007:30007"
+    volumes:
+      # Mount model directories if you have them locally
+      # - ./models/openchat-3.5-0106:/app/models/openchat-3.5-0106:ro
+      # - ./openchat-lora-only:/app/openchat-lora-only:ro
+
+      # Mount cache directory for model downloads
+      - chatbot_models_cache:/app/models/.cache
+    networks:
+      - vionex-network
+    healthcheck:
+      test: [ "CMD", "python3", "-c", "import grpc; channel = grpc.insecure_channel('localhost:30007'); grpc.channel_ready_future(channel).result(timeout=5)" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+volumes:
+  chatbot_models_cache:
+
+
+networks:
+  vionex-network:
+    external: true
