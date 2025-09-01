@@ -29,10 +29,10 @@ async function bootstrap() {
     await ConfigModule.forRoot({
         isGlobal: true,
     });
-    const httpsOptions = {
-        key: fs.readFileSync('./secrets/private-key.pem'),
-        cert: fs.readFileSync('./secrets/public-certificate.pem'),
-    };
+    // const httpsOptions = {
+    //     key: fs.readFileSync('./secrets/private-key.pem'),
+    //     cert: fs.readFileSync('./secrets/public-certificate.pem'),
+    // };
     const configService = new ConfigService();
     const app = await NestFactory.create(GatewayModule);
     app.useWebSocketAdapter(new SecureIoAdapter(app));

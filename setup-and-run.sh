@@ -94,8 +94,10 @@ check_python() {
         print_success "Python is installed: $PYTHON_VERSION"
         return 0
     else
-        print_error "Python is not installed. Please install Python first."
-        return 1
+        sudo apt update
+        sudo apt install -y python3 python3-pip
+        print_success "Python installed successfully"
+        return 0
     fi
 }
 
@@ -106,9 +108,109 @@ check_docker() {
         print_success "Docker is installed: $DOCKER_VERSION"
         return 0
     else
-        print_error "Docker is not installed. Please install Docker first."
+        #!/bin/bash
+
+        # Gỡ các bản Docker cũ (nếu có)
+        sudo apt-get remove -y docker docker-engine docker.io containerd runc
+
+        # Cập nhật hệ thống
+        sudo apt-get update
+        sudo apt-get install -y \
+            ca-certificates \
+            curl \
+            gnupg \
+            lsb-release
+
+        # Thêm key GPG chính thức của Docker
+        sudo mkdir -p /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+            sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+        # Thêm repository Docker vào APT sources
+        echo \
+        "deb [arch=$(dpkg --print-architecture) \
+        signed-by=/etc/apt/keyrings/docker.gpg] \
+        https://download.docker.com/linux/ubuntu \
+        $(lsb_release -cs) stable" | \
+        sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+        # Cập nhật và cài đặt Docker Engine
+        sudo apt-get update
+        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+        # Kiểm tra Docker
+        sudo docker --version
+        sudo docker run hello-world
+        return 0
+    fi
+}
+
+# Check and install MySQL Server
+check_mysql() {
+    if command -v mysql &> /dev/null; then
+        MYSQL_VERSION=$(mysql --version)
+        print_success "MySQL is installed: $MYSQL_VERSION"
+        return 0
+    else
+        print_warning "MySQL is not installed. Installing MySQL Server..."
+        
+        # Update package list
+        sudo apt update
+        
+        # Install MySQL Server
+        sudo apt install -y mysql-server mysql-client
+        
+        # Start MySQL service
+        sudo systemctl start mysql
+        sudo systemctl enable mysql
+        
+        print_success "MySQL Server installed and started"
+        return 0
+    fi
+}
+
+# Setup MySQL database for auth service
+setup_mysql_database() {
+    print_header "Setting up MySQL Database for Auth Service"
+    
+    # Default MySQL password for auth service
+    MYSQL_ROOT_PASSWORD="lexuantruong2k3"
+    DB_NAME="vionex_auth_service"
+    
+    # Check if MySQL is running
+    if ! sudo systemctl is-active --quiet mysql; then
+        print_info "Starting MySQL service..."
+        sudo systemctl start mysql
+        sleep 5
+    fi
+    
+    # Secure MySQL installation and set root password
+    print_info "Securing MySQL installation..."
+    sudo mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '$MYSQL_ROOT_PASSWORD';" 2>/dev/null || true
+    sudo mysql -u root -p$MYSQL_ROOT_PASSWORD -e "FLUSH PRIVILEGES;" 2>/dev/null || true
+    
+    # Create database if not exists
+    print_info "Creating database '$DB_NAME' if not exists..."
+    mysql -u root -p$MYSQL_ROOT_PASSWORD -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null
+    
+    # Run initialization script if exists
+    if [ -f "vionex-auth-service/src/migrations/init.sql" ]; then
+        print_info "Running database initialization script..."
+        mysql -u root -p$MYSQL_ROOT_PASSWORD < vionex-auth-service/src/migrations/init.sql
+        print_success "Database initialization completed"
+    else
+        print_warning "Database initialization script not found at vionex-auth-service/src/migrations/init.sql"
+    fi
+    
+    # Test database connection
+    if mysql -u root -p$MYSQL_ROOT_PASSWORD -e "USE \`$DB_NAME\`; SHOW TABLES;" &> /dev/null; then
+        print_success "Database '$DB_NAME' is ready and accessible"
+    else
+        print_error "Failed to connect to database '$DB_NAME'"
         return 1
     fi
+    
+    return 0
 }
 
 # Install and start Qdrant
@@ -362,16 +464,10 @@ install_dependencies() {
         
         # Check if virtual environment exists
         if [ ! -d "venv" ]; then
-            print_info "Creating Python virtual environment..."
-            python3 -m venv venv || python -m venv venv
+            python3 -m venv venv
         fi
         
-        # Activate virtual environment and install dependencies
-        if [ -f "venv/bin/activate" ]; then
-            source venv/bin/activate
-        elif [ -f "venv/Scripts/activate" ]; then
-            source venv/Scripts/activate
-        fi
+        source venv/bin/activate
         
         pip install -r requirements.txt
         deactivate
@@ -578,6 +674,10 @@ main() {
         exit 1
     fi
     
+    if ! check_mysql; then
+        exit 1
+    fi
+    
     if ! check_pm2; then
         exit 1
     fi
@@ -585,7 +685,11 @@ main() {
     case $ACTION in
         "install")
             setup_env_files
+            setup_mysql_database
             install_dependencies
+            ;;
+        "database")
+            setup_mysql_database
             ;;
         "build")
             build_services
@@ -602,6 +706,7 @@ main() {
             ;;
         "all")
             setup_env_files
+            setup_mysql_database
             install_dependencies
             build_services
             setup_pm2_config
@@ -609,7 +714,7 @@ main() {
             ;;
         *)
             print_error "Invalid action: $ACTION"
-            echo "Available actions: install, build, start, stop, restart, all"
+            echo "Available actions: install, database, build, start, stop, restart, all"
             exit 1
             ;;
     esac
