@@ -46,19 +46,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/tmp/*
 
 # Install CUDA Toolkit keyring and repository
+# Cài CUDA 11.8 + cuDNN 9 tương thích
 RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb \
     && dpkg -i cuda-keyring_1.0-1_all.deb \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
     cuda-cudart-11-8 \
     cuda-compat-11-8 \
+    libcudnn9-cuda-11 \
+    libcudnn9-dev-cuda-11 \
     && rm -rf /var/lib/apt/lists/* \
     && rm cuda-keyring_1.0-1_all.deb
 
 # Set CUDA environment variables
 ENV CUDA_HOME=/usr/local/cuda-11.8
-ENV LD_LIBRARY_PATH=/usr/local/cuda-11.8/lib64:/usr/lib/x86_64-linux-gnu
+ENV LD_LIBRARY_PATH=/usr/local/cuda-11.8/lib64:/usr/lib/x86_64-linux-gnu:/usr/local/cuda/lib64
 ENV PATH=/usr/local/cuda-11.8/bin:$PATH
+ENV CUDNN_VERSION=8.9.7
 
 # Copy Python packages from builder stage
 COPY --from=builder /root/.local /root/.local

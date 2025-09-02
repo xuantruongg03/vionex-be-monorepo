@@ -162,6 +162,9 @@ python audio_service_clean.py
 2. **Run the Docker container**
 
     ```bash
+    # Pull
+    docker pull lexuantruong098/vionex-audio-service-gpu:latest
+
     # CPU Version
     docker run --rm -it \
       -p 30005:30005 -p 35000-35400:35000-35400/udp \
@@ -185,14 +188,6 @@ python audio_service_clean.py
       -v "/opt/vionex/transcripts:/app/transcripts" \
       lexuantruong098/vionex-audio-service-gpu:latest
     ```
-
-    docker run --gpus all -p 30005:30005 -p 35000-35400:35000-35400/udp \
-  -e TYPE_ENGINE=cuda \
-  lexuantruong098/vionex-audio-service-gpu:latest
-
-docker pull lexuantruong098/vionex-audio-service-gpu:latest
-
-nvidia-smi -l 1
 
 ## 🔧 Configuration
 
