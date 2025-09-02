@@ -637,78 +637,78 @@ class TranslationCabinManager:
             logger.error(f"[PROCESSING] ERROR in {processing_time:.2f}ms: {e}")
             logger.error(f"[PROCESSING] Traceback: {traceback.format_exc()}")
 
-    def _send_rtp_to_sfu(self, cabin: TranslationCabin, pcm_audio_data: bytes) -> bool:
-        """
-        Send RTP packets to SFU using SharedSocketManager
-        """
-        try:
-            # Get SFU connection details
-            # Use send_port (which is the port SFU receiveTransport listens on)
-            sfu_host = "192.168.1.10"
-            sfu_port = cabin.send_port  # This is where SFU is expecting RTP packets
+    # def _send_rtp_to_sfu(self, cabin: TranslationCabin, pcm_audio_data: bytes) -> bool:
+    #     """
+    #     Send RTP packets to SFU using SharedSocketManager
+    #     """
+    #     try:
+    #         # Get SFU connection details
+    #         # Use send_port (which is the port SFU receiveTransport listens on)
+    #         sfu_host = "192.168.1.10"
+    #         sfu_port = cabin.send_port  # This is where SFU is expecting RTP packets
             
-            # logger.warning(f"[RTP-SEND] SENDING SAMPLE AUDIO to SFU at {sfu_host}:{sfu_port}")
-            # logger.info(f"[RTP-SEND] Input PCM data: {len(pcm_audio_data)} bytes")
+    #         # logger.warning(f"[RTP-SEND] SENDING SAMPLE AUDIO to SFU at {sfu_host}:{sfu_port}")
+    #         # logger.info(f"[RTP-SEND] Input PCM data: {len(pcm_audio_data)} bytes")
             
-            # Initialize RTP state if not exists
-            if not cabin._rtp_ssrc:
-                cabin._rtp_timestamp = int(time.time() * 48000)
-                cabin._rtp_ssrc = cabin.ssrc or (hash(cabin.cabin_id) & 0xFFFFFFFF)
-                # logger.info(f"[RTP-SEND] Initialized RTP state for cabin {cabin.cabin_id}, SSRC: {cabin._rtp_ssrc}")
+    #         # Initialize RTP state if not exists
+    #         if not cabin._rtp_ssrc:
+    #             cabin._rtp_timestamp = int(time.time() * 48000)
+    #             cabin._rtp_ssrc = cabin.ssrc or (hash(cabin.cabin_id) & 0xFFFFFFFF)
+    #             # logger.info(f"[RTP-SEND] Initialized RTP state for cabin {cabin.cabin_id}, SSRC: {cabin._rtp_ssrc}")
             
-            # Convert and encode PCM to Opus using codec utils
-            # logger.warning(f"[RTP-SEND] Step 1: Upsampling {len(pcm_audio_data)} bytes PCM 16kHz to 48kHz stereo...")
-            # logger.info(f"[RTP-SEND] Input audio analysis: {len(pcm_audio_data)} bytes = {len(pcm_audio_data)/2} samples = {len(pcm_audio_data)/2/16000:.2f}s")
+    #         # Convert and encode PCM to Opus using codec utils
+    #         # logger.warning(f"[RTP-SEND] Step 1: Upsampling {len(pcm_audio_data)} bytes PCM 16kHz to 48kHz stereo...")
+    #         # logger.info(f"[RTP-SEND] Input audio analysis: {len(pcm_audio_data)} bytes = {len(pcm_audio_data)/2} samples = {len(pcm_audio_data)/2/16000:.2f}s")
             
-            pcm_48k_stereo = AudioProcessingUtils.upsample_to_48k_stereo(pcm_audio_data, 16000)
-            if not pcm_48k_stereo:
-                logger.error("[RTP-SEND] Failed to upsample PCM")
-                return False
-            # logger.info(f"[RTP-SEND] Step 1 SUCCESS: Upsampled to {len(pcm_48k_stereo)} bytes")
-            # logger.info(f"[RTP-SEND] 48kHz stereo analysis: {len(pcm_48k_stereo)} bytes = {len(pcm_48k_stereo)/4} samples = {len(pcm_48k_stereo)/4/48000:.2f}s")
+    #         pcm_48k_stereo = AudioProcessingUtils.upsample_to_48k_stereo(pcm_audio_data, 16000)
+    #         if not pcm_48k_stereo:
+    #             logger.error("[RTP-SEND] Failed to upsample PCM")
+    #             return False
+    #         # logger.info(f"[RTP-SEND] Step 1 SUCCESS: Upsampled to {len(pcm_48k_stereo)} bytes")
+    #         # logger.info(f"[RTP-SEND] 48kHz stereo analysis: {len(pcm_48k_stereo)} bytes = {len(pcm_48k_stereo)/4} samples = {len(pcm_48k_stereo)/4/48000:.2f}s")
             
-            # Check first few samples of audio data
-            # import struct
-            # if len(pcm_audio_data) >= 10:
-            #     first_samples = struct.unpack('<5h', pcm_audio_data[:10])
-            #     logger.info(f"[RTP-SEND] First 5 samples of 16kHz PCM: {first_samples}")
+    #         # Check first few samples of audio data
+    #         # import struct
+    #         # if len(pcm_audio_data) >= 10:
+    #         #     first_samples = struct.unpack('<5h', pcm_audio_data[:10])
+    #         #     logger.info(f"[RTP-SEND] First 5 samples of 16kHz PCM: {first_samples}")
             
-            # if len(pcm_48k_stereo) >= 20:
-            #     first_samples_48k = struct.unpack('<5h', pcm_48k_stereo[:10])
-            #     logger.info(f"[RTP-SEND] First 5 samples of 48kHz stereo: {first_samples_48k}")
+    #         # if len(pcm_48k_stereo) >= 20:
+    #         #     first_samples_48k = struct.unpack('<5h', pcm_48k_stereo[:10])
+    #         #     logger.info(f"[RTP-SEND] First 5 samples of 48kHz stereo: {first_samples_48k}")
             
-            # logger.info(f"[RTP-SEND] Step 2: Encoding {len(pcm_48k_stereo)} bytes PCM to Opus...")
-            opus_payload = opus_codec_manager.encode_pcm_to_opus(cabin.cabin_id, pcm_48k_stereo)
-            if not opus_payload:
-                logger.error("[RTP-SEND] Failed to encode PCM to Opus")
-                return False
-            # logger.warning(f"[RTP-SEND] Step 2 SUCCESS: Encoded to {len(opus_payload)} bytes Opus (compression ratio: {len(pcm_48k_stereo)/len(opus_payload):.1f}:1)")
+    #         # logger.info(f"[RTP-SEND] Step 2: Encoding {len(pcm_48k_stereo)} bytes PCM to Opus...")
+    #         opus_payload = opus_codec_manager.encode_pcm_to_opus(cabin.cabin_id, pcm_48k_stereo)
+    #         if not opus_payload:
+    #             logger.error("[RTP-SEND] Failed to encode PCM to Opus")
+    #             return False
+    #         # logger.warning(f"[RTP-SEND] Step 2 SUCCESS: Encoded to {len(opus_payload)} bytes Opus (compression ratio: {len(pcm_48k_stereo)/len(opus_payload):.1f}:1)")
             
-            # Increment sequence number and timestamp
-            cabin._rtp_seq_num = (cabin._rtp_seq_num + 1) & 0xFFFF
-            cabin._rtp_timestamp = (cabin._rtp_timestamp + 960) & 0xFFFFFFFF
+    #         # Increment sequence number and timestamp
+    #         cabin._rtp_seq_num = (cabin._rtp_seq_num + 1) & 0xFFFF
+    #         cabin._rtp_timestamp = (cabin._rtp_timestamp + 960) & 0xFFFFFFFF
             
-            # logger.info(f"[RTP-SEND] Step 3: Creating RTP packet (seq={cabin._rtp_seq_num}, ts={cabin._rtp_timestamp}, ssrc={cabin._rtp_ssrc})...")
-            # Create RTP packet using utility
-            rtp_packet = RTPUtils.create_rtp_packet(
-                opus_payload, 100, cabin._rtp_seq_num, cabin._rtp_timestamp, cabin._rtp_ssrc
-            )
-            # logger.info(f"[RTP-SEND] Step 3 SUCCESS: Created RTP packet {len(rtp_packet)} bytes")
+    #         # logger.info(f"[RTP-SEND] Step 3: Creating RTP packet (seq={cabin._rtp_seq_num}, ts={cabin._rtp_timestamp}, ssrc={cabin._rtp_ssrc})...")
+    #         # Create RTP packet using utility
+    #         rtp_packet = RTPUtils.create_rtp_packet(
+    #             opus_payload, 100, cabin._rtp_seq_num, cabin._rtp_timestamp, cabin._rtp_ssrc
+    #         )
+    #         # logger.info(f"[RTP-SEND] Step 3 SUCCESS: Created RTP packet {len(rtp_packet)} bytes")
             
-            # Send using SharedSocketManager
-            # logger.info(f"[RTP-SEND] Step 4: Sending RTP packet via SharedSocketManager...")
-            success = self.socket_manager.send_rtp_to_sfu(rtp_packet, sfu_host, sfu_port)
-            # if success:
-            #     logger.warning(f"[RTP-SEND] SENT SAMPLE AUDIO via SharedSocketManager ({len(opus_payload)} bytes Opus payload)")
-            # else:
-            #     logger.error(f"[RTP-SEND] Failed to send via SharedSocketManager")
-            return success
+    #         # Send using SharedSocketManager
+    #         # logger.info(f"[RTP-SEND] Step 4: Sending RTP packet via SharedSocketManager...")
+    #         success = self.socket_manager.send_rtp_to_sfu(rtp_packet, sfu_host, sfu_port)
+    #         # if success:
+    #         #     logger.warning(f"[RTP-SEND] SENT SAMPLE AUDIO via SharedSocketManager ({len(opus_payload)} bytes Opus payload)")
+    #         # else:
+    #         #     logger.error(f"[RTP-SEND] Failed to send via SharedSocketManager")
+    #         return success
             
-        except Exception as e:
-            logger.error(f"[RTP-SEND] Error sending to SFU: {e}")
-            import traceback
-            logger.error(f"[RTP-SEND] Traceback: {traceback.format_exc()}")
-            return False
+    #     except Exception as e:
+    #         logger.error(f"[RTP-SEND] Error sending to SFU: {e}")
+    #         import traceback
+    #         logger.error(f"[RTP-SEND] Traceback: {traceback.format_exc()}")
+    #         return False
 
     def _send_rtp_chunks_to_sfu(self, cabin: TranslationCabin, audio_data: bytes) -> bool:
         """
@@ -912,10 +912,10 @@ class TranslationCabinManager:
         try:
             # Use chunked streaming for better audio quality
             success = self._send_rtp_chunks_to_sfu(cabin, audio_data)
-            if not success:
-                logger.error(f"[{audio_type.upper()}] Failed to send {audio_type} audio via chunks")
-                # Fallback to original method
-                success = self._send_rtp_to_sfu(cabin, audio_data)
+            # if not success:
+            #     logger.error(f"[{audio_type.upper()}] Failed to send {audio_type} audio via chunks")
+            #     # Fallback to original method
+            #     success = self._send_rtp_to_sfu(cabin, audio_data)
             return success
             
         except Exception as e:

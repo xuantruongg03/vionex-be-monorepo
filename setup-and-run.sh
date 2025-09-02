@@ -189,15 +189,34 @@ setup_mysql_database() {
     sudo mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '$MYSQL_ROOT_PASSWORD';" 2>/dev/null || true
     sudo mysql -u root -p$MYSQL_ROOT_PASSWORD -e "FLUSH PRIVILEGES;" 2>/dev/null || true
     
-    # Create database if not exists
-    print_info "Creating database '$DB_NAME' if not exists..."
-    mysql -u root -p$MYSQL_ROOT_PASSWORD -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null
+    # Check if database already exists and has tables
+    print_info "Checking if database '$DB_NAME' already exists..."
+    if mysql -u root -p$MYSQL_ROOT_PASSWORD -e "USE \`$DB_NAME\`;" &> /dev/null; then
+        # Database exists, check if it has tables
+        TABLE_COUNT=$(mysql -u root -p$MYSQL_ROOT_PASSWORD -e "USE \`$DB_NAME\`; SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$DB_NAME';" -s -N 2>/dev/null || echo "0")
+        
+        if [ "$TABLE_COUNT" -gt 0 ]; then
+            print_success "Database '$DB_NAME' already exists with $TABLE_COUNT tables. Skipping database setup."
+            return 0
+        else
+            print_warning "Database '$DB_NAME' exists but is empty. Will initialize with tables."
+        fi
+    else
+        # Database doesn't exist, create it
+        print_info "Database '$DB_NAME' doesn't exist. Creating new database..."
+        mysql -u root -p$MYSQL_ROOT_PASSWORD -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null
+        print_success "Database '$DB_NAME' created successfully"
+    fi
     
-    # Run initialization script if exists
+    # Run initialization script if exists and database is empty
     if [ -f "vionex-auth-service/src/migrations/init.sql" ]; then
         print_info "Running database initialization script..."
-        mysql -u root -p$MYSQL_ROOT_PASSWORD < vionex-auth-service/src/migrations/init.sql
+        mysql -u root -p$MYSQL_ROOT_PASSWORD $DB_NAME < vionex-auth-service/src/migrations/init.sql
         print_success "Database initialization completed"
+        
+        # Verify tables were created
+        NEW_TABLE_COUNT=$(mysql -u root -p$MYSQL_ROOT_PASSWORD -e "USE \`$DB_NAME\`; SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$DB_NAME';" -s -N 2>/dev/null || echo "0")
+        print_success "Database '$DB_NAME' now has $NEW_TABLE_COUNT tables"
     else
         print_warning "Database initialization script not found at vionex-auth-service/src/migrations/init.sql"
     fi
@@ -219,21 +238,34 @@ setup_qdrant() {
     
     # Check if Qdrant container is already running
     if docker ps --format "table {{.Names}}" | grep -q "qdrant"; then
-        print_success "Qdrant is already running"
+        print_success "Qdrant container is already running"
+        
+        # Test Qdrant connection
+        if curl -f http://localhost:6333/health &> /dev/null; then
+            print_success "Qdrant is healthy and ready to use"
+        else
+            print_warning "Qdrant container is running but may not be ready yet"
+        fi
         return 0
     fi
     
     # Check if Qdrant container exists but stopped
     if docker ps -a --format "table {{.Names}}" | grep -q "qdrant"; then
-        print_info "Starting existing Qdrant container..."
+        print_info "Found existing Qdrant container. Starting it..."
         docker start qdrant
         sleep 5
-        print_success "Qdrant container started"
+        
+        # Test connection after starting
+        if curl -f http://localhost:6333/health &> /dev/null; then
+            print_success "Existing Qdrant container started and is healthy"
+        else
+            print_warning "Qdrant container started but may need more time to be ready"
+        fi
         return 0
     fi
     
     # Create and start new Qdrant container
-    print_info "Pulling and starting Qdrant container..."
+    print_info "No existing Qdrant container found. Creating new one..."
     docker run -d \
         --name qdrant \
         -p 6333:6333 \
@@ -242,15 +274,22 @@ setup_qdrant() {
         qdrant/qdrant:latest
     
     # Wait for Qdrant to be ready
-    print_info "Waiting for Qdrant to be ready..."
-    sleep 10
+    print_info "Waiting for new Qdrant container to be ready..."
+    sleep 15
     
-    # Test Qdrant connection
-    if curl -f http://localhost:6333/health &> /dev/null; then
-        print_success "Qdrant is running and healthy"
-    else
-        print_warning "Qdrant may not be fully ready yet, continuing..."
-    fi
+    # Test Qdrant connection with retry
+    for i in {1..5}; do
+        if curl -f http://localhost:6333/health &> /dev/null; then
+            print_success "Qdrant is running and healthy"
+            return 0
+        else
+            print_info "Waiting for Qdrant to be ready... (attempt $i/5)"
+            sleep 5
+        fi
+    done
+    
+    print_warning "Qdrant container created but health check failed. It may need more time to be ready."
+    return 0
 }
 
 # Create or update environment files
@@ -461,6 +500,7 @@ install_dependencies() {
     if [ -d "vionex-semantic-service" ]; then
         print_info "Installing Python dependencies for vionex-semantic-service..."
         cd "vionex-semantic-service"
+        apt install python3.12-venv
         
         # Check if virtual environment exists
         if [ ! -d "venv" ]; then
