@@ -79,8 +79,8 @@ class AudioProcessor:
             if not self._validate_input(buffer):
                 return self._create_result(False, 'Invalid input', start_time, False)
 
-            # Convert and analyze audio
-            audio_array = self._buffer_to_audio_array(buffer, sample_rate, channels)
+            # Convert and analyze audio using new client conversion pipeline
+            audio_array = self._convert_client_pcm_to_whisper(buffer, sample_rate, channels)
             if audio_array is None:
                 return self._create_result(False, 'Failed to convert audio', start_time, False)
 
@@ -121,6 +121,87 @@ class AudioProcessor:
             return False
             
         return True
+
+    def _convert_client_pcm_to_whisper(self, buffer: bytes, sample_rate: int, channels: int) -> Optional[np.ndarray]:
+        """
+        Convert client PCM audio buffer to Whisper-compatible format using WAV+ffmpeg pipeline
+        
+        This function specifically handles audio data received from client WebSocket connections.
+        It uses the same conversion pipeline as the translation cabin for consistency.
+        
+        Args:
+            buffer: Raw PCM audio data from client
+            sample_rate: Original sample rate 
+            channels: Number of audio channels
+            
+        Returns:
+            Optional[np.ndarray]: Float32 audio array for Whisper, or None if conversion fails
+        """
+        try:
+            import tempfile
+            import subprocess
+            import os
+            from .codec_utils import AudioProcessingUtils
+            
+            # Convert PCM bytes to numpy array
+            audio_array = np.frombuffer(buffer, dtype=np.int16)
+            
+            # Handle multi-channel by converting to mono
+            if channels > 1:
+                audio_array = audio_array.reshape(-1, channels)
+                audio_array = np.mean(audio_array, axis=1).astype(np.int16)
+            
+            # Use AudioProcessingUtils to convert PCM to WAV bytes (same as translation cabin)
+            wav_bytes = AudioProcessingUtils.pcm_to_wav_bytes(
+                audio_array.tobytes(), 
+                sample_rate=sample_rate, 
+                channels=1  # mono after conversion above
+            )
+            
+            # Create temporary files for ffmpeg conversion
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as wav_file:
+                wav_file.write(wav_bytes)
+                wav_path = wav_file.name
+            
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as out_file:
+                out_path = out_file.name
+            
+            try:
+                # Use ffmpeg to convert to Whisper-compatible format (same as translation cabin)
+                cmd = [
+                    'ffmpeg', '-i', wav_path,
+                    '-ar', '16000',  # 16kHz sample rate
+                    '-ac', '1',      # mono
+                    '-f', 'wav',     # WAV format
+                    '-y',            # overwrite output
+                    out_path
+                ]
+                
+                subprocess.run(cmd, check=True, capture_output=True)
+                
+                # Read converted audio
+                with open(out_path, 'rb') as f:
+                    converted_wav = f.read()
+                
+                # Extract audio data from WAV (skip 44-byte header)
+                audio_data = converted_wav[44:]
+                
+                # Convert to float32 numpy array for Whisper
+                audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+                
+                return audio_array
+                
+            finally:
+                # Clean up temporary files
+                for path in [wav_path, out_path]:
+                    try:
+                        os.unlink(path)
+                    except:
+                        pass
+                        
+        except Exception as e:
+            logger.error(f"Client PCM to Whisper conversion error: {e}")
+            return None
 
     def _buffer_to_audio_array(self, buffer: bytes, sample_rate: int, channels: int) -> Optional[np.ndarray]:
         """
