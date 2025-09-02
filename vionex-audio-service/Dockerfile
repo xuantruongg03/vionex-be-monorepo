@@ -46,14 +46,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/tmp/*
 
 # Install CUDA Toolkit keyring and repository
+# Cài CUDA 11.8 + cuDNN 9 tương thích
 RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb \
     && dpkg -i cuda-keyring_1.0-1_all.deb \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
     cuda-cudart-11-8 \
     cuda-compat-11-8 \
-    libcudnn8=8.9.7.29-1+cuda11.8 \
-    libcudnn8-dev=8.9.7.29-1+cuda11.8 \
+    libcudnn9-cuda-11 \
+    libcudnn9-dev-cuda-11 \
     && rm -rf /var/lib/apt/lists/* \
     && rm cuda-keyring_1.0-1_all.deb
 
