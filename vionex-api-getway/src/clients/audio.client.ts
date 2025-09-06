@@ -31,8 +31,6 @@ export class AudioClientService implements OnModuleInit {
         const rs = await firstValueFrom(
             this.audioService.allocateTranslationPort(data),
         );
-
-        console.log('[Audio Client] Translation port allocation result:', rs);
         return rs;
     }
 

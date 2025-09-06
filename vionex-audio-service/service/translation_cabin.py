@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from service.pipline_processor.VAD import VoiceActivityDetector
 from service.pipline_processor.sliding_windows import SmartAudioBuffer
+from core.config import SFU_SERVICE_HOST
 
 if TYPE_CHECKING:
     from service.pipline_processor.translation_pipeline import TranslationPipeline
@@ -719,8 +720,10 @@ class TranslationCabinManager:
         import numpy as np
 
         try:
-            sfu_host = "192.168.1.10"
-            sfu_port = cabin.send_port
+            sfu_host = SFU_SERVICE_HOST  # Load from config instead of hardcoded
+            sfu_port = cabin.send_port  # Use real SFU port if available
+            
+            logger.warning(f"[RTP-CHUNKS] Sending audio to SFU: {sfu_host}:{sfu_port} (real_port: {cabin.sfu_send_port}, allocated: {cabin.send_port})")
 
             # --- 0) Chuẩn hoá input: WAV -> PCM16 mono + sample_rate ---
             # Nếu là WAV (bắt đầu "RIFF"), bóc PCM và lấy sample_rate

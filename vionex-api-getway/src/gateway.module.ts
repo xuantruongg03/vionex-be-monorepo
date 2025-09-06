@@ -1,30 +1,31 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { AuthController } from './auth.controller';
 import { AudioClientService } from './clients/audio.client';
+import { AuthClientService } from './clients/auth.client';
 import { ChatClientService } from './clients/chat.client';
+import { ChatBotClientService } from './clients/chatbot.client';
 import { InteractionClientService } from './clients/interaction.client';
+import { OrganizationClientService } from './clients/organization.client';
 import { RoomClientService } from './clients/room.client';
 import { SfuClientService } from './clients/sfu.client';
-import { OrganizationClientService } from './clients/organization.client';
 import { protoPaths } from './common/paths';
 import { GatewayController } from './gateway.controller';
 import { GatewayGateway } from './gateway.gateway';
-import { RoomHttpController } from './room-http.controller';
-import { OrganizationController } from './organization.controller';
-import { ChatService } from './services/chat.service';
-import { HttpBroadcastService } from './services/http-broadcast.service';
-import { WebSocketEventService } from './services/websocket-event.service';
-import { StreamService } from './services/stream.service';
-import { ServiceErrorService } from './services/service-error.service';
-import { ChatBotClientService } from './clients/chatbot.client';
-import { AuthController } from './auth.controller';
-import { AuthClientService } from './clients/auth.client';
 import { ChatHandler } from './handlers/chat.handler';
-import { VotingHandler } from './handlers/voting.handler';
 import { QuizHandler } from './handlers/quiz.handler';
+import { TranslationHandler } from './handlers/translation.handler';
+import { VotingHandler } from './handlers/voting.handler';
 import { WhiteboardHandler } from './handlers/whiteboard.handler';
 import { GatewayHelperService } from './helpers/gateway.helper';
+import { OrganizationController } from './organization.controller';
+import { RoomHttpController } from './room-http.controller';
+import { ChatService } from './services/chat.service';
+import { HttpBroadcastService } from './services/http-broadcast.service';
+import { ServiceErrorService } from './services/service-error.service';
+import { StreamService } from './services/stream.service';
+import { WebSocketEventService } from './services/websocket-event.service';
 
 @Module({
     imports: [
@@ -164,6 +165,7 @@ import { GatewayHelperService } from './helpers/gateway.helper';
         AuthClientService,
         OrganizationClientService,
         ChatHandler,
+        TranslationHandler,
         VotingHandler,
         QuizHandler,
         WhiteboardHandler,

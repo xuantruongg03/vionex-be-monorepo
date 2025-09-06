@@ -16,6 +16,7 @@ import { RoomClientService } from './clients/room.client';
 import { SfuClientService } from './clients/sfu.client';
 import { ChatHandler } from './handlers/chat.handler';
 import { QuizHandler } from './handlers/quiz.handler';
+import { TranslationHandler } from './handlers/translation.handler';
 import { VotingHandler } from './handlers/voting.handler';
 import { WhiteboardHandler } from './handlers/whiteboard.handler';
 import { GatewayHelperService } from './helpers/gateway.helper';
@@ -46,6 +47,7 @@ export class GatewayGateway
         private readonly interactionClient: InteractionClientService,
         private readonly audioService: AudioClientService,
         private readonly chatHandler: ChatHandler,
+        private readonly translationHandler: TranslationHandler,
         private readonly votingHandler: VotingHandler,
         private readonly quizHandler: QuizHandler,
         private readonly whiteboardHandler: WhiteboardHandler,
@@ -878,6 +880,7 @@ export class GatewayGateway
                 kind: consumerData.kind,
                 rtpParameters: consumerData.rtpParameters,
                 streamId: data.streamId,
+                metadata: consumerData.metadata, // Include metadata for translation streams
             };
 
             // Validate that all required fields are present
@@ -1850,6 +1853,59 @@ export class GatewayGateway
         return this.chatHandler.handleSendFileMessage(client, data);
     }
 
+    // ==================== TRANSLATION CABIN HANDLERS ====================
+
+    @SubscribeMessage('translation:create')
+    async handleCreateTranslationCabin(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            sourceUserId: string;
+            targetUserId: string;
+            sourceLanguage: string;
+            targetLanguage: string;
+        },
+    ) {
+        return this.translationHandler.handleCreateTranslationCabin(
+            client,
+            data,
+        );
+    }
+
+    @SubscribeMessage('translation:destroy')
+    async handleDestroyTranslationCabin(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            sourceUserId: string;
+            targetUserId: string;
+            sourceLanguage: string;
+            targetLanguage: string;
+        },
+    ) {
+        return this.translationHandler.handleDestroyTranslationCabin(
+            client,
+            data,
+        );
+    }
+
+    @SubscribeMessage('translation:list')
+    async handleListTranslationCabins(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            userId: string;
+        },
+    ) {
+        return this.translationHandler.handleListTranslationCabins(
+            client,
+            data,
+        );
+    }
+
     // ==================== PIN/UNPIN USER HANDLERS ====================
 
     @SubscribeMessage('sfu:pin-user')
@@ -2125,7 +2181,7 @@ export class GatewayGateway
             behaviorLogs: Array<{
                 type: string;
                 value: any;
-                time: Date;
+                time: Date | string | number;
             }>;
         },
     ) {

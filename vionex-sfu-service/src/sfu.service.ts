@@ -1,7 +1,12 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import mediasoupTypes, { AppData } from 'mediasoup/node/lib/types';
+import mediasoupTypes from 'mediasoup/node/lib/types';
 import * as T from './interface';
+import {
+    createSafeCabinId,
+    createSafeTranslatedStreamId,
+    sanitizeId,
+} from './utils/sdp-helpers';
 import { WorkerPoolService } from './worker-pool/worker-pool.service';
 
 // SFU Configuration Constants
@@ -515,17 +520,17 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     ): boolean {
         // Use mediaRooms instead of rooms for room state
         const mediaRoom = this.mediaRooms.get(roomId);
-        
+
         if (!mediaRoom) {
             console.log(`[SFU DEBUG] Media room ${roomId} not found`);
             return false;
         }
-        
+
         // Calculate total users from room streams (unique publishers)
         const roomStreams = this.getStreamsByRoom(roomId);
-        const uniqueUsers = new Set(roomStreams.map(s => s.publisherId));
+        const uniqueUsers = new Set(roomStreams.map((s) => s.publisherId));
         const totalUsers = uniqueUsers.size;
-        
+
         // PRIORITY 0: Pinned users always consume (highest priority)
         if (this.isPinnedUser(roomId, consumerId, publisherId)) {
             return true;
@@ -790,6 +795,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 rtpParameters: consumer.rtpParameters,
                 streamId: streamId,
                 producerId: producer.id,
+                metadata: stream.metadata, // Include stream metadata for client processing
             };
         } catch (error) {
             console.error(`[SFU] Failed to create consumer:`, error);
@@ -917,14 +923,17 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             // Generate a more unique streamId to avoid collisions
             const timestamp = Date.now();
             const randomSuffix = Math.random().toString(36).substr(2, 5);
-            let streamId = `${data.participant.peerId || data.participant.peer_id}_${streamType}_${timestamp}_${randomSuffix}`;
+            // Keep original peerId for client logic compatibility, DO NOT sanitize streamId
+            const originalPeerId =
+                data.participant.peerId || data.participant.peer_id;
+            let streamId = `${originalPeerId}_${streamType}_${timestamp}_${randomSuffix}`;
 
             // Ensure streamId is unique
             let counter = 0;
             while (this.streams.has(streamId) && counter < 10) {
                 counter++;
                 const newRandomSuffix = Math.random().toString(36).substr(2, 5);
-                streamId = `${data.participant.peerId || data.participant.peer_id}_${streamType}_${timestamp}_${newRandomSuffix}_${counter}`;
+                streamId = `${originalPeerId}_${streamType}_${timestamp}_${newRandomSuffix}_${counter}`;
             }
 
             // Store producer in media room
@@ -1446,7 +1455,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         speakingPeerId: string,
     ): Promise<void> {
         try {
-
             // Step 1: Get the media room
             const mediaRoom = this.mediaRooms.get(roomId);
             if (!mediaRoom) {
@@ -1754,7 +1762,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
                 // Update the stored stream
                 this.streams.set(stream.streamId, stream);
-
             }
         });
     }
@@ -1768,7 +1775,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         stoppedSpeakingPeerId: string,
     ): Promise<void> {
         try {
-
             const mediaRoom = this.mediaRooms.get(roomId);
             if (!mediaRoom) return;
 
@@ -1801,7 +1807,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     );
                 }
             }
-
         } catch (error) {
             console.error(`[SFU] Error rebalancing stream priorities:`, error);
         }
@@ -1896,7 +1901,25 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     }> {
         try {
             const router = await this.getMediaRouter(roomId);
-            const cabinId = `${roomId}_${targetUserId}_${sourceLanguage}_${targetLanguage}`;
+
+            // Create safe cabin identifiers using helper
+            const cabinIds = createSafeCabinId(
+                roomId,
+                targetUserId,
+                sourceLanguage,
+                targetLanguage,
+            );
+            const {
+                original: cabinId,
+                safe: safeCabinId,
+                components,
+            } = cabinIds;
+            const {
+                safeRoomId,
+                safeTargetUserId,
+                safeSourceLanguage,
+                safeTargetLanguage,
+            } = components;
 
             // Check if cabin already exists
             if (this.translationCabins.has(cabinId)) {
@@ -1981,7 +2004,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             const translatedProducer = await receiveTransport.produce({
                 kind: 'audio',
                 rtpParameters: {
-                    mid: `translated_${cabinId}`,
+                    mid: `translated_${safeRoomId}_${Date.now()}`, // Use safe identifier
                     codecs: [
                         {
                             mimeType: 'audio/opus',
@@ -1993,13 +2016,18 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     headerExtensions: [],
                     encodings: [{ ssrc: ssrc }], // Use SSRC from Audio Service
                     rtcp: {
-                        cname: `translated_${targetUserId}`,
+                        cname: `translated_${safeTargetUserId}_${safeSourceLanguage}_${safeTargetLanguage}`, // Use safe identifier
                     },
                 },
             });
 
-            // Step 6: Generate streamId for translated audio
-            const translatedStreamId = `translated_${targetUserId}_${sourceLanguage}_${targetLanguage}`;
+            // Step 6: Generate unique streamId for translated audio - keep original names for storage but use safe for MediaSoup
+            // Since translation streams use metadata for client parsing, streamId can be safe
+            const translatedStreamId = createSafeTranslatedStreamId(
+                roomId,
+                sourceLanguage,
+                targetLanguage,
+            );
 
             // Step 7: Register translated audio as new stream
             const translatedStream: T.Stream = {
@@ -2008,8 +2036,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 producerId: translatedProducer.id,
                 metadata: {
                     type: 'translated_audio',
-                    originalUserId: targetUserId,
-                    targetUserId: targetUserId,
+                    isTranslation: true,
+                    sourceUserId: sourceUserId, // Người nói gốc
+                    targetUserId: targetUserId, // Người nhận translation
+                    originalUserId: targetUserId, // Backward compatibility
                     sourceLanguage,
                     targetLanguage,
                 },
