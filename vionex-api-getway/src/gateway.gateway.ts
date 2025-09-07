@@ -1994,10 +1994,6 @@ export class GatewayGateway
             userId: string;
         },
     ) {
-        console.log(
-            '[Gateway] translation:list received data:',
-            JSON.stringify(data),
-        );
         return this.translationHandler.handleListTranslationCabins(
             client,
             data,
@@ -2603,7 +2599,7 @@ export class GatewayGateway
                 question: data.text?.substring(0, 100) + '...',
             });
 
-            // 🛡️ Security: Validate user is in the room
+            // Security: Validate user is in the room
             const socketRooms = Array.from(client.rooms);
             if (!socketRooms.includes(data.roomId)) {
                 console.warn(
@@ -2649,7 +2645,7 @@ export class GatewayGateway
             // const canProceed = await this.rateLimitCheck(peerId);
             // if (!canProceed) { ... }
 
-            // 🚀 Call chatbot service
+            // Call chatbot service
             console.log(
                 `[Chatbot] Processing request for user ${peerId} in room ${data.roomId}`,
             );
@@ -2659,7 +2655,7 @@ export class GatewayGateway
                 room_id: data.roomId,
             });
 
-            // 📤 Send final response (for now, no streaming)
+            // Send final response (for now, no streaming)
             client.emit('chatbot:final', {
                 requestId: data.id,
                 text:

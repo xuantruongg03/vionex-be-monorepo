@@ -568,9 +568,17 @@ class TranslationCabinManager:
         Works for both translated audio and passthrough audio
         """
         try:
-            # Use chunked streaming for better audio quality
-            success = self._send_rtp_chunks_to_sfu(cabin, audio_data)
-            return success
+            # For passthrough: forward RTP packet directly
+            if audio_type == "passthrough":
+                # audio_data is already RTP packet, forward directly
+                sfu_host = SFU_SERVICE_HOST
+                sfu_port = cabin.sfu_send_port or cabin.send_port
+                success = self.socket_manager.send_rtp_to_sfu(audio_data, sfu_host, sfu_port)
+                return success
+            else:
+                # For translated: process through audio pipeline
+                success = self._send_rtp_chunks_to_sfu(cabin, audio_data)
+                return success
             
         except Exception as e:
             logger.error(f"[{audio_type.upper()}] Error sending {audio_type} audio: {e}")

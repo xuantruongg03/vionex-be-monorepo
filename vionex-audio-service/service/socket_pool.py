@@ -233,7 +233,7 @@ class SharedSocketManager:
                             cabin_id = next(iter(self.cabin_to_ssrc))
                             old_ssrc = self.cabin_to_ssrc[cabin_id]
                             if old_ssrc != ssrc:
-                                logger.info(f"[RTP-ROUTER] Auto-learning SSRC for {cabin_id}: {old_ssrc} -> {ssrc}")
+                                # logger.info(f"[RTP-ROUTER] Auto-learning SSRC for {cabin_id}: {old_ssrc} -> {ssrc}")
 
                                 # Clean up old SSRC mapping
                                 if old_ssrc in self.ssrc_to_cabin:
@@ -258,7 +258,7 @@ class SharedSocketManager:
                     logger.error(f"[RTP-ROUTER] Error: {e}")
                 time.sleep(0.1)
         
-        logger.info("[RTP-ROUTER] RTP packet router stopped")
+        # logger.info("[RTP-ROUTER] RTP packet router stopped")
     
     def send_rtp_to_sfu(self, rtp_packet: bytes, sfu_host: str, sfu_port: int) -> bool:
         """
