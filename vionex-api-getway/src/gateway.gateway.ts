@@ -209,10 +209,104 @@ export class GatewayGateway
                     error,
                 );
             }
+
+            // Auto-destroy translation cabins
+            try {
+                await this.autoDestroyCabins(peerId, roomId);
+            } catch (error) {
+                console.error(
+                    '[BACKEND] Error auto-destroying translation cabins:',
+                    error,
+                );
+            }
         }
 
         // Clean up connection mapping
         this.helperService.cleanupParticipantMapping(client.id);
+    }
+
+    /**
+     * Auto-destroy translation cabins when user disconnects
+     */
+    private async autoDestroyCabins(userId: string, roomId: string) {
+        try {
+            // Get room participants from room service
+            const roomData = await this.roomClient.getRoom(roomId);
+            if (!roomData.data?.participants) return;
+
+            const allParticipants = roomData.data.participants.map(
+                (p: any) => p.peer_id,
+            );
+            const allCabins: any[] = [];
+
+            // Collect cabins from all participants to find all cabins in room
+            for (const participantId of allParticipants) {
+                try {
+                    const cabinsResult =
+                        await this.sfuClient.listTranslationCabin(
+                            roomId,
+                            participantId,
+                        );
+                    if (cabinsResult.success && cabinsResult.cabins) {
+                        cabinsResult.cabins.forEach((cabin) => {
+                            allCabins.push({
+                                ...cabin,
+                                queriedUserId: participantId, // track who we queried to get this cabin
+                            });
+                        });
+                    }
+                } catch (err) {
+                    console.log('[Gateway] Error listing cabins for participant:', err);
+                }
+            }
+
+            // Remove duplicates based on cabin signature
+            const uniqueCabins = allCabins.filter(
+                (cabin, index, arr) =>
+                    arr.findIndex(
+                        (c) =>
+                            c.targetUserId === cabin.targetUserId &&
+                            c.sourceLanguage === cabin.sourceLanguage &&
+                            c.targetLanguage === cabin.targetLanguage,
+                    ) === index,
+            );
+
+            // Process each cabin based on role
+            for (const cabin of uniqueCabins) {
+                if (cabin.targetUserId === userId) {
+                    // User disconnecting is TARGET of cabin -> destroy unconditionally
+                    const destroyData = {
+                        roomId,
+                        sourceUserId: cabin.queriedUserId, // who created this cabin
+                        targetUserId: cabin.targetUserId,
+                        sourceLanguage: cabin.sourceLanguage,
+                        targetLanguage: cabin.targetLanguage,
+                    };
+                    await this.translationHandler.handleDestroyTranslationCabin(
+                        null,
+                        destroyData,
+                    );
+                } else if (cabin.queriedUserId === userId) {
+                    // User disconnecting CREATED this cabin -> check consumers
+                    if (!allParticipants.includes(cabin.targetUserId)) {
+                        // Target not in room -> no consumers -> destroy
+                        const destroyData = {
+                            roomId,
+                            sourceUserId: userId,
+                            targetUserId: cabin.targetUserId,
+                            sourceLanguage: cabin.sourceLanguage,
+                            targetLanguage: cabin.targetLanguage,
+                        };
+                        await this.translationHandler.handleDestroyTranslationCabin(
+                            null,
+                            destroyData,
+                        );
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('[Gateway] Error in auto destroy cabins:', error);
+        }
     }
 
     @SubscribeMessage('sfu:join')
@@ -1900,6 +1994,10 @@ export class GatewayGateway
             userId: string;
         },
     ) {
+        console.log(
+            '[Gateway] translation:list received data:',
+            JSON.stringify(data),
+        );
         return this.translationHandler.handleListTranslationCabins(
             client,
             data,

@@ -774,6 +774,12 @@ export class SfuController {
     }> {
         try {
             if (!data.room_id || !data.user_id) {
+                console.log(
+                    '[SFU Controller] Missing fields - room_id:',
+                    data.room_id,
+                    'user_id:',
+                    data.user_id,
+                );
                 throw new RpcException(
                     'Missing required fields for listing translation cabins',
                 );

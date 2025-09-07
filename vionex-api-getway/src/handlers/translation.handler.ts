@@ -151,7 +151,7 @@ export class TranslationHandler {
      * Destroy translation cabin
      */
     async handleDestroyTranslationCabin(
-        client: Socket,
+        client: Socket | null,
         data: {
             roomId: string;
             sourceUserId: string;
@@ -168,11 +168,13 @@ export class TranslationHandler {
                 !data.sourceLanguage ||
                 !data.targetLanguage
             ) {
-                this.eventService.emitError(
-                    client,
-                    'Missing required fields for destroying translation cabin',
-                    'INVALID_DESTROY_DATA',
-                );
+                if (client) {
+                    this.eventService.emitError(
+                        client,
+                        'Missing required fields for destroying translation cabin',
+                        'INVALID_DESTROY_DATA',
+                    );
+                }
                 return { success: false, error: 'Missing required fields' };
             }
 
@@ -186,12 +188,14 @@ export class TranslationHandler {
                 );
 
             if (!destroyResponse.success) {
-                this.eventService.emitError(
-                    client,
-                    destroyResponse.message ||
-                        'Failed to destroy translation cabin',
-                    'DESTROY_TRANSLATION_FAILED',
-                );
+                if (client) {
+                    this.eventService.emitError(
+                        client,
+                        destroyResponse.message ||
+                            'Failed to destroy translation cabin',
+                        'DESTROY_TRANSLATION_FAILED',
+                    );
+                }
                 return { success: false, error: destroyResponse.message };
             } else {
                 // 10001 is code in message from sfu to mark cabin is not use and destroy success
@@ -205,12 +209,14 @@ export class TranslationHandler {
                         );
 
                     if (!destroyCabinTranslationResponse.success) {
-                        this.eventService.emitError(
-                            client,
-                            destroyCabinTranslationResponse.message ||
-                                'Failed to destroy translation cabin',
-                            'AUDIO_DESTROY_FAILED',
-                        );
+                        if (client) {
+                            this.eventService.emitError(
+                                client,
+                                destroyCabinTranslationResponse.message ||
+                                    'Failed to destroy translation cabin',
+                                'AUDIO_DESTROY_FAILED',
+                            );
+                        }
                         return {
                             success: false,
                             error: destroyCabinTranslationResponse.message,
@@ -219,21 +225,24 @@ export class TranslationHandler {
                 }
             }
 
-            // Emit success event to client
-            client.emit('translation:destroyed', {
-                success: true,
-                message: 'Translation cabin destroyed successfully',
-            });
+            // Only emit events if client exists (not auto-destroy)
+            if (client) {
+                // Emit success event to client
+                client.emit('translation:destroyed', {
+                    success: true,
+                    message: 'Translation cabin destroyed successfully',
+                });
 
-            // Notify other users in the room about destroyed translation cabin
-            client.to(data.roomId).emit('translation:cabin-update', {
-                action: 'destroyed',
-                roomId: data.roomId,
-                sourceUserId: data.sourceUserId,
-                targetUserId: data.targetUserId,
-                sourceLanguage: data.sourceLanguage,
-                targetLanguage: data.targetLanguage,
-            });
+                // Notify other users in the room about destroyed translation cabin
+                client.to(data.roomId).emit('translation:cabin-update', {
+                    action: 'destroyed',
+                    roomId: data.roomId,
+                    sourceUserId: data.sourceUserId,
+                    targetUserId: data.targetUserId,
+                    sourceLanguage: data.sourceLanguage,
+                    targetLanguage: data.targetLanguage,
+                });
+            }
 
             return { success: true };
         } catch (error) {
@@ -241,11 +250,13 @@ export class TranslationHandler {
                 '[TranslationHandler] Error destroying translation cabin:',
                 error,
             );
-            this.eventService.emitError(
-                client,
-                'Internal server error',
-                'DESTROY_TRANSLATION_ERROR',
-            );
+            if (client) {
+                this.eventService.emitError(
+                    client,
+                    'Internal server error',
+                    'DESTROY_TRANSLATION_ERROR',
+                );
+            }
             return { success: false, error: error.message };
         }
     }

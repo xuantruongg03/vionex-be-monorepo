@@ -24,57 +24,6 @@ class OpusCodecManager:
             logger.debug(f"[CODEC] Created Opus decoder for {cabin_id}: {sample_rate}Hz, {channels}ch")
         return self._decoders[cabin_id]
 
-    # def get_encoder(self, cabin_id: str, sample_rate: int = 48000, channels: int = 2) -> opuslib.Encoder:
-    #     """Get or Create Opus Encoder for Cabin with optimal Settings for quality"""
-    #     if cabin_id not in self._encoders:
-    #         enc = opuslib.Encoder(sample_rate, channels, opuslib.APPLICATION_AUDIO)
-
-    #         # **Important **: Settings to reduce artifacts with compatibility check
-    #         enc.bitrate = 128000  # Increase bitrate for better quality
-    #         try:
-    #             # Check available methods before setting
-    #             if hasattr(enc, 'complexity'):
-    #                 enc.complexity = 10  # Max complexity
-    #             elif hasattr(enc, 'set_complexity'):
-    #                 enc.set_complexity(10)
-                
-    #             if hasattr(enc, 'signal'):
-    #                 enc.signal = opuslib.SIGNAL_MUSIC
-    #             elif hasattr(enc, 'set_signal'):
-    #                 enc.set_signal(opuslib.SIGNAL_MUSIC)
-                
-    #             if hasattr(enc, 'vbr'):
-    #                 enc.vbr = True
-    #             elif hasattr(enc, 'set_vbr'):
-    #                 enc.set_vbr(True)
-                
-    #             if hasattr(enc, 'vbr_constraint'):
-    #                 enc.vbr_constraint = False
-    #             elif hasattr(enc, 'set_vbr_constraint'):
-    #                 enc.set_vbr_constraint(False)
-                
-    #             if hasattr(enc, 'inband_fec'):
-    #                 enc.inband_fec = True
-    #             elif hasattr(enc, 'set_inband_fec'):
-    #                 enc.set_inband_fec(True)
-                
-    #             if hasattr(enc, 'packet_loss_perc'):
-    #                 enc.packet_loss_perc = 1
-    #             elif hasattr(enc, 'set_packet_loss_perc'):
-    #                 enc.set_packet_loss_perc(1)
-                
-    #             if hasattr(enc, 'dtx'):
-    #                 enc.dtx = False
-    #             elif hasattr(enc, 'set_dtx'):
-    #                 enc.set_dtx(False)
-                
-    #             logger.info(f"[CODEC] Enhanced Opus encoder for {cabin_id}: 128kbps, optimized settings")
-    #         except Exception as e:
-    #             logger.warning(f"[CODEC] Some Opus settings failed for {cabin_id}: {e}")
-    #             logger.info(f"[CODEC] Using basic Opus encoder for {cabin_id}: 128kbps")
-            
-    #         self._encoders[cabin_id] = enc
-    #     return self._encoders[cabin_id]
     def get_encoder(self, cabin_id: str, sample_rate: int = 48000, channels: int = 2) -> opuslib.Encoder:
         """Get or Create Opus Encoder - SIMPLIFIED for SFU compatibility"""
         if cabin_id not in self._encoders:
@@ -83,7 +32,6 @@ class OpusCodecManager:
 
             try:
                 enc.bitrate = 128000  # 128kbps as shown in logs
-                logger.info(f"[CODEC] Created Opus encoder for {cabin_id}: 48kHz stereo, 128kbps")
             except Exception as e:
                 logger.warning(f"[CODEC] Basic Opus creation failed for {cabin_id}: {e}")
                 

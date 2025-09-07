@@ -152,9 +152,7 @@ export class GatewayController {
     @Get('sfu/rooms/:roomId/users')
     async getUsersInRoom(
         @Param('roomId') roomId: string,
-        @Headers('authorization') authorization?: string,
     ) {
-        console.log('=== Get Users Request ===');
         try {
             const room = await this.roomClient.getRoom(roomId);
             if (!room || !room.data || !room.data.participants) {

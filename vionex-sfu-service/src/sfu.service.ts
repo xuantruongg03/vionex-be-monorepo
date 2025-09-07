@@ -1982,7 +1982,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             await consumer.resume();
 
             // Step 4: Create SEND transport (Audio Service → SFU)
-            // Use comedia: true only for receiveTransport to handle dynamic source ports
             const receiveTransport = await router.createPlainTransport({
                 listenIp: {
                     ip:
@@ -1997,7 +1996,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 port: sendPort, // This is the port Audio Service will send RTP to
             });
 
-            // Connect receiveTransport - with comedia: true, no need to specify source details
+            // Connect receiveTransport
             await receiveTransport.connect({});
 
             // Step 5: Create producer on send transport for translated audio
@@ -2214,87 +2213,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    /**
-     * Check if translation cabin is still being used by any participants
-     */
-    // private async isCabinStillInUse(
-    //     cabinId: string,
-    //     roomId: string,
-    //     targetUserId: string,
-    //     cabin: {
-    //         receiveTransport: mediasoupTypes.PlainTransport;
-    //         sendTransport: mediasoupTypes.PlainTransport;
-    //         consumer: mediasoupTypes.Consumer;
-    //         producer?: mediasoupTypes.Producer;
-    //         streamId?: string;
-    //     },
-    // ): Promise<boolean> {
-    //     try {
-    //         const mediaRoom = this.mediaRooms.get(roomId);
-
-    //         if (!mediaRoom || !cabin.streamId) {
-    //             return false;
-    //         }
-
-    //         // Check if there are any active consumers for the translated stream
-    //         const consumers = mediaRoom.consumers.get(cabin.streamId);
-    //         if (consumers && consumers.length > 0) {
-    //             // Filter out closed consumers
-    //             const activeConsumers = consumers.filter(
-    //                 (consumer) => !consumer.closed,
-    //             );
-
-    //             if (activeConsumers.length > 0) {
-    //                 console.log(
-    //                     `[SFU Service] Cabin ${cabinId} has ${activeConsumers.length} active consumers`,
-    //                 );
-
-    //                 // Update the consumers list to remove closed ones
-    //                 if (activeConsumers.length < consumers.length) {
-    //                     mediaRoom.consumers.set(
-    //                         cabin.streamId,
-    //                         activeConsumers,
-    //                     );
-    //                 }
-
-    //                 return true;
-    //             } else {
-    //                 // All consumers are closed, clean up the consumers list
-    //                 mediaRoom.consumers.delete(cabin.streamId);
-    //             }
-    //         }
-
-    //         if (targetUserId) {
-    //             const userStreams = this.getStreamsByRoom(roomId).filter(
-    //                 (stream) => stream.publisherId === targetUserId,
-    //             );
-
-    //             if (userStreams.length === 0) {
-    //                 console.log(
-    //                     `[SFU Service] Original user ${targetUserId} no longer has streams in room ${roomId}`,
-    //                 );
-    //                 return false;
-    //             }
-    //         }
-
-    //         // Check if the producer is still active
-    //         if (cabin.producer && cabin.producer.closed) {
-    //             console.log(
-    //                 `[SFU Service] Cabin ${cabinId} producer is closed`,
-    //             );
-    //             return false;
-    //         }
-
-    //         return false;
-    //     } catch (error) {
-    //         console.error(
-    //             `[SFU Service] Error checking cabin usage for ${cabinId}:`,
-    //             error,
-    //         );
-    //         return false;
-    //     }
-    // }
-
     async listTranslationCabin(params: {
         roomId: string;
         userId: string;
@@ -2308,22 +2226,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         message?: string;
     }> {
         try {
-            // Lấy ra thông tin từ cabinId ==> targetLanguage, sourceLanguage
-            // const cabins = Array.from(this.translationCabins.keys());
-
-            // const result = cabins
-            //     .filter(
-            //         (cabinId) =>
-            //             cabinId.includes(params.roomId) &&
-            //             cabinId.includes(params.userId),
-            //     )
-            //     .map((cabinId) => {
-            //         return {
-            //             target_user_id: cabinId.split('_')[2],
-            //             target_language: cabinId.split('_')[3],
-            //             source_language: cabinId.split('_')[4],
-            //         };
-            //     });
             const result = [] as {
                 target_user_id: string;
                 target_language: string;

@@ -123,9 +123,6 @@ export class AudioClientService implements OnModuleInit {
         sourceLanguage: string,
         targetLanguage: string,
     ) {
-        console.log(
-            `[Audio Client] createTranslationProduce receives request with params roomId: ${roomId}, targetUserId: ${targetUserId}, sourceLanguage: ${sourceLanguage}, targetLanguage: ${targetLanguage}`,
-        );
         try {
             return await firstValueFrom(
                 this.audioService.createTranslationProduce({
@@ -156,7 +153,7 @@ export class AudioClientService implements OnModuleInit {
     ) {
         try {
             const response = await firstValueFrom(
-                this.audioService.destroyTranslationCabin({
+                this.audioService.DestroyCabin({
                     room_id: roomId,
                     target_user_id: targetUserId,
                     source_language: sourceLanguage,
@@ -175,21 +172,4 @@ export class AudioClientService implements OnModuleInit {
             };
         }
     }
-
-    // async listTranslationCabins(roomId: string) {
-    //   try {
-    //     const data = { roomId };
-    //     const response = await firstValueFrom(
-    //       this.audioService.listTranslationCabins(data),
-    //     );
-    //     return response;
-    //   } catch (error) {
-    //     console.error('[AudioClientService] listTranslationCabins error:', error);
-    //     return {
-    //       success: false,
-    //       message: 'Audio service unavailable',
-    //       cabins: [],
-    //     };
-    //   }
-    // }
 }
