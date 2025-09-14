@@ -652,6 +652,21 @@ export class GatewayGateway
                 roomId,
             );
 
+            // Store RTP capabilities in room service for persistence and retrieval
+            try {
+                const rtpResult = await this.roomClient.updateParticipantRtpCapabilities(
+                    peerId,
+                    data.rtpCapabilities,
+                );
+                
+                if (!rtpResult.success) {
+                    console.warn('[Gateway] Failed to store RTP capabilities in room service:', rtpResult.error);
+                }
+            } catch (error) {
+                console.warn('[Gateway] Error storing RTP capabilities in room service:', error);
+                // Don't fail the whole operation for this
+            }
+
             client.emit('sfu:rtp-capabilities-set', { success: true });
             return { success: true };
         } catch (error) {
