@@ -133,23 +133,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     clockRate: 48000,
                     channels: 2,
                 },
-                {
-                    kind: 'video',
-                    mimeType: 'video/VP8',
-                    clockRate: 90000,
-                    parameters: {
-                        'x-google-start-bitrate': 1000,
-                    },
-                },
-                {
-                    kind: 'video',
-                    mimeType: 'video/VP9',
-                    clockRate: 90000,
-                    parameters: {
-                        'profile-id': 2,
-                        'x-google-start-bitrate': 1000,
-                    },
-                },
+                // H.264 codecs first for priority
                 {
                     kind: 'video',
                     mimeType: 'video/h264',
@@ -169,6 +153,24 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                         'packetization-mode': 1,
                         'profile-level-id': '640c1f',
                         'level-asymmetry-allowed': 1,
+                        'x-google-start-bitrate': 1000,
+                    },
+                },
+                // VP8/VP9 as fallback
+                {
+                    kind: 'video',
+                    mimeType: 'video/VP8',
+                    clockRate: 90000,
+                    parameters: {
+                        'x-google-start-bitrate': 1000,
+                    },
+                },
+                {
+                    kind: 'video',
+                    mimeType: 'video/VP9',
+                    clockRate: 90000,
+                    parameters: {
+                        'profile-id': 2,
                         'x-google-start-bitrate': 1000,
                     },
                 },
