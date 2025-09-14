@@ -1,17 +1,3 @@
-"""
- * Copyright (c) 2025 xuantruongg003
- *
- * This software is licensed for non-commercial use only.
- * You may use, study, and modify this code for educational and research purposes.
- *
- * Commercial use of this code, in whole or in part, is strictly prohibited
- * without prior written permission from the author.
- *
- * Author Contact: lexuantruong098@gmail.com
- */
-
- Vionex ChatBot Service
-"""
 
 import grpc
 import logging
@@ -67,7 +53,6 @@ class VionexChatBotService(chatbot_pb2_grpc.ChatbotServiceServicer):
 
             # Process the question using the chat bot processor
             response = self.chatbot_processor.ask(request.question, request.room_id)
-            # response = "Hello, this is test message"
 
             return chatbot_pb2.AskChatBotResponse(
                 answer=response

@@ -1,8 +1,13 @@
-from typing import Any, Dict, Optional
-import numpy as np
 import asyncio
-from core.model import whisper_model
+import difflib
+import logging
+import numpy as np
 import subprocess
+from typing import Any, Dict, Optional
+
+from core.model import whisper_model
+
+logger = logging.getLogger(__name__)
 
 class STTPipeline:
     def __init__(self, source_language: str = "vi"):
@@ -18,7 +23,6 @@ class STTPipeline:
 
     def remove_overlap(self, curr: str, prev: str, min_words=2) -> str:
         """Enhanced overlap removal using difflib for better accuracy"""
-        import difflib
         
         curr_words = curr.strip().split()
         prev_words = prev.strip().split()
@@ -44,10 +48,19 @@ class STTPipeline:
         
         return curr  # No significant overlap found
 
+    def limit_words(self, text: str, max_words: int = 20) -> str:
+        """Limit text to maximum number of words"""
+        words = text.strip().split()
+        if len(words) > max_words:
+            limited_text = ' '.join(words[:max_words])
+            logger.warning(f"Text truncated from {len(words)} to {max_words} words")
+            return limited_text
+        return text
+
     async def speech_to_text(self, audio_data: bytes) -> Optional[Dict[str, Any]]:
         try:
             if not whisper_model:
-                print("Whisper model not available")
+                logger.warning("Whisper model not available")
                 return None
 
             audio_array = decode_audio_to_array(audio_data)
@@ -60,15 +73,35 @@ class STTPipeline:
             )
 
             if result and result["text"]:
+                # Remove overlap first
                 cleaned_text = self.remove_overlap(result["text"], self.prev_text)
-                self.prev_text += " " + cleaned_text
-                result["text"] = cleaned_text  # Gửi text sạch
+                
+                # Limit to max 20 words
+                limited_text = self.limit_words(cleaned_text, max_words=20)
+                
+                # Check for excessive repetition (same word repeated > 5 times)
+                words = limited_text.split()
+                if len(words) > 5:
+                    # Count consecutive repetitions
+                    consecutive_count = 1
+                    for i in range(1, len(words)):
+                        if words[i] == words[i-1]:
+                            consecutive_count += 1
+                            if consecutive_count > 3:  # More than 3 consecutive same words
+                                logger.warning(f"Detected excessive repetition, truncating text")
+                                limited_text = ' '.join(words[:i-2])  # Keep only up to first repetition
+                                break
+                        else:
+                            consecutive_count = 1
+                
+                self.prev_text += " " + limited_text
+                result["text"] = limited_text  # Send cleaned text
                 return result
 
             return result
 
         except Exception as e:
-            print(f"Error in STT: {e}")
+            logger.error(f"Error in STT: {e}")
             return None
 
 def decode_audio_to_array(audio_bytes: bytes) -> np.ndarray:
@@ -85,25 +118,25 @@ def decode_audio_to_array(audio_bytes: bytes) -> np.ndarray:
     return audio_array
 
 
-async def _speech_to_text(audio_data: bytes) -> Optional[Dict[str, Any]]:
-    """Convert audio to text using Whisper"""
-    try:
-        if not whisper_model:
-            print("Whisper model not available")
-            return None
+# async def _speech_to_text(audio_data: bytes) -> Optional[Dict[str, Any]]:
+#     """Convert audio to text using Whisper"""
+#     try:
+#         if not whisper_model:
+#             logger.warning("Whisper model not available")
+#             return None
 
-        # Decode audio bytes properly
-        audio_array = decode_audio_to_array(audio_data)
+#         # Decode audio bytes properly
+#         audio_array = decode_audio_to_array(audio_data)
 
-        # Run transcription in thread
-        result = await asyncio.get_event_loop().run_in_executor(
-            None, _transcribe, audio_array, "vi"  # Default to Vietnamese
-        )
-        return result
+#         # Run transcription in thread
+#         result = await asyncio.get_event_loop().run_in_executor(
+#             None, _transcribe, audio_array, "vi"  # Default to Vietnamese
+#         )
+#         return result
 
-    except Exception as e:
-        print(f"Error in speech to text: {e}")
-        return None
+#     except Exception as e:
+#         logger.error(f"Error in speech to text: {e}")
+#         return None
 
 
 def _transcribe(audio_array: np.ndarray, language: str = "vi") -> Dict[str, Any]:

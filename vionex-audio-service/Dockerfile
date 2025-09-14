@@ -73,6 +73,8 @@ COPY models/Helsinki-NLP-opus-mt-en-vi /app/models/Helsinki-NLP-opus-mt-en-vi
 # Create directory structure and copy XTTS-v2 samples for speaker voice reference
 RUN mkdir -p /app/models/XTTS-v2
 COPY models/XTTS-v2/samples /app/models/XTTS-v2/samples
+RUN mkdir -p /app/voice_clones/embeddings \
+    && chmod 755 /app/voice_clones
 
 # Expose gRPC port and UDP port range for RTP
 EXPOSE 30005

@@ -40,8 +40,8 @@ class TranslationCabin:
     cabin_id: str
     source_language: str
     target_language: str
-    receive_port: int = 0  # Port riêng cho receive
-    send_port: int = 0     # Port riêng cho send  
+    receive_port: int = 0 
+    send_port: int = 0   
     status: CabinStatus = CabinStatus.IDLE
     room_id: Optional[str] = None
     user_id: Optional[str] = None
@@ -52,7 +52,7 @@ class TranslationCabin:
     vad: VoiceActivityDetector = field(default_factory=VoiceActivityDetector)
     
     # Threading and queue management
-    audio_queue: queue.Queue = field(default_factory=queue.Queue)
+    audio_queue: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=200))  # Limit queue size
     processor_thread: Optional[threading.Thread] = None
     
     # Audio timing and statistics
@@ -90,6 +90,9 @@ class TranslationCabinManager:
         self.cabins: Dict[str, TranslationCabin] = {}
         self._lock = threading.Lock()
         self.socket_manager = get_shared_socket_manager()
+        
+        # Memory monitoring settings
+        self.enable_memory_monitoring = True  # Set to False to disable monitoring
 
     def create_cabin(
         self, 
@@ -231,8 +234,20 @@ class TranslationCabinManager:
             if not pcm_16k_mono:
                 return
 
+            # Cleanup intermediate data immediately
+            del pcm_48k_stereo
+
             # Add to FIFO queue for translation processing
-            cabin.audio_queue.put(pcm_16k_mono, block=False)
+            try:
+                cabin.audio_queue.put(pcm_16k_mono, block=False)
+            except queue.Full:
+                # Queue is full, drop oldest item and add new one
+                try:
+                    cabin.audio_queue.get_nowait()  # Remove oldest
+                    cabin.audio_queue.put(pcm_16k_mono, block=False)  # Add new
+                    logger.debug(f"[AUDIO-CALLBACK] Queue full, dropped oldest audio chunk for {cabin.cabin_id}")
+                except queue.Empty:
+                    pass  # Queue became empty between calls
             
         except Exception as e:
             logger.error(f"[AUDIO-CALLBACK] Error processing RTP packet for {cabin.cabin_id}: {e}")
@@ -252,7 +267,9 @@ class TranslationCabinManager:
         try:
             pipeline = TranslationPipeline(
                 source_language=cabin.source_language,
-                target_language=cabin.target_language
+                target_language=cabin.target_language,
+                user_id=cabin.user_id,    # Pass user_id for voice cloning
+                room_id=cabin.room_id     # Pass room_id for voice cloning
             )
         except Exception as e:
             logger.error(f"[PROCESSOR] Failed to initialize translation pipeline: {e}")
@@ -260,7 +277,9 @@ class TranslationCabinManager:
         
         # Processing statistics
         processing_count = 0
-        bypass_vad = False  # Skip VAD for faster processing
+        bypass_vad = True
+        last_cleanup = time.time()
+        CLEANUP_INTERVAL = 600  # 10 minutes
         
         # Step 3: Main audio processing loop
         try:
@@ -271,8 +290,18 @@ class TranslationCabinManager:
                         audio_data = cabin.audio_queue.get(timeout=1.0)
                         processing_count += 1
                     except queue.Empty:
+                        # Periodic cleanup check during idle time
+                        current_time = time.time()
+                        if current_time - last_cleanup > CLEANUP_INTERVAL:
+                            try:
+                                import gc
+                                collected = gc.collect()
+                                last_cleanup = current_time
+                                logger.debug(f"[PROCESSOR] Periodic cleanup: collected {collected} objects")
+                            except Exception as cleanup_error:
+                                logger.warning(f"[PROCESSOR] Cleanup error: {cleanup_error}")
+                        
                         logger.debug(f"[PROCESSOR] Audio queue empty")
-                        processing_count += 1
                         continue
                     
                     # VAD speech detection
@@ -326,6 +355,9 @@ class TranslationCabinManager:
                     
                     # Mark task as done
                     cabin.audio_queue.task_done()
+                    
+                    # Cleanup audio_data immediately after processing
+                    del audio_data
 
                 except Exception as e:
                     if cabin.running:
@@ -336,6 +368,21 @@ class TranslationCabinManager:
             cabin.status = CabinStatus.ERROR
 
         finally:
+            # Cleanup voice cloning data before closing
+            try:
+                if hasattr(pipeline, 'cleanup_voice_data'):
+                    pipeline.cleanup_voice_data()
+            except Exception as e:
+                logger.error(f"[PROCESSOR] Error cleaning up voice data: {e}")
+            
+            # Force garbage collection before closing
+            try:
+                import gc
+                collected = gc.collect()
+                logger.debug(f"[PROCESSOR] Final cleanup: collected {collected} objects")
+            except Exception as e:
+                logger.warning(f"[PROCESSOR] Final garbage collection error: {e}")
+                
             # Close the event loop before thread exits
             try:
                 loop.close()
@@ -717,12 +764,19 @@ class TranslationCabinManager:
             # Step 4: Clear audio processing buffers
             cabin.audio_buffer.clear()
             
-            # Step 5: Empty audio queue to prevent memory leaks
-            while not cabin.audio_queue.empty():
+            # Step 5: Empty audio queue to prevent memory leaks (with limit)
+            queue_cleared = 0
+            while not cabin.audio_queue.empty() and queue_cleared < 1000:  # Prevent infinite loop
                 try:
                     cabin.audio_queue.get_nowait()
+                    queue_cleared += 1
                 except queue.Empty:
                     break
+                    
+            if queue_cleared >= 1000:
+                logger.warning(f"[CLEANUP] Stopped queue cleanup after {queue_cleared} items for {cabin_id}")
+            else:
+                logger.debug(f"[CLEANUP] Cleared {queue_cleared} items from audio queue for {cabin_id}")
             
             # Step 6: Close optimized network resources
             if hasattr(cabin, '_send_socket') and cabin._send_socket:
@@ -742,6 +796,14 @@ class TranslationCabinManager:
             # Note: SharedSocketManager handles socket lifecycle, no manual cleanup needed
             # Step 8: Remove cabin from tracking registry
             del self.cabins[cabin_id]
+            
+            # Step 9: Force garbage collection after cleanup
+            try:
+                import gc
+                collected = gc.collect()
+                logger.debug(f"[CLEANUP] Garbage collected {collected} objects after cabin cleanup")
+            except Exception as gc_error:
+                logger.warning(f"[CLEANUP] Garbage collection error: {gc_error}")
             
         except Exception as e:
             logger.error(f"[CLEANUP] Error in cabin cleanup: {e}")
@@ -786,16 +848,33 @@ class TranslationCabinManager:
                 # Step 3: Unregister from SharedSocketManager routing system
                 self.socket_manager.unregister_cabin(cabin_id)
                 
-                # Step 4: Cleanup OPUS codec resources
+                # Step 4: Cleanup voice cloning data
+                try:
+                    from .voice_cloning.voice_clone_manager import get_voice_clone_manager
+                    voice_manager = get_voice_clone_manager()
+                    if cabin.user_id and cabin.room_id:
+                        voice_manager.cleanup_user_voice(cabin.user_id, cabin.room_id)
+                        logger.info(f"[CABIN-MANAGER] Cleaned up voice data for {cabin.user_id}_{cabin.room_id}")
+                except Exception as e:
+                    logger.warning(f"[CABIN-MANAGER] Error cleaning up voice data: {e}")
+                
+                # Step 5: Cleanup OPUS codec resources
                 opus_codec_manager.cleanup_cabin(cabin_id)
                 
                 # Clear audio buffers and queue
                 cabin.audio_buffer.clear()
-                while not cabin.audio_queue.empty():
+                queue_cleared = 0
+                while not cabin.audio_queue.empty() and queue_cleared < 500:  # Limit cleanup iterations
                     try:
                         cabin.audio_queue.get_nowait()
+                        queue_cleared += 1
                     except queue.Empty:
                         break
+                
+                # Force garbage collection after resource cleanup
+                import gc
+                collected = gc.collect()
+                logger.debug(f"[CABIN-MANAGER] Cleanup collected {collected} objects for {cabin_id}")
                 
                 logger.info(f"[CABIN-MANAGER] Successfully destroyed cabin {cabin_id}")
                 return True
