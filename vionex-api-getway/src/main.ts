@@ -34,7 +34,7 @@ async function bootstrap() {
     //     cert: fs.readFileSync('./secrets/public-certificate.pem'),
     // };
     const configService = new ConfigService();
-    const app = await NestFactory.create(GatewayModule, {httpsOptions});
+    const app = await NestFactory.create(GatewayModule);
     app.useWebSocketAdapter(new SecureIoAdapter(app));
 
     // Enable global prefix for API routes (optional)
