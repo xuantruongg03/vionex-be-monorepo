@@ -133,30 +133,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     clockRate: 48000,
                     channels: 2,
                 },
-                // H.264 codecs first for priority
-                {
-                    kind: 'video',
-                    mimeType: 'video/h264',
-                    clockRate: 90000,
-                    parameters: {
-                        'packetization-mode': 1,
-                        'profile-level-id': '42e01f', // Baseline Profile Level 3.1 - most compatible
-                        'level-asymmetry-allowed': 1,
-                        'x-google-start-bitrate': 1000,
-                    },
-                },
-                {
-                    kind: 'video',
-                    mimeType: 'video/h264',
-                    clockRate: 90000,
-                    parameters: {
-                        'packetization-mode': 1,
-                        'profile-level-id': '640c1f',
-                        'level-asymmetry-allowed': 1,
-                        'x-google-start-bitrate': 1000,
-                    },
-                },
-                // VP8/VP9 as fallback
                 {
                     kind: 'video',
                     mimeType: 'video/VP8',
@@ -171,6 +147,28 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     clockRate: 90000,
                     parameters: {
                         'profile-id': 2,
+                        'x-google-start-bitrate': 1000,
+                    },
+                },
+                {
+                    kind: 'video',
+                    mimeType: 'video/h264',
+                    clockRate: 90000,
+                    parameters: {
+                        'packetization-mode': 1,
+                        'profile-level-id': '4d0032',
+                        'level-asymmetry-allowed': 1,
+                        'x-google-start-bitrate': 1000,
+                    },
+                },
+                {
+                    kind: 'video',
+                    mimeType: 'video/h264',
+                    clockRate: 90000,
+                    parameters: {
+                        'packetization-mode': 1,
+                        'profile-level-id': '42e01f',
+                        'level-asymmetry-allowed': 1,
                         'x-google-start-bitrate': 1000,
                     },
                 },
@@ -757,70 +755,30 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 );
             }
 
-            // Get RTP capabilities from participant data (stored in room service)
-            let finalRtpCapabilities;
-            
-            console.log(`[SFU] CreateConsumer for stream ${streamId}, producer ${stream.producerId}, participant ${participant.peerId || participant.peer_id}`);
-            
-            // Try to use participant's stored RTP capabilities first
-            if (participant?.rtp_capabilities) {
-                try {
-                    // Parse if it's a string, otherwise use directly
-                    finalRtpCapabilities = typeof participant.rtp_capabilities === 'string' 
-                        ? JSON.parse(participant.rtp_capabilities)
-                        : participant.rtp_capabilities;
-                    
-                    console.log(`[SFU] Using participant's stored RTP capabilities for peer ${participant.peerId || participant.peer_id}`);
-                    console.log(`[SFU] RTP capabilities codecs count: ${finalRtpCapabilities?.codecs?.length || 0}`);
-                } catch (error) {
-                    console.warn(`[SFU] Failed to parse participant RTP capabilities:`, error);
-                    finalRtpCapabilities = null;
-                }
+            // If no RTP capabilities provided, use router capabilities as fallback
+            let finalRtpCapabilities = rtpCapabilities;
+            if (!rtpCapabilities || Object.keys(rtpCapabilities).length === 0) {
+                finalRtpCapabilities = mediaRoom.router.rtpCapabilities;
             }
-
-            // Fallback to provided capabilities or router capabilities
-            if (!finalRtpCapabilities) {
-                finalRtpCapabilities = rtpCapabilities;
-                if (!rtpCapabilities || Object.keys(rtpCapabilities).length === 0) {
-                    console.warn(
-                        `[SFU] No RTP capabilities found for peer ${participant.peerId || participant.peer_id}, using router capabilities as fallback`,
-                    );
-                    finalRtpCapabilities = mediaRoom.router.rtpCapabilities;
-                } else {
-                    console.log(`[SFU] Using provided RTP capabilities for peer ${participant.peerId || participant.peer_id}`);
-                }
-            }
-
-            console.log(`[SFU] Final RTP capabilities codecs count: ${finalRtpCapabilities?.codecs?.length || 0}`);
-            console.log(`[SFU] Producer kind: ${producer.kind}, Producer RTP parameters codecs: ${producer.rtpParameters?.codecs?.length || 0}`);
 
             // Check if router can consume this producer with the given capabilities
-            const canConsume = mediaRoom.router.canConsume({
-                producerId: producer.id,
-                rtpCapabilities: finalRtpCapabilities,
-            });
-            
-            console.log(`[SFU] Router canConsume check: ${canConsume} for producer ${producer.id}`);
-            
-            if (!canConsume) {
-                console.error(`[SFU] Router cannot consume producer ${producer.id}`);
-                console.error(`[SFU] Producer codecs:`, JSON.stringify(producer.rtpParameters?.codecs || [], null, 2));
-                console.error(`[SFU] Consumer RTP capabilities codecs:`, JSON.stringify(finalRtpCapabilities?.codecs || [], null, 2));
+            if (
+                !mediaRoom.router.canConsume({
+                    producerId: producer.id,
+                    rtpCapabilities: finalRtpCapabilities,
+                })
+            ) {
                 throw new Error(
                     `Router cannot consume producer ${producer.id}`,
                 );
             }
 
             // Create consumer
-            console.log(`[SFU] Creating consumer for producer ${producer.id} on transport ${transport.id}`);
             const consumer = await transport.consume({
                 producerId: producer.id,
                 rtpCapabilities: finalRtpCapabilities,
                 paused: true,
             });
-            
-            console.log(`[SFU] Consumer created successfully: ${consumer.id}, kind: ${consumer.kind}`);
-            console.log(`[SFU] Consumer RTP parameters codecs count: ${consumer.rtpParameters?.codecs?.length || 0}`);
             // Store consumer in media room - use streamId as key and store array of consumers
             if (!mediaRoom.consumers.has(streamId)) {
                 mediaRoom.consumers.set(streamId, []);
@@ -931,53 +889,11 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 throw new Error(`Transport ${data.transportId} not found`);
             }
 
-            console.log(`[SFU] Creating producer on transport ${data.transportId}, kind: ${data.kind}`);
-            console.log(`[SFU] RTP parameters codecs count: ${data.rtpParameters?.codecs?.length || 0}`);
-            console.log(`[SFU] Transport connected status: ${transport.appData?.connected || false}`);
-            console.log(`[SFU] Transport closed: ${transport.closed}`);
-            
-            // Log first codec details for debugging
-            if (data.rtpParameters?.codecs?.length > 0) {
-                const firstCodec = data.rtpParameters.codecs[0];
-                console.log(`[SFU] First codec:`, {
-                    mimeType: firstCodec.mimeType,
-                    payloadType: firstCodec.payloadType,
-                    clockRate: firstCodec.clockRate,
-                    parameters: firstCodec.parameters
-                });
-                
-                // Special check for H.264 parameters
-                if (firstCodec.mimeType === 'video/H264' && firstCodec.parameters) {
-                    console.log(`[SFU] H.264 profile-level-id: ${firstCodec.parameters['profile-level-id'] || 'not set'}`);
-                }
-            }
-
-            // Validate RTP parameters structure
-            if (!data.rtpParameters.codecs || data.rtpParameters.codecs.length === 0) {
-                throw new Error(`No codecs found in RTP parameters for ${data.kind}`);
-            }
-
-            if (!data.rtpParameters.encodings || data.rtpParameters.encodings.length === 0) {
-                console.warn(`[SFU] No encodings found in RTP parameters for ${data.kind}, this might cause issues`);
-            }
-
-            // Validate router and RTP parameters compatibility
-            console.log(`[SFU] Router RTP capabilities codecs count: ${mediaRoom.router.rtpCapabilities.codecs?.length || 0}`);
-            
-            // Log matching codecs
-            const routerCodecs = mediaRoom.router.rtpCapabilities.codecs?.filter(codec => 
-                codec.kind === data.kind
-            ) || [];
-            console.log(`[SFU] Router ${data.kind} codecs count: ${routerCodecs.length}`);
-
-            console.log(`[SFU] About to call transport.produce...`);
             // Create producer
             const producer = await transport.produce({
                 kind: data.kind,
                 rtpParameters: data.rtpParameters,
             });
-            
-            console.log(`[SFU] Producer created successfully: ${producer.id}, kind: ${producer.kind}`);
 
             let isScreenShare = false;
             // Check metadata
@@ -1589,14 +1505,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         speakingPeerId: string,
     ): T.Stream[] {
         const roomStreams = this.getStreamsByRoom(roomId);
-        
-        console.log(`[SFU] Looking for streams from speaking user ${speakingPeerId}`);
-        console.log(`[SFU] Total streams in room ${roomId}: ${roomStreams.length}`);
-        
-        // Log all streams for debugging
-        roomStreams.forEach(stream => {
-            console.log(`[SFU] Stream: ${stream.streamId}, Publisher: ${stream.publisherId}`);
-        });
 
         return roomStreams.filter((stream) => {
             // Must be from speaking user
@@ -1605,14 +1513,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             // Parse stream ID to determine type
             const parts = stream.streamId.split('_');
             const mediaType = parts[1]; // video, audio, screen, screen_audio
-            
-            console.log(`[SFU] Stream ${stream.streamId} parts:`, parts, `mediaType: ${mediaType}`);
 
             // Only prioritize regular audio/video streams, not screen shares
-            const isRegularStream = mediaType === 'video' || mediaType === 'audio';
-            console.log(`[SFU] Stream ${stream.streamId} isRegularStream: ${isRegularStream}`);
-            
-            return isRegularStream;
+            return mediaType === 'video' || mediaType === 'audio';
         });
     }
 
