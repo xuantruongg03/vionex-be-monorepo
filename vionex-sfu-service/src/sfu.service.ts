@@ -156,7 +156,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     clockRate: 90000,
                     parameters: {
                         'packetization-mode': 1,
-                        'profile-level-id': '4d0032',
+                        'profile-level-id': '42e01f', // Baseline Profile Level 3.1 - most compatible
                         'level-asymmetry-allowed': 1,
                         'x-google-start-bitrate': 1000,
                     },
@@ -167,7 +167,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     clockRate: 90000,
                     parameters: {
                         'packetization-mode': 1,
-                        'profile-level-id': '42e01f',
+                        'profile-level-id': '640c1f',
                         'level-asymmetry-allowed': 1,
                         'x-google-start-bitrate': 1000,
                     },
@@ -755,10 +755,35 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 );
             }
 
-            // If no RTP capabilities provided, use router capabilities as fallback
-            let finalRtpCapabilities = rtpCapabilities;
-            if (!rtpCapabilities || Object.keys(rtpCapabilities).length === 0) {
-                finalRtpCapabilities = mediaRoom.router.rtpCapabilities;
+            // Get RTP capabilities from participant data (stored in room service)
+            let finalRtpCapabilities;
+            
+            // Try to use participant's stored RTP capabilities first
+            if (participant?.rtp_capabilities) {
+                try {
+                    // Parse if it's a string, otherwise use directly
+                    finalRtpCapabilities = typeof participant.rtp_capabilities === 'string' 
+                        ? JSON.parse(participant.rtp_capabilities)
+                        : participant.rtp_capabilities;
+                    
+                    console.log(`[SFU] Using participant's stored RTP capabilities for peer ${participant.peerId || participant.peer_id}`);
+                } catch (error) {
+                    console.warn(`[SFU] Failed to parse participant RTP capabilities:`, error);
+                    finalRtpCapabilities = null;
+                }
+            }
+
+            // Fallback to provided capabilities or router capabilities
+            if (!finalRtpCapabilities) {
+                finalRtpCapabilities = rtpCapabilities;
+                if (!rtpCapabilities || Object.keys(rtpCapabilities).length === 0) {
+                    console.warn(
+                        `[SFU] No RTP capabilities found for peer ${participant.peerId || participant.peer_id}, using router capabilities as fallback`,
+                    );
+                    finalRtpCapabilities = mediaRoom.router.rtpCapabilities;
+                } else {
+                    console.log(`[SFU] Using provided RTP capabilities for peer ${participant.peerId || participant.peer_id}`);
+                }
             }
 
             // Check if router can consume this producer with the given capabilities
