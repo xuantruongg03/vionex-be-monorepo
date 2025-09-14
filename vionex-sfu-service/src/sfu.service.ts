@@ -929,11 +929,53 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 throw new Error(`Transport ${data.transportId} not found`);
             }
 
+            console.log(`[SFU] Creating producer on transport ${data.transportId}, kind: ${data.kind}`);
+            console.log(`[SFU] RTP parameters codecs count: ${data.rtpParameters?.codecs?.length || 0}`);
+            console.log(`[SFU] Transport connected status: ${transport.appData?.connected || false}`);
+            console.log(`[SFU] Transport closed: ${transport.closed}`);
+            
+            // Log first codec details for debugging
+            if (data.rtpParameters?.codecs?.length > 0) {
+                const firstCodec = data.rtpParameters.codecs[0];
+                console.log(`[SFU] First codec:`, {
+                    mimeType: firstCodec.mimeType,
+                    payloadType: firstCodec.payloadType,
+                    clockRate: firstCodec.clockRate,
+                    parameters: firstCodec.parameters
+                });
+                
+                // Special check for H.264 parameters
+                if (firstCodec.mimeType === 'video/H264' && firstCodec.parameters) {
+                    console.log(`[SFU] H.264 profile-level-id: ${firstCodec.parameters['profile-level-id'] || 'not set'}`);
+                }
+            }
+
+            // Validate RTP parameters structure
+            if (!data.rtpParameters.codecs || data.rtpParameters.codecs.length === 0) {
+                throw new Error(`No codecs found in RTP parameters for ${data.kind}`);
+            }
+
+            if (!data.rtpParameters.encodings || data.rtpParameters.encodings.length === 0) {
+                console.warn(`[SFU] No encodings found in RTP parameters for ${data.kind}, this might cause issues`);
+            }
+
+            // Validate router and RTP parameters compatibility
+            console.log(`[SFU] Router RTP capabilities codecs count: ${mediaRoom.router.rtpCapabilities.codecs?.length || 0}`);
+            
+            // Log matching codecs
+            const routerCodecs = mediaRoom.router.rtpCapabilities.codecs?.filter(codec => 
+                codec.kind === data.kind
+            ) || [];
+            console.log(`[SFU] Router ${data.kind} codecs count: ${routerCodecs.length}`);
+
+            console.log(`[SFU] About to call transport.produce...`);
             // Create producer
             const producer = await transport.produce({
                 kind: data.kind,
                 rtpParameters: data.rtpParameters,
             });
+            
+            console.log(`[SFU] Producer created successfully: ${producer.id}, kind: ${producer.kind}`);
 
             let isScreenShare = false;
             // Check metadata
