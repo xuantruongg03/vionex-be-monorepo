@@ -292,7 +292,6 @@ class AudioService(audio_pb2_grpc.AudioServiceServicer):
                     message="Failed to destroy cabin - not found"
                 )
             
-            logger.info(f"Cabin {request.cabinId} destroyed successfully")
             return audio_pb2.DestroyCabinResponse(
                 success=True,
                 message="Cabin destroyed successfully"
@@ -304,33 +303,6 @@ class AudioService(audio_pb2_grpc.AudioServiceServicer):
                 success=False,
                 message=f"Failed to destroy cabin: {str(e)}"
             )
-    # def UpdateCabinSfuPort(self, request, context):
-    #     """
-    #     """
-    #     try:
-    #         # Generate cabin ID that matches create_cabin
-    #         cabin_id = f"{request.roomId}_{request.userId}_{request.sourceLanguage}_{request.targetLanguage}"
-            
-    #         # Update the cabin's SFU send port
-    #         success = cabin_manager.update_cabin_sfu_port(cabin_id, request.sfuSendPort)
-            
-    #         if success:
-    #             return audio_pb2.UpdateSfuPortResponse(
-    #                 success=True,
-    #                 message=f"Updated SFU port to {request.sfuSendPort}"
-    #             )
-    #         else:
-    #             return audio_pb2.UpdateSfuPortResponse(
-    #                 success=False,
-    #                 message="Failed to update SFU port - cabin not found"
-    #             )
-                
-    #     except Exception as e:
-    #         logger.error(f"UpdateCabinSfuPort error: {e}")
-    #         return audio_pb2.UpdateSfuPortResponse(
-    #             success=False,
-    #             message=f"Failed to update SFU port: {str(e)}"
-    #         )
 
 def serve():
     """Start the gRPC server"""

@@ -16,6 +16,7 @@ import { RoomClientService } from './clients/room.client';
 import { SfuClientService } from './clients/sfu.client';
 import { ChatHandler } from './handlers/chat.handler';
 import { QuizHandler } from './handlers/quiz.handler';
+import { TranslationHandler } from './handlers/translation.handler';
 import { VotingHandler } from './handlers/voting.handler';
 import { WhiteboardHandler } from './handlers/whiteboard.handler';
 import { GatewayHelperService } from './helpers/gateway.helper';
@@ -46,6 +47,7 @@ export class GatewayGateway
         private readonly interactionClient: InteractionClientService,
         private readonly audioService: AudioClientService,
         private readonly chatHandler: ChatHandler,
+        private readonly translationHandler: TranslationHandler,
         private readonly votingHandler: VotingHandler,
         private readonly quizHandler: QuizHandler,
         private readonly whiteboardHandler: WhiteboardHandler,
@@ -207,10 +209,104 @@ export class GatewayGateway
                     error,
                 );
             }
+
+            // Auto-destroy translation cabins
+            try {
+                await this.autoDestroyCabins(peerId, roomId);
+            } catch (error) {
+                console.error(
+                    '[BACKEND] Error auto-destroying translation cabins:',
+                    error,
+                );
+            }
         }
 
         // Clean up connection mapping
         this.helperService.cleanupParticipantMapping(client.id);
+    }
+
+    /**
+     * Auto-destroy translation cabins when user disconnects
+     */
+    private async autoDestroyCabins(userId: string, roomId: string) {
+        try {
+            // Get room participants from room service
+            const roomData = await this.roomClient.getRoom(roomId);
+            if (!roomData.data?.participants) return;
+
+            const allParticipants = roomData.data.participants.map(
+                (p: any) => p.peer_id,
+            );
+            const allCabins: any[] = [];
+
+            // Collect cabins from all participants to find all cabins in room
+            for (const participantId of allParticipants) {
+                try {
+                    const cabinsResult =
+                        await this.sfuClient.listTranslationCabin(
+                            roomId,
+                            participantId,
+                        );
+                    if (cabinsResult.success && cabinsResult.cabins) {
+                        cabinsResult.cabins.forEach((cabin) => {
+                            allCabins.push({
+                                ...cabin,
+                                queriedUserId: participantId, // track who we queried to get this cabin
+                            });
+                        });
+                    }
+                } catch (err) {
+                    console.log('[Gateway] Error listing cabins for participant:', err);
+                }
+            }
+
+            // Remove duplicates based on cabin signature
+            const uniqueCabins = allCabins.filter(
+                (cabin, index, arr) =>
+                    arr.findIndex(
+                        (c) =>
+                            c.targetUserId === cabin.targetUserId &&
+                            c.sourceLanguage === cabin.sourceLanguage &&
+                            c.targetLanguage === cabin.targetLanguage,
+                    ) === index,
+            );
+
+            // Process each cabin based on role
+            for (const cabin of uniqueCabins) {
+                if (cabin.targetUserId === userId) {
+                    // User disconnecting is TARGET of cabin -> destroy unconditionally
+                    const destroyData = {
+                        roomId,
+                        sourceUserId: cabin.queriedUserId, // who created this cabin
+                        targetUserId: cabin.targetUserId,
+                        sourceLanguage: cabin.sourceLanguage,
+                        targetLanguage: cabin.targetLanguage,
+                    };
+                    await this.translationHandler.handleDestroyTranslationCabin(
+                        null,
+                        destroyData,
+                    );
+                } else if (cabin.queriedUserId === userId) {
+                    // User disconnecting CREATED this cabin -> check consumers
+                    if (!allParticipants.includes(cabin.targetUserId)) {
+                        // Target not in room -> no consumers -> destroy
+                        const destroyData = {
+                            roomId,
+                            sourceUserId: userId,
+                            targetUserId: cabin.targetUserId,
+                            sourceLanguage: cabin.sourceLanguage,
+                            targetLanguage: cabin.targetLanguage,
+                        };
+                        await this.translationHandler.handleDestroyTranslationCabin(
+                            null,
+                            destroyData,
+                        );
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('[Gateway] Error in auto destroy cabins:', error);
+        }
     }
 
     @SubscribeMessage('sfu:join')
@@ -878,6 +974,7 @@ export class GatewayGateway
                 kind: consumerData.kind,
                 rtpParameters: consumerData.rtpParameters,
                 streamId: data.streamId,
+                metadata: consumerData.metadata, // Include metadata for translation streams
             };
 
             // Validate that all required fields are present
@@ -1850,6 +1947,59 @@ export class GatewayGateway
         return this.chatHandler.handleSendFileMessage(client, data);
     }
 
+    // ==================== TRANSLATION CABIN HANDLERS ====================
+
+    @SubscribeMessage('translation:create')
+    async handleCreateTranslationCabin(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            sourceUserId: string;
+            targetUserId: string;
+            sourceLanguage: string;
+            targetLanguage: string;
+        },
+    ) {
+        return this.translationHandler.handleCreateTranslationCabin(
+            client,
+            data,
+        );
+    }
+
+    @SubscribeMessage('translation:destroy')
+    async handleDestroyTranslationCabin(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            sourceUserId: string;
+            targetUserId: string;
+            sourceLanguage: string;
+            targetLanguage: string;
+        },
+    ) {
+        return this.translationHandler.handleDestroyTranslationCabin(
+            client,
+            data,
+        );
+    }
+
+    @SubscribeMessage('translation:list')
+    async handleListTranslationCabins(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            userId: string;
+        },
+    ) {
+        return this.translationHandler.handleListTranslationCabins(
+            client,
+            data,
+        );
+    }
+
     // ==================== PIN/UNPIN USER HANDLERS ====================
 
     @SubscribeMessage('sfu:pin-user')
@@ -2125,7 +2275,7 @@ export class GatewayGateway
             behaviorLogs: Array<{
                 type: string;
                 value: any;
-                time: Date;
+                time: Date | string | number;
             }>;
         },
     ) {
@@ -2449,7 +2599,7 @@ export class GatewayGateway
                 question: data.text?.substring(0, 100) + '...',
             });
 
-            // 🛡️ Security: Validate user is in the room
+            // Security: Validate user is in the room
             const socketRooms = Array.from(client.rooms);
             if (!socketRooms.includes(data.roomId)) {
                 console.warn(
@@ -2495,7 +2645,7 @@ export class GatewayGateway
             // const canProceed = await this.rateLimitCheck(peerId);
             // if (!canProceed) { ... }
 
-            // 🚀 Call chatbot service
+            // Call chatbot service
             console.log(
                 `[Chatbot] Processing request for user ${peerId} in room ${data.roomId}`,
             );
@@ -2505,7 +2655,7 @@ export class GatewayGateway
                 room_id: data.roomId,
             });
 
-            // 📤 Send final response (for now, no streaming)
+            // Send final response (for now, no streaming)
             client.emit('chatbot:final', {
                 requestId: data.id,
                 text:

@@ -37,7 +37,10 @@ class SocketPoolStats:
 
 class SharedSocketManager:
     """
-    Shared socket manager với RTP packet routing
+    Shared Socket Manager for RTP Packet Routing
+    
+    Manages centralized RTP packet routing between SFU and translation cabins.
+    Uses single RX/TX sockets with SSRC-based packet routing.
     """
     
     def __init__(self):
@@ -61,11 +64,14 @@ class SharedSocketManager:
         
     def initialize_shared_sockets(self, audio_rx_port=35000, tx_source_port=0):
         """
-        Starting Shared Sockets with RTP Packet Routing
+        Initialize shared RX/TX sockets for RTP packet routing
         
-        ARGS:
-            Audio_rx_port: Fixed port to receive all RTP Packets from SFU (Default: 35000)
-            TX_Source_port: Source Port for TX Socket (0 = Ephemeral)
+        Args:
+            audio_rx_port: Port to receive RTP packets from SFU (default: 35000)
+            tx_source_port: TX socket source port (0 = ephemeral)
+            
+        Returns:
+            bool: True if initialization successful
         """
         try:
             # RX socket: Receive all RTP Packets from SFU on a single port
@@ -104,15 +110,15 @@ class SharedSocketManager:
     
     def register_cabin_for_routing(self, cabin_id: str, ssrc: int, callback: Callable[[bytes], None]) -> Optional[tuple]:
         """
-        Register the cabin for RTP Packet Routing
+        Register cabin for RTP packet routing
         
-        ARGS:
-            Cabin_ID: Cabin's ID
-            SSRC: SSRC of Cabin to Routing Packets
-            Callback: Function is called when receiving packet for this cabin
+        Args:
+            cabin_id: Unique cabin identifier
+            ssrc: RTP SSRC for packet routing
+            callback: Function called when packets received for this cabin
             
         Returns:
-            tuple: (allocated_rx_port, allocated_tx_port) for compatibility with existing code
+            tuple: (rx_port, tx_port) for compatibility, None if failed
         """
         from .port_manager import port_manager
         
@@ -120,7 +126,6 @@ class SharedSocketManager:
             if cabin_id in self.cabin_to_ssrc:
                 return self.cabin_to_ports.get(cabin_id)
 
-            # Allocate ports from port manager for compatibility
             allocated_rx_port = port_manager.allocate_port()
             allocated_tx_port = port_manager.allocate_port()
 
@@ -132,7 +137,7 @@ class SharedSocketManager:
                 logger.error(f"[SHARED-SOCKET] Failed to allocate ports for cabin {cabin_id}")
                 return None
             
-            # Register routing
+            # Register SSRC-based routing
             self.ssrc_to_cabin[ssrc] = cabin_id
             self.cabin_to_ssrc[cabin_id] = ssrc
             self.cabin_callbacks[cabin_id] = callback
@@ -142,7 +147,15 @@ class SharedSocketManager:
             return (allocated_rx_port, allocated_tx_port)
     
     def unregister_cabin(self, cabin_id: str) -> bool:
-        """Cancel registration from routing system """
+        """
+        Unregister cabin from routing system and cleanup resources
+        
+        Args:
+            cabin_id: Cabin identifier to unregister
+            
+        Returns:
+            bool: True if successfully unregistered
+        """
         from .port_manager import port_manager
         
         with self._lock:
@@ -154,12 +167,10 @@ class SharedSocketManager:
             if ssrc is not None:
                 self.ssrc_to_cabin.pop(ssrc, None)
             
-            # Release allocated ports back to port manager
             if ports:
                 allocated_rx_port, allocated_tx_port = ports
                 port_manager.release_port(allocated_rx_port)
                 port_manager.release_port(allocated_tx_port)
-                logger.debug(f"[SHARED-SOCKET] Released ports {allocated_rx_port}, {allocated_tx_port} for cabin {cabin_id}")
             
             if ssrc is None:
                 logger.warning(f"[SHARED-SOCKET] Cabin {cabin_id} was not registered")
@@ -183,11 +194,12 @@ class SharedSocketManager:
     
     def _rtp_packet_router(self):
         """
-        RTP packet router - Receive packets and routes to the correct cabin
+        Main RTP packet routing loop
+        
+        Receives RTP packets from SFU and routes them to appropriate 
+        cabin callbacks based on SSRC mapping.
         """
-        logger.info("[RTP-ROUTER] Starting RTP packet routing...")
         packet_count = 0
-        last_log_time = time.time()
         
         while self.running:
             try:
@@ -199,23 +211,11 @@ class SharedSocketManager:
                 data, addr = self.rx_sock.recvfrom(4096)
                 packet_count += 1
                 
-                # Log every 10 seconds for debugging
-                # current_time = time.time()
-                # if current_time - last_log_time >= 10.0:
-                #     logger.info(f"[RTP-ROUTER] Received {packet_count} packets in 10s from {addr}")
-                #     last_log_time = current_time
-                #     packet_count = 0
-                
                 if len(data) < 12:  # Minimum RTP header size
-                    logger.debug(f"[RTP-ROUTER] Packet too small: {len(data)} bytes from {addr}")
                     continue
                 
                 # Extract SSRC from RTP header (bytes 8-11)
                 ssrc = struct.unpack('!I', data[8:12])[0]
-                
-                # Log first few packets for debugging
-                # if packet_count <= 5:
-                #     logger.info(f"[RTP-ROUTER] Packet #{packet_count}: {len(data)}B from {addr}, SSRC={ssrc}")
                 
                 # Route packet to correct cabin
                 with self._lock:
@@ -225,8 +225,6 @@ class SharedSocketManager:
                         try:
                             # Call cabin's audio processing callback
                             callback(data)
-                            if packet_count <= 5:
-                                logger.info(f"[RTP-ROUTER] Routed to cabin {cabin_id}")
                         except Exception as e:
                             logger.error(f"[RTP-ROUTER] Error in callback for {cabin_id}: {e}")
                     else:
@@ -235,7 +233,7 @@ class SharedSocketManager:
                             cabin_id = next(iter(self.cabin_to_ssrc))
                             old_ssrc = self.cabin_to_ssrc[cabin_id]
                             if old_ssrc != ssrc:
-                                logger.info(f"[RTP-ROUTER] Auto-learning SSRC for {cabin_id}: {old_ssrc} -> {ssrc}")
+                                # logger.info(f"[RTP-ROUTER] Auto-learning SSRC for {cabin_id}: {old_ssrc} -> {ssrc}")
 
                                 # Clean up old SSRC mapping
                                 if old_ssrc in self.ssrc_to_cabin:
@@ -249,45 +247,30 @@ class SharedSocketManager:
                                 if cabin_id in self.cabin_callbacks:
                                     try:
                                         self.cabin_callbacks[cabin_id](data)
-                                        logger.info(f"[RTP-ROUTER] Auto-routed to cabin {cabin_id} with learned SSRC {ssrc}")
                                     except Exception as e:
                                         logger.error(f"[RTP-ROUTER] Error in auto-routed callback for {cabin_id}: {e}")
                                 continue
                         
-                        # Multiple cabins or no auto-learning possible
-                        # if packet_count <= 10:  # Log more details initially
-                        #     logger.info(f"[RTP-ROUTER] No cabin registered for SSRC {ssrc}")
-                        #     logger.info(f"[RTP-ROUTER] Available SSRC mappings: {dict(self.ssrc_to_cabin)}")
-                        #     logger.info(f"[RTP-ROUTER] Cabin to SSRC mappings: {dict(self.cabin_to_ssrc)}")
-                        #     logger.info(f"[RTP-ROUTER] Total registered cabins: {len(self.cabin_to_ssrc)}")
-                        # elif packet_count % 100 == 0:  # Periodic logging for unmatched packets
-                        #     logger.warning(f"[RTP-ROUTER] Still receiving unmatched SSRC {ssrc} after {packet_count} packets")
-                        
             except socket_module.timeout:
-                # Log timeout periodically to confirm router is still alive
-                # current_time = time.time()
-                # if current_time - last_log_time >= 30.0:
-                #     logger.info(f"[RTP-ROUTER] Still listening on port, no packets received in 30s")
-                #     last_log_time = current_time
                 continue  # Normal timeout, keep running
             except Exception as e:
                 if self.running:  # Only log if we should be running
                     logger.error(f"[RTP-ROUTER] Error: {e}")
                 time.sleep(0.1)
         
-        logger.info("[RTP-ROUTER] RTP packet router stopped")
+        # logger.info("[RTP-ROUTER] RTP packet router stopped")
     
     def send_rtp_to_sfu(self, rtp_packet: bytes, sfu_host: str, sfu_port: int) -> bool:
         """
-        Send RTP Packet to SFU using Shared TX Socket
+        Send RTP packet to SFU using shared TX socket
         
         Args:
-            rtp_packet: Complete RTP packet (header + payload)  
-            sfu_host: SFU server address
+            rtp_packet: Complete RTP packet data
+            sfu_host: SFU server hostname/IP
             sfu_port: SFU server port
             
         Returns:
-            bool: True if sent successfully
+            bool: True if packet sent successfully
         """
         if not self.tx_sock:
             logger.error(f"[SHARED-SOCKET] TX socket not initialized!")
@@ -295,14 +278,6 @@ class SharedSocketManager:
         
         try:
             bytes_sent = self.tx_sock.sendto(rtp_packet, (sfu_host, sfu_port))
-            
-            # DEBUG: Log details for debugging
-            if len(rtp_packet) >= 12:
-                ssrc = struct.unpack('!I', rtp_packet[8:12])[0]
-                logger.debug(f"[SHARED-SOCKET] Sent {bytes_sent}B to {sfu_host}:{sfu_port}, SSRC={ssrc}")
-            else:
-                logger.debug(f"[SHARED-SOCKET] Sent {bytes_sent}B to {sfu_host}:{sfu_port}")
-                
             return bytes_sent > 0
             
         except Exception as e:
@@ -342,7 +317,12 @@ class SharedSocketManager:
         logger.info("[SHARED-SOCKET] Stopped and cleaned up")
 
     def get_stats(self) -> Dict[str, Any]:
-        """Get shared socket manager statistics"""
+        """
+        Get current statistics and status of the socket manager
+        
+        Returns:
+            dict: Statistics including running status, cabin count, etc.
+        """
         with self._lock:
             return {
                 "running": self.running,
@@ -358,7 +338,15 @@ class SharedSocketManager:
 shared_socket_manager: Optional[SharedSocketManager] = None
 
 def get_shared_socket_manager() -> SharedSocketManager:
-    """Get or create shared socket manager"""
+    """
+    Get or create the global shared socket manager instance
+    
+    Returns:
+        SharedSocketManager: Global socket manager instance
+        
+    Raises:
+        RuntimeError: If initialization fails
+    """
     global shared_socket_manager
     if shared_socket_manager is None:
         logger.info("[SHARED-SOCKET] Creating new SharedSocketManager instance...")

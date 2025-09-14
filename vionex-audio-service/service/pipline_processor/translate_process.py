@@ -1,5 +1,8 @@
 
+import logging
 from core.model import translation_models, translation_tokenizers
+
+logger = logging.getLogger(__name__)
 
 class TranslateProcess:
     """
@@ -13,7 +16,7 @@ class TranslateProcess:
         
         # Log available models
         available_directions = list(self.models.keys())
-        print(f"[TranslateProcess] Available translation models: {available_directions}")
+        logger.info(f"[TranslateProcess] Available translation models: {available_directions}")
 
     def _get_model_and_tokenizer(self, direction):
         """Get model and tokenizer for a specific direction"""
@@ -26,7 +29,7 @@ class TranslateProcess:
         model, tokenizer = self._get_model_and_tokenizer(direction)
         
         if model is None or tokenizer is None:
-            print(f"[TranslateProcess] Model not available for direction: {direction}")
+            logger.warning(f"[TranslateProcess] Model not available for direction: {direction}")
             return [text] if isinstance(text, str) else text
             
         try:
@@ -44,7 +47,7 @@ class TranslateProcess:
             
             return result
         except Exception as e:
-            print(f"[TranslateProcess] Error in {direction} translation: {e}")
+            logger.error(f"[TranslateProcess] Error in {direction} translation: {e}")
             return [text] if isinstance(text, str) else text
 
     def translate_vi_to_en(self, vietnamese_sentences):
@@ -102,5 +105,5 @@ class TranslateProcess:
         if direction_key in self.models:
             return self._translate_generic(text, direction_key)
         else:
-            print(f"[TranslateProcess] Model not available for direction: {source_lang}→{target_lang}")
+            logger.warning(f"[TranslateProcess] Model not available for direction: {source_lang}→{target_lang}")
             return [text] if isinstance(text, str) else text

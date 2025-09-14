@@ -14,8 +14,14 @@ from core.config import (
     THERMAL_THROTTLE_TEMP
 )
 
-# Load model whisper with configurable compute type
-whisper_model = WhisperModel(WHISPER_MODEL, device=TYPE_ENGINE, compute_type=WHISPER_COMPUTE_TYPE)
+# Load model whisper with device-appropriate compute type
+# Use float16 for CUDA/GPU, int8 for CPU to avoid compute type errors
+if TYPE_ENGINE == "cuda":
+    compute_type = WHISPER_COMPUTE_TYPE  # Use configured compute type for GPU
+else:
+    compute_type = "int8"  # Use int8 for CPU to avoid float16 errors
+
+whisper_model = WhisperModel(WHISPER_MODEL, device=TYPE_ENGINE, compute_type=compute_type)
 
 from transformers import MarianTokenizer, MarianMTModel
 import os

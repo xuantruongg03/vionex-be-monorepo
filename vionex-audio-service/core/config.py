@@ -46,6 +46,10 @@ RTP_PORT_RANGE_END = int(os.getenv("RTP_PORT_RANGE_END", 40400))
 MEDIASOUP_WORKER_HOST = os.getenv("MEDIASOUP_WORKER_HOST", "localhost")
 MEDIASOUP_WORKER_PORT = int(os.getenv("MEDIASOUP_WORKER_PORT", 3000))
 
+# SFU service configuration
+SFU_SERVICE_HOST = os.getenv("SFU_SERVICE_HOST", "127.0.0.1")
+SFU_SERVICE_PORT = int(os.getenv("SFU_SERVICE_PORT", 30004))
+
 # Type engine
 TYPE_ENGINE = os.getenv("TYPE_ENGINE", "cpu")
 

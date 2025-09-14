@@ -681,16 +681,37 @@ export class InteractionClientService implements OnModuleInit {
         behaviorLogs: Array<{
             type: string;
             value: any;
-            time: Date;
+            time: Date | string | number;
         }>,
     ) {
         try {
-            // Convert logs to gRPC format
-            const events = behaviorLogs.map((log) => ({
-                type: log.type,
-                value: String(log.value),
-                time: log.time.toISOString(),
-            }));
+            // Convert logs to gRPC format with safe date conversion
+            const events = behaviorLogs.map((log) => {
+                let timeString: string;
+                try {
+                    if (log.time instanceof Date) {
+                        timeString = log.time.toISOString();
+                    } else {
+                        // Handle string/number timestamps
+                        const date = new Date(log.time);
+                        if (isNaN(date.getTime())) {
+                            // If invalid date, use current time
+                            timeString = new Date().toISOString();
+                        } else {
+                            timeString = date.toISOString();
+                        }
+                    }
+                } catch (dateError) {
+                    // Fallback to current time if any conversion fails
+                    timeString = new Date().toISOString();
+                }
+
+                return {
+                    type: log.type,
+                    value: String(log.value),
+                    time: timeString,
+                };
+            });
 
             const observable = this.behaviorService.saveUserBehavior({
                 user_id: peerId,
