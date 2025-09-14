@@ -636,7 +636,11 @@ export class GatewayGateway
                 data.roomId ||
                 (await this.helperService.getRoomIdBySocketId(client.id));
 
+            console.log(`[Gateway] Setting RTP capabilities for peer ${peerId} in room ${roomId}`);
+            console.log(`[Gateway] RTP capabilities codecs count: ${data.rtpCapabilities?.codecs?.length || 0}`);
+
             if (!peerId || !roomId) {
+                console.error(`[Gateway] Invalid participant or room info - peerId: ${peerId}, roomId: ${roomId}`);
                 client.emit('sfu:error', {
                     message: 'Invalid participant or room information',
                 });
@@ -654,12 +658,15 @@ export class GatewayGateway
 
             // Store RTP capabilities in room service for persistence and retrieval
             try {
+                console.log(`[Gateway] Storing RTP capabilities in room service for peer ${peerId}`);
                 const rtpResult = await this.roomClient.updateParticipantRtpCapabilities(
                     peerId,
                     data.rtpCapabilities,
                 );
                 
-                if (!rtpResult.success) {
+                if (rtpResult.success) {
+                    console.log(`[Gateway] Successfully stored RTP capabilities for peer ${peerId}`);
+                } else {
                     console.warn('[Gateway] Failed to store RTP capabilities in room service:', rtpResult.error);
                 }
             } catch (error) {

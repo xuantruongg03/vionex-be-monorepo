@@ -758,6 +758,8 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             // Get RTP capabilities from participant data (stored in room service)
             let finalRtpCapabilities;
             
+            console.log(`[SFU] CreateConsumer for stream ${streamId}, producer ${stream.producerId}, participant ${participant.peerId || participant.peer_id}`);
+            
             // Try to use participant's stored RTP capabilities first
             if (participant?.rtp_capabilities) {
                 try {
@@ -767,6 +769,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                         : participant.rtp_capabilities;
                     
                     console.log(`[SFU] Using participant's stored RTP capabilities for peer ${participant.peerId || participant.peer_id}`);
+                    console.log(`[SFU] RTP capabilities codecs count: ${finalRtpCapabilities?.codecs?.length || 0}`);
                 } catch (error) {
                     console.warn(`[SFU] Failed to parse participant RTP capabilities:`, error);
                     finalRtpCapabilities = null;
@@ -786,24 +789,36 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 }
             }
 
+            console.log(`[SFU] Final RTP capabilities codecs count: ${finalRtpCapabilities?.codecs?.length || 0}`);
+            console.log(`[SFU] Producer kind: ${producer.kind}, Producer RTP parameters codecs: ${producer.rtpParameters?.codecs?.length || 0}`);
+
             // Check if router can consume this producer with the given capabilities
-            if (
-                !mediaRoom.router.canConsume({
-                    producerId: producer.id,
-                    rtpCapabilities: finalRtpCapabilities,
-                })
-            ) {
+            const canConsume = mediaRoom.router.canConsume({
+                producerId: producer.id,
+                rtpCapabilities: finalRtpCapabilities,
+            });
+            
+            console.log(`[SFU] Router canConsume check: ${canConsume} for producer ${producer.id}`);
+            
+            if (!canConsume) {
+                console.error(`[SFU] Router cannot consume producer ${producer.id}`);
+                console.error(`[SFU] Producer codecs:`, JSON.stringify(producer.rtpParameters?.codecs || [], null, 2));
+                console.error(`[SFU] Consumer RTP capabilities codecs:`, JSON.stringify(finalRtpCapabilities?.codecs || [], null, 2));
                 throw new Error(
                     `Router cannot consume producer ${producer.id}`,
                 );
             }
 
             // Create consumer
+            console.log(`[SFU] Creating consumer for producer ${producer.id} on transport ${transport.id}`);
             const consumer = await transport.consume({
                 producerId: producer.id,
                 rtpCapabilities: finalRtpCapabilities,
                 paused: true,
             });
+            
+            console.log(`[SFU] Consumer created successfully: ${consumer.id}, kind: ${consumer.kind}`);
+            console.log(`[SFU] Consumer RTP parameters codecs count: ${consumer.rtpParameters?.codecs?.length || 0}`);
             // Store consumer in media room - use streamId as key and store array of consumers
             if (!mediaRoom.consumers.has(streamId)) {
                 mediaRoom.consumers.set(streamId, []);
@@ -1530,6 +1545,14 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         speakingPeerId: string,
     ): T.Stream[] {
         const roomStreams = this.getStreamsByRoom(roomId);
+        
+        console.log(`[SFU] Looking for streams from speaking user ${speakingPeerId}`);
+        console.log(`[SFU] Total streams in room ${roomId}: ${roomStreams.length}`);
+        
+        // Log all streams for debugging
+        roomStreams.forEach(stream => {
+            console.log(`[SFU] Stream: ${stream.streamId}, Publisher: ${stream.publisherId}`);
+        });
 
         return roomStreams.filter((stream) => {
             // Must be from speaking user
@@ -1538,9 +1561,14 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             // Parse stream ID to determine type
             const parts = stream.streamId.split('_');
             const mediaType = parts[1]; // video, audio, screen, screen_audio
+            
+            console.log(`[SFU] Stream ${stream.streamId} parts:`, parts, `mediaType: ${mediaType}`);
 
             // Only prioritize regular audio/video streams, not screen shares
-            return mediaType === 'video' || mediaType === 'audio';
+            const isRegularStream = mediaType === 'video' || mediaType === 'audio';
+            console.log(`[SFU] Stream ${stream.streamId} isRegularStream: ${isRegularStream}`);
+            
+            return isRegularStream;
         });
     }
 
