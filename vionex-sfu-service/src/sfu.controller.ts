@@ -106,6 +106,8 @@ export class SfuController {
             const { transport_id, dtls_parameters } = data;
             const dtlsParameters = JSON.parse(dtls_parameters);
 
+            console.log(`[SFU Controller] Connecting transport ${transport_id}`);
+
             // Get transport from SFU service registry
             const transport = this.sfuService.getTransport(transport_id);
             if (!transport) {
@@ -115,6 +117,7 @@ export class SfuController {
 
             // Check if already connected
             if (transport.appData?.connected) {
+                console.log(`[SFU Controller] Transport ${transport_id} already connected`);
                 return {
                     message: 'Transport already connected',
                     success: false,
@@ -122,6 +125,7 @@ export class SfuController {
             }
 
             // Connect the transport
+            console.log(`[SFU Controller] Connecting transport ${transport_id} with DTLS parameters`);
             await transport.connect({ dtlsParameters });
 
             // Mark as connected
@@ -129,6 +133,8 @@ export class SfuController {
                 ...transport.appData,
                 connected: true,
             };
+
+            console.log(`[SFU Controller] Transport ${transport_id} connected successfully`);
 
             return {
                 message: 'Transport connected successfully',
