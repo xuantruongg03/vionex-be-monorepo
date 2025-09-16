@@ -39,6 +39,9 @@ export class GatewayGateway
 {
     @WebSocketServer() io: Server;
 
+    // RTP capabilities cache to fix timing race condition
+    private readonly rtpCapabilitiesCache = new Map<string, any>();
+
     constructor(
         private readonly eventService: WebSocketEventService,
         private readonly roomClient: RoomClientService,
@@ -121,6 +124,10 @@ export class GatewayGateway
 
         if (peerId && roomId) {
             try {
+                // Clean up RTP capabilities cache
+                this.rtpCapabilitiesCache.delete(peerId);
+                console.log(`[Gateway] Cleaned up RTP capabilities cache for peer: ${peerId}`);
+                
                 try {
                     const removeMediaResponse =
                         await this.sfuClient.removeParticipantMedia({
@@ -176,6 +183,12 @@ export class GatewayGateway
                         peerId: leaveRoomResponse.data.newCreator,
                         isCreator: true,
                     });
+                }
+
+                // Clean up RTP capabilities cache
+                if (peerId) {
+                    this.rtpCapabilitiesCache.delete(peerId);
+                    console.log(`[Gateway] Cleaned up RTP capabilities cache for peer: ${peerId}`);
                 }
 
                 try {
@@ -546,22 +559,22 @@ export class GatewayGateway
             );
             return;
         }
-        try {
-            const routerCapabilities =
-                await this.sfuClient.getRouterRtpCapabilities(data.roomId);
+        // try {
+        //     const routerCapabilities =
+        //         await this.sfuClient.getRouterRtpCapabilities(data.roomId);
 
-            this.eventService.emitToClient(client, 'sfu:router-capabilities', {
-                routerRtpCapabilities: routerCapabilities,
-            });
-        } catch (error) {
-            console.error('Failed to get router capabilities:', error);
-            this.eventService.emitError(
-                client,
-                'Failed to get router capabilities',
-                'ROUTER_ERROR',
-            );
-            return;
-        }
+        //     this.eventService.emitToClient(client, 'sfu:router-capabilities', {
+        //         routerRtpCapabilities: routerCapabilities,
+        //     });
+        // } catch (error) {
+        //     console.error('Failed to get router capabilities:', error);
+        //     this.eventService.emitError(
+        //         client,
+        //         'Failed to get router capabilities',
+        //         'ROUTER_ERROR',
+        //     );
+        //     return;
+        // }
 
         // Send existing streams to the new client
         try {
@@ -645,6 +658,10 @@ export class GatewayGateway
                     error: 'Invalid participant or room information',
                 };
             }
+
+            // Store RTP capabilities in cache to fix race condition
+            this.rtpCapabilitiesCache.set(peerId, data.rtpCapabilities);
+            console.log(`[Gateway] Stored RTP capabilities for peer: ${peerId}`);
 
             await this.sfuClient.setRtpCapabilities(
                 peerId,
@@ -996,9 +1013,17 @@ export class GatewayGateway
                 participant = { peer_id: peerId, is_creator: false };
             }
 
-            // For consume operation, we need to pass minimal RTP capabilities
-            // The SFU service should have stored capabilities when they were set
-            const rtpCapabilities = {}; // Will be populated by SFU service from stored data
+            // Get RTP capabilities from cache to fix race condition
+            const rtpCapabilities = this.rtpCapabilitiesCache.get(peerId) || {};
+            const hasCapabilities = Object.keys(rtpCapabilities).length > 0;
+            
+            console.log(`[Gateway] Using RTP capabilities for peer ${peerId}:`, 
+                hasCapabilities ? 'Found' : 'Empty');
+            
+            // Warn if no capabilities found (helps debugging)
+            if (!hasCapabilities) {
+                console.warn(`[Gateway] No RTP capabilities found for peer ${peerId}. This may cause SDP negotiation issues.`);
+            }
 
             const consumerInfo = await this.sfuClient.consume(
                 data.streamId,

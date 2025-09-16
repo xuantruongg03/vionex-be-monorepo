@@ -107,6 +107,13 @@ export default interface SfuGrpcService {
 
     getActiveSpeakers(data: { room_id: string }): any;
 
+    // RTP capabilities management
+    setRtpCapabilities(data: {
+        room_id: string;
+        peer_id: string;
+        rtp_capabilities: string;
+    }): Observable<{ status: string; message: string }>;
+
     // Enhanced Translation Cabin management
     allocatePort(data: {
         room_id: string;

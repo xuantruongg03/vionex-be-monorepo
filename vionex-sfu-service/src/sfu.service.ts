@@ -27,6 +27,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     private transports = new Map<string, mediasoupTypes.WebRtcTransport>(); // Map<transportId, Transport>
     private activeSpeakers = new Map<string, Map<string, Date>>(); // Map<roomId, Map<participantId, lastActiveTime>>
 
+    // RTP capabilities storage - Map<roomId, Map<participantId, rtpCapabilities>>
+    private participantRtpCapabilities = new Map<string, Map<string, any>>();
+
     // Pin/Unpin system - Map<roomId, Map<consumerId, Set<publisherId>>>
     // PRIORITY SYSTEM: Pinned users get HIGHEST priority in shouldUserReceiveStream()
     private pinnedUsers = new Map<string, Map<string, Set<string>>>();
@@ -755,11 +758,20 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 );
             }
 
-            // If no RTP capabilities provided, use router capabilities as fallback
-            let finalRtpCapabilities = rtpCapabilities;
-            if (!rtpCapabilities || Object.keys(rtpCapabilities).length === 0) {
-                finalRtpCapabilities = mediaRoom.router.rtpCapabilities;
+            // STRICT MODE: Only use stored RTP capabilities, no fallback
+            const participantId = participant.peerId || participant.peer_id;
+            const storedCapabilities = this.getParticipantRtpCapabilities(roomId, participantId);
+            
+            if (!storedCapabilities) {
+                throw new Error(
+                    `No stored RTP capabilities found for participant ${participantId} in room ${roomId}. ` +
+                    `Client must send RTP capabilities via 'sfu:set-rtp-capabilities' before creating consumers.`
+                );
             }
+            
+            const finalRtpCapabilities = storedCapabilities;
+            console.log(`[SFU] Using stored RTP capabilities for participant ${participantId}:`, 
+                JSON.stringify(storedCapabilities.codecs?.map((c: any) => c.mimeType) || []));
 
             // Check if router can consume this producer with the given capabilities
             if (
@@ -769,7 +781,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 })
             ) {
                 throw new Error(
-                    `Router cannot consume producer ${producer.id}`,
+                    `Router cannot consume producer ${producer.id} with participant ${participantId} capabilities`,
                 );
             }
 
@@ -1053,6 +1065,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
         // Dọn dẹp speaking data khi participant rời phòng
         this.removeParticipantSpeaking(roomId, participantId);
+
+        // Clean up RTP capabilities
+        this.removeParticipantRtpCapabilities(roomId, participantId);
 
         return removedStreams;
     }
@@ -2410,5 +2425,54 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
         const userPins = roomPins.get(consumerId);
         return userPins ? Array.from(userPins) : [];
+    }
+
+    /**
+     * Set RTP capabilities for a participant
+     */
+    async setParticipantRtpCapabilities(
+        roomId: string,
+        participantId: string,
+        rtpCapabilities: any
+    ): Promise<void> {
+        if (!this.participantRtpCapabilities.has(roomId)) {
+            this.participantRtpCapabilities.set(roomId, new Map());
+        }
+        
+        const roomCapabilities = this.participantRtpCapabilities.get(roomId)!;
+        roomCapabilities.set(participantId, rtpCapabilities);
+        
+        console.log(`[SFU] Stored RTP capabilities for participant ${participantId} in room ${roomId}`);
+    }
+
+    /**
+     * Get RTP capabilities for a participant
+     */
+    getParticipantRtpCapabilities(
+        roomId: string,
+        participantId: string
+    ): any | null {
+        const roomCapabilities = this.participantRtpCapabilities.get(roomId);
+        if (!roomCapabilities) return null;
+        
+        return roomCapabilities.get(participantId) || null;
+    }
+
+    /**
+     * Remove RTP capabilities for a participant (cleanup)
+     */
+    removeParticipantRtpCapabilities(
+        roomId: string,
+        participantId: string
+    ): void {
+        const roomCapabilities = this.participantRtpCapabilities.get(roomId);
+        if (roomCapabilities) {
+            roomCapabilities.delete(participantId);
+            
+            // Clean up empty room capability maps
+            if (roomCapabilities.size === 0) {
+                this.participantRtpCapabilities.delete(roomId);
+            }
+        }
     }
 }

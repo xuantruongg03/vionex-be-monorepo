@@ -26,6 +26,7 @@ service SfuService {
   rpc UnpinUser(UnpinUserRequest) returns (UnpinUserResponse);
   rpc HandleSpeaking(HandleSpeakingRequest) returns (HandleSpeakingResponse);
   rpc HandleStopSpeaking(HandleStopSpeakingRequest) returns (HandleStopSpeakingResponse);
+  rpc SetRtpCapabilities(SetRtpCapabilitiesRequest) returns (SetRtpCapabilitiesResponse);
   
   // Translation Cabin Methods
   rpc AllocatePort(AllocatePortRequest) returns (AllocatePortResponse);
@@ -347,4 +348,15 @@ message TranslationCabin {
   string target_user_id = 1;
   string source_language = 2;
   string target_language = 3;
+}
+
+message SetRtpCapabilitiesRequest {
+  string room_id = 1;
+  string peer_id = 2;
+  string rtp_capabilities = 3;
+}
+
+message SetRtpCapabilitiesResponse {
+  string status = 1;
+  string message = 2;
 }

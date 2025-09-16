@@ -93,7 +93,7 @@ export class SfuClientService implements OnModuleInit {
                 transport_id: transportId,
                 room_id: roomId,
                 peer_id: peerId,
-                rtp_capabilities: JSON.stringify(rtpCapabilities || {}),
+                rtp_capabilities: JSON.stringify(rtpCapabilities),
                 participant_data: JSON.stringify(
                     participantData || { peer_id: peerId },
                 ),
@@ -120,14 +120,24 @@ export class SfuClientService implements OnModuleInit {
         rtpCapabilities: any,
         roomId: string,
     ) {
-        // Since setRtpCapabilities is not in proto, we can use getMediaRouter to get capabilities
-        // and store them locally or use createMediaRoom to ensure room exists
         try {
+            // Ensure room exists first
             await this.createMediaRoom(roomId);
-            return { success: true };
+            
+            // Actually set RTP capabilities in SFU service
+            const result = await firstValueFrom(
+                this.sfuService.setRtpCapabilities({
+                    room_id: roomId,
+                    peer_id: peerId,
+                    rtp_capabilities: JSON.stringify(rtpCapabilities),
+                }),
+            );
+            
+            console.log(`[SFU Client] Set RTP capabilities for peer ${peerId}: ${result.status}`);
+            return { success: result.status === 'success' };
         } catch (error) {
-            // Room might already exist, that's fine
-            return { success: true };
+            console.error(`[SFU Client] Failed to set RTP capabilities for peer ${peerId}:`, error);
+            return { success: false, error: error.message };
         }
     }
 

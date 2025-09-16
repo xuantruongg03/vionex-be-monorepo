@@ -96,6 +96,36 @@ export class SfuController {
         return { status: 'success', streams: protoStreams };
     }
 
+    @GrpcMethod('SfuService', 'SetRtpCapabilities')
+    async handleSetRtpCapabilities(data: {
+        room_id: string;
+        peer_id: string;
+        rtp_capabilities: string;
+    }): Promise<{ status: string; message: string }> {
+        try {
+            const rtpCapabilities = JSON.parse(data.rtp_capabilities);
+            
+            await this.sfuService.setParticipantRtpCapabilities(
+                data.room_id,
+                data.peer_id,
+                rtpCapabilities
+            );
+            
+            console.log(`[SFU] Set RTP capabilities for peer ${data.peer_id} in room ${data.room_id}`);
+            
+            return {
+                status: 'success',
+                message: 'RTP capabilities set successfully'
+            };
+        } catch (error) {
+            console.error('Error setting RTP capabilities:', error);
+            return {
+                status: 'error',
+                message: error.message || 'Failed to set RTP capabilities'
+            };
+        }
+    }
+
     @GrpcMethod('SfuService', 'ConnectTransport')
     async handleConnectTransport(data: {
         transport_id: string;
@@ -297,16 +327,20 @@ export class SfuController {
                 throw new RpcException(`Invalid roomId: ${data.room_id}`);
             }
 
-            // Parse RTP capabilities, handle empty case
-            let rtpCapabilities = {};
-            try {
-                rtpCapabilities = JSON.parse(data.rtp_capabilities || '{}');
-            } catch (error) {
-                console.warn(
-                    '[SFU] Invalid RTP capabilities, using empty object',
-                );
-                rtpCapabilities = {};
+            // STRICT MODE: Validate RTP capabilities are provided (even though we'll use stored ones)
+            let rtpCapabilities = null;
+            if (data.rtp_capabilities && data.rtp_capabilities.trim() !== '' && data.rtp_capabilities !== '{}') {
+                try {
+                    rtpCapabilities = JSON.parse(data.rtp_capabilities);
+                } catch (error) {
+                    console.warn('[SFU] Invalid RTP capabilities format, will use stored capabilities instead');
+                    rtpCapabilities = null;
+                }
             }
+            
+            // Log what we received to help debug
+            console.log(`[SFU Controller] CreateConsumer - RTP capabilities received: ${data.rtp_capabilities}`);
+            console.log(`[SFU Controller] CreateConsumer - Parsed capabilities:`, rtpCapabilities ? 'Valid' : 'Empty/Invalid');
 
             // Parse participant data
             let participant = {};
