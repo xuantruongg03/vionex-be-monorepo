@@ -256,7 +256,10 @@ export class GatewayGateway
                         });
                     }
                 } catch (err) {
-                    console.log('[Gateway] Error listing cabins for participant:', err);
+                    console.log(
+                        '[Gateway] Error listing cabins for participant:',
+                        err,
+                    );
                 }
             }
 
