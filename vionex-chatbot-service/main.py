@@ -49,10 +49,11 @@ class VionexChatBotService(chatbot_pb2_grpc.ChatbotServiceServicer):
             AskChatBotResponse with the bot's answer
         """
         try:
-            logger.info(f"AskChatBot request: {request.question} in room {request.room_id}")
+            logger.info(f"AskChatBot request: {request.question} in room {request.room_id} for org {getattr(request, 'organization_id', 'None')}")
 
-            # Process the question using the chat bot processor
-            response = self.chatbot_processor.ask(request.question, request.room_id)
+            # Process the question using the chat bot processor with organization context
+            organization_id = getattr(request, 'organization_id', None)
+            response = self.chatbot_processor.ask(request.question, request.room_id, organization_id)
 
             return chatbot_pb2.AskChatBotResponse(
                 answer=response

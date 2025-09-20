@@ -54,7 +54,8 @@ class AudioProcessor:
         user_id: str,
         sample_rate: int = SAMPLE_RATE, 
         channels: int = 1,
-        duration: float = 0
+        duration: float = 0,
+        organization_id: str = None
     ) -> Dict[str, Any]:
         """
         Process audio buffer and transcribe
@@ -66,6 +67,7 @@ class AudioProcessor:
             sample_rate: Audio sample rate
             channels: Number of channels
             duration: Duration in milliseconds
+            organization_id: Organization ID for multi-tenant isolation
             
         Returns:
             Processing result dictionary
@@ -96,7 +98,7 @@ class AudioProcessor:
             transcript_saved = False
             if result and result.get('text', '').strip():
                 transcript_saved = await self._save_transcript(
-                    result, room_id, user_id, audio_duration
+                    result, room_id, user_id, audio_duration, organization_id
                 )
                 self.stats['successful'] += 1
             else:
@@ -358,7 +360,8 @@ class AudioProcessor:
         result: Dict[str, Any], 
         room_id: str, 
         user_id: str, 
-        duration: float
+        duration: float,
+        organization_id: str = None
     ) -> bool:
         """Save transcript to JSON file and semantic service"""
         try:
@@ -372,10 +375,15 @@ class AudioProcessor:
                 'segments': result.get('segments', [])
             }
             
+            # Add organization_id if provided
+            if organization_id:
+                transcript_data['organization_id'] = organization_id
+            
             # Send to semantic service
             await self._send_to_semantic(transcript_data)
             
-            logger.info(f"Transcript saved for {user_id} in {room_id}")
+            logger.info(f"Transcript saved for {user_id} in {room_id}" + 
+                       (f" (org: {organization_id})" if organization_id else ""))
             return True
             
         except Exception as e:

@@ -12,106 +12,65 @@
 
 # 🎯 Vionex Interaction Service
 
-A microservice that manages interactions and interactive activities within the Vionex video meeting system. This service handles features like voting, quizzes, whiteboard, polling, and other interactive activities in meeting rooms.
+Interactive features microservice for voting, polling, whiteboard, and quiz management in video meetings.
 
-## ✨ Key Features
+## ✨ Features
 
-- **Voting System**: Voting and polling mechanisms
-- **Real-time Polling**: Real-time opinion polling
-- **Whiteboard Integration**: Interactive whiteboard integration
-- **Quiz Management**: Quiz and question management
-- **Analytics & Reports**: Interaction analytics and reporting
-- **Survey Tools**: Survey and feedback tools
-- **Engagement Tracking**: Participation level tracking
-- **Data Export**: Excel data export capabilities
+- **Voting System**: Real-time voting and polling in meetings
+- **Quiz Management**: Interactive quizzes and Q&A sessions
+- **Whiteboard Integration**: Collaborative whiteboard functionality
+- **Analytics & Reports**: Interaction analytics and data export
+- **Survey Tools**: Feedback collection and surveys
+- **Engagement Tracking**: Participant engagement monitoring
 
 ## 🛠️ Technologies
 
-- **Framework**: NestJS v11
+- **Framework**: NestJS
 - **Language**: TypeScript
-- **Communication**: gRPC (@grpc/grpc-js)
-- **Data Processing**: ExcelJS v4.4
-- **Configuration**: @nestjs/config
-- **Microservices**: @nestjs/microservices
-- **Runtime**: Node.js
+- **Communication**: gRPC
+- **Data Processing**: ExcelJS (for exports)
+- **Real-time**: Redis
+- **Storage**: MongoDB
 
 ## 📁 Project Structure
 
 ```
 src/
-├── voting/
-│   ├── voting.controller.ts   # Voting gRPC controller
-│   ├── voting.service.ts      # Voting business logic
-│   └── dto/                   # Voting DTOs
-├── quiz/
-│   ├── quiz.controller.ts     # Quiz management
-│   ├── quiz.service.ts        # Quiz logic
-│   └── models/                # Quiz models
-├── polling/
-│   ├── polling.controller.ts  # Polling controller
-│   ├── polling.service.ts     # Polling service
-│   └── types/                 # Polling types
-├── whiteboard/
-│   ├── whiteboard.controller.ts # Whiteboard controller
-│   ├── whiteboard.service.ts   # Whiteboard service
-│   └── events/                 # Whiteboard events
-├── analytics/
-│   ├── analytics.service.ts   # Analytics processing
-│   ├── export.service.ts      # Data export service
-│   └── reports/               # Report generators
-├── shared/
-│   ├── interfaces/            # TypeScript interfaces
-│   ├── validators/            # Data validators
-│   └── utils/                 # Utility functions
-├── app.module.ts              # Root module
-└── main.ts                   # Application entry point
+├── voting.controller.ts      # Voting and polling endpoints
+├── voting.service.ts         # Voting logic and management
+├── quiz.controller.ts        # Quiz management endpoints
+├── quiz.service.ts           # Quiz logic and scoring
+├── whiteboard.controller.ts  # Whiteboard endpoints
+├── whiteboard.service.ts     # Whiteboard state management
+├── analytics.service.ts      # Analytics and reporting
+├── dto/
+│   └── interaction.dto.ts    # Data transfer objects
+├── app.module.ts             # Module configuration
+└── main.ts                   # Entry point
 ```
 
-## Environment Variables
+## 🔧 Environment Variables
 
 ```bash
-# Service Configuration
-PORT=50054
+# Server
+INTERACTION_GRPC_PORT=30010
 NODE_ENV=development
 
-# gRPC Configuration
-GRPC_HOST=0.0.0.0
-GRPC_PORT=50054
-
-# Database Configuration
-DATABASE_URL=mongodb://localhost:27017/vionex-interactions
-
-# Redis Configuration (for real-time features)
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=
-
-# File Storage
-UPLOAD_DIR=./uploads
-MAX_FILE_SIZE=10MB
 
 # Analytics
 ANALYTICS_RETENTION_DAYS=30
 EXPORT_BATCH_SIZE=1000
 ```
 
-## 🏗️ Architecture
+## 📋 Installation
 
-```
-┌─────────────────┐    gRPC    ┌──────────────────────┐
-│   API Gateway   │◄─────────►│ Interaction Service  │
-└─────────────────┘            └──────────────────────┘
-                                        │
-                        ┌───────────────┼───────────────┐
-                        ▼               ▼               ▼
-                ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-                │   Voting    │ │    Quiz     │ │ Whiteboard  │
-                │   Engine    │ │   Engine    │ │   Engine    │
-                └─────────────┘ └─────────────┘ └─────────────┘
-                        │               │               │
-                        ▼               ▼               ▼
-                ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-                │   Results   │ │  Analytics  │ │   Canvas    │
-                │   Store     │ │   Engine    │ │   State     │
-                └─────────────┘ └─────────────┘ └─────────────┘
+```bash
+# Install dependencies
+npm install
+# Run service
+npm run start:dev
+
+# Run with Docker
+docker build -t vionex-interaction-service .
+docker run -p 30010:30010 --env-file .env vionex-interaction-service
 ```

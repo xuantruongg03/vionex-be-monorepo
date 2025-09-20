@@ -40,7 +40,7 @@ class SemanticProcessor:
             logger.info(f"Loaded model")
 
 
-    def save(self, room_id, speaker, text, timestamp, language="vi"):
+    def save(self, room_id, speaker, text, timestamp, language="vi", organization_id=None):
         try:
             # Convert text to vector
             vector = self.model.encode(text).tolist()  # Convert to list for Qdrant compatibility
@@ -59,39 +59,58 @@ class SemanticProcessor:
             else:
                 parsed_timestamp = int(time.time())
 
+            # Prepare payload with organization_id
+            payload = {
+                "text": text,
+                "room_id": room_id,
+                "speaker": speaker,
+                "timestamp": parsed_timestamp,
+                "language": language
+            }
+            
+            # Add organization_id to payload if provided
+            if organization_id:
+                payload["organization_id"] = organization_id
+
             # Save vector to Qdrant
             point = PointStruct(
                 id=str(uuid.uuid4()),
                 vector=vector,
-                payload={
-                    "text": text,
-                    "room_id": room_id,
-                    "speaker": speaker,
-                    "timestamp": parsed_timestamp,
-                    "language": language
-                }
+                payload=payload
             )
 
             self.qdrant_client.upsert(collection_name=COLLECTION_NAME, points=[point])
 
-            logger.info(f"Saved transcript for room {room_id}, speaker {speaker} at {parsed_timestamp} in language {language}")
+            logger.info(f"Saved transcript for room {room_id}, speaker {speaker} at {parsed_timestamp} in language {language}" + 
+                       (f" for organization {organization_id}" if organization_id else ""))
             return True
             
         except Exception as e:
             logger.error(f"Error saving transcript: {e}")
             return False
     
-    def search(self, query, room_id, limit=10) -> List[dict]:
+    def search(self, query, room_id, limit=10, organization_id=None) -> List[dict]:
         # Vectorize the query
         vector = self.model.encode(query).tolist()  # Convert to list for Qdrant compatibility
 
         query_filter = None
+        filter_conditions = []
+        
+        # Add room_id filter if provided
         if room_id:
-            query_filter = Filter(
-                must=[
-                    FieldCondition(key="room_id", match=MatchValue(value=room_id))
-                ]
+            filter_conditions.append(
+                FieldCondition(key="room_id", match=MatchValue(value=room_id))
             )
+        
+        # Add organization_id filter if provided
+        if organization_id:
+            filter_conditions.append(
+                FieldCondition(key="organization_id", match=MatchValue(value=organization_id))
+            )
+        
+        # Create filter if any conditions exist
+        if filter_conditions:
+            query_filter = Filter(must=filter_conditions)
 
         # Perform search in Qdrant
         results = self.qdrant_client.search(
@@ -116,33 +135,40 @@ class SemanticProcessor:
             for hit in filtered_results
         ]
     
-    # def get_text_by_room_id(self, room_id: str) -> List[dict]:
-    #     """
-    #     Get all transcripts for a specific room ID.
+    def get_text_by_room_id(self, room_id: str, organization_id: str = None) -> List[dict]:
+        """
+        Get all transcripts for a specific room ID.
         
-    #     Args:
-    #         room_id (str): The room ID to filter transcripts.
+        Args:
+            room_id (str): The room ID to filter transcripts.
+            organization_id (str, optional): The organization ID for multi-tenant isolation.
         
-    #     Returns:
-    #         List[dict]: List of transcripts with text, speaker, and timestamp.
-    #     """
-    #     query_filter = Filter(
-    #         must=[
-    #             FieldCondition(key="room_id", match=MatchValue(value=room_id))
-    #         ]
-    #     )
+        Returns:
+            List[dict]: List of transcripts with text, speaker, and timestamp.
+        """
+        filter_conditions = [
+            FieldCondition(key="room_id", match=MatchValue(value=room_id))
+        ]
+        
+        # Add organization filter if provided
+        if organization_id:
+            filter_conditions.append(
+                FieldCondition(key="organization_id", match=MatchValue(value=organization_id))
+            )
+        
+        query_filter = Filter(must=filter_conditions)
 
-    #     results = self.qdrant_client.scroll(
-    #         collection_name=COLLECTION_NAME,
-    #         query_filter=query_filter,
-    #         with_payload=True
-    #     )
+        results = self.qdrant_client.scroll(
+            collection_name=COLLECTION_NAME,
+            query_filter=query_filter,
+            with_payload=True
+        )
 
-    #     return [
-    #         {
-    #             "text": hit.payload.get("speaker") + ": " + hit.payload.get("text"),
-    #             "speaker": hit.payload.get("speaker"),
-    #             "timestamp": hit.payload.get("timestamp")
-    #         }
-    #         for hit in results
-    #     ]
+        return [
+            {
+                "text": hit.payload.get("speaker") + ": " + hit.payload.get("text"),
+                "speaker": hit.payload.get("speaker"),
+                "timestamp": hit.payload.get("timestamp")
+            }
+            for hit in results
+        ]

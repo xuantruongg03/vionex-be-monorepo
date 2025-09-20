@@ -33,18 +33,26 @@ class SemanticClient:
                 logger.error("Semantic client not initialized")
                 return False
 
-            request = semantic_pb2.SaveTranscriptRequest(
-                room_id=data.get('room_id', ''),
-                speaker=data.get('user_id', ''),
-                text=data.get('text', ''),
-                timestamp=data.get('timestamp', ''),
-                language=data.get('language', 'unknown')
-            )
+            # Prepare request with organization_id support
+            request_params = {
+                'room_id': data.get('room_id', ''),
+                'speaker': data.get('user_id', ''),
+                'text': data.get('text', ''),
+                'timestamp': data.get('timestamp', ''),
+                'language': data.get('language', 'unknown')
+            }
+            
+            # Add organization_id if provided
+            if data.get('organization_id'):
+                request_params['organization_id'] = data.get('organization_id')
+
+            request = semantic_pb2.SaveTranscriptRequest(**request_params)
             
             response = self.stub.SaveTranscript(request)
             
             if response.success:
-                logger.info(f"Transcript saved for room {data.get('room_id')}")
+                logger.info(f"Transcript saved for room {data.get('room_id')}" + 
+                           (f" (org: {data.get('organization_id')})" if data.get('organization_id') else ""))
                 return True
             else:
                 logger.error(f"Failed to save transcript: {response}")

@@ -42,7 +42,7 @@ class VionexSemanticService(semantic_pb2_grpc.SemanticServiceServicer):
         Save transcript to semantic service
         
         Args:
-            request: SaveTranscriptRequest containing room_id, speaker, text, timestamp, language
+            request: SaveTranscriptRequest containing room_id, speaker, text, timestamp, language, organization_id
             context: gRPC context
             
         Returns:
@@ -54,13 +54,15 @@ class VionexSemanticService(semantic_pb2_grpc.SemanticServiceServicer):
             # Handle optional fields properly
             timestamp = request.timestamp if request.HasField('timestamp') else None
             language = request.language if request.HasField('language') else "vi"
+            organization_id = request.organization_id if request.HasField('organization_id') else None
 
             result = self.semantic_processor.save(
                 room_id=request.room_id, 
                 speaker=request.speaker, 
                 text=request.text, 
                 timestamp=timestamp, 
-                language=language
+                language=language,
+                organization_id=organization_id
             )
             
             if result:
@@ -94,9 +96,22 @@ class VionexSemanticService(semantic_pb2_grpc.SemanticServiceServicer):
         """
         try:
             logger.info(f"SearchTranscripts request: {request.query}")
-            
-            # Process the search query using the semantic processor
-            search_results = self.semantic_processor.search(request.query, request.room_id, request.limit or 10)
+
+            # Handle optional organization_id field
+            organization_id = request.organization_id if request.HasField('organization_id') else None
+
+            search_results = []
+            # Process when ask "summary" or "tóm tắt"
+            if "summary" in request.query.lower() or "tóm tắt" in request.query.lower():
+                search_results = self.semantic_processor.get_text_by_room_id(request.room_id, organization_id)
+            else:
+                # Process the search query using the semantic processor
+                search_results = self.semantic_processor.search(
+                    request.query, 
+                    request.room_id, 
+                    request.limit or 10, 
+                    organization_id
+                )
             
             # Convert search results to proto format
             proto_results = []

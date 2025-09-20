@@ -1,644 +1,380 @@
-# VIONEX - Advanced Video Conferencing Platform
+<p align="center">
+  <img src="https://res.cloudinary.com/dcweof28t/image/upload/v1750399380/image_products/favicon_vo2jtz.png" alt="Vionex Logo" width="200"/>
+</p>
 
-<div align="center">
-  <img src="https://res.cloudinary.com/dcweof28t/image/upload/v1751123716/image_products/logo_o34pnk.png" alt="Vionex Logo" width="400"/>
-  
-  <p><strong>Next-Generation Video Conferencing Solution</strong></p>
-  
-  [![License](https://img.shields.io/badge/License-Custom-blue.svg)](LICENSE)
-  [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)
-  [![NestJS](https://img.shields.io/badge/NestJS-10+-red.svg)](https://nestjs.com/)
-  [![TypeScript](https://img.shields.io/badge/TypeScript-5+-blue.svg)](https://www.typescriptlang.org/)
-  [![gRPC](https://img.shields.io/badge/gRPC-Latest-lightgrey.svg)](https://grpc.io/)
-</div>
+<p align="center">
+  <img src="https://img.shields.io/badge/NestJS-e0234e?style=for-the-badge&logo=nestjs&logoColor=white" alt="NestJS"/>
+  <img src="https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript"/>
+  <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
+  <img src="https://img.shields.io/badge/gRPC-4285f4?style=for-the-badge&logo=grpc&logoColor=white" alt="gRPC"/>
+  <img src="https://img.shields.io/badge/WebRTC-333333?style=for-the-badge&logo=webrtc&logoColor=white" alt="WebRTC"/>
+  <img src="https://img.shields.io/badge/AI-FF6B6B?style=for-the-badge&logo=artificial-intelligence&logoColor=white" alt="AI"/>
+</p>
 
----
+# 🎥 Vionex Backend
 
-## Overview
+Enterprise-grade video conferencing platform with AI-powered features, built on modern microservices architecture.
 
-**Vionex** is a cutting-edge, enterprise-grade video conferencing platform built with modern microservices architecture. Designed for scalability, reliability, and performance, Vionex delivers seamless real-time communication experiences for businesses, educational institutions, and collaborative teams.
+## 🚀 Overview
 
-### Key Features
+**Vionex** is a comprehensive video conferencing solution designed for scalability, reliability, and advanced AI capabilities. The platform provides seamless real-time communication with intelligent features like automated transcription, semantic search, and organization-aware multi-tenancy.
 
--   **HD Video Conferencing** - Crystal-clear video calls with adaptive bitrate streaming
--   **Real-time Chat** - Instant messaging with rich media support
--   **Interactive Whiteboard** - Collaborative drawing and presentation tools
--   **Live Polling & Voting** - Engage participants with real-time polls
--   **Room Management** - Advanced meeting room controls and permissions
--   **WebRTC SFU** - Selective Forwarding Unit for optimized media routing
--   **Real-time Audio Transcription** - AI-powered speech-to-text with Whisper
--   **Semantic Search** - Vector-based transcript search and analysis
--   **REST & gRPC APIs** - Comprehensive integration capabilities
--   **Enterprise Security** - End-to-end encryption and access controls
--   **Interaction Analytics** - Comprehensive analytics and reporting
+### ✨ Key Features
 
----
+- **HD Video Conferencing**: Crystal-clear video calls with WebRTC SFU architecture
+- **AI-Powered Transcription**: Real-time speech-to-text with OpenAI Whisper
+- **Semantic Search**: Vector-based transcript search and analysis
+- **Organization Support**: Multi-tenant architecture with organization isolation
+- **Real-time Chat**: Instant messaging within meeting rooms
+- **Interactive Tools**: Whiteboard, polling, voting, and quiz management
+- **Screen Sharing**: Desktop and application sharing capabilities
+- **Authentication & Authorization**: JWT-based security with role management
+- **Microservices Architecture**: Scalable and maintainable service design
 
-## System Architecture
+## 🏗️ System Architecture
 
-Vionex follows a **microservices architecture** pattern, ensuring scalability, maintainability, and fault tolerance:
+Vionex follows a **microservices architecture** pattern with AI-powered services and organization-aware multi-tenancy:
 
 ```
-┌─────────────────┐    ┌──────────────────┐
-│   Client Apps   │ ── │  API Gateway     │
-│  (Web/Mobile)   │    │  (Entry Point)   │
-└─────────────────┘    └──────────────────┘
-                                │
-                    ┌───────────┼───────────┐
-                    │           │           │
-        ┌───────────▼───┐  ┌────▼────┐  ┌──▼─────────┐
-        │  Chat Service │  │   SFU   │  │ Room Mgmt  │
-        │   (gRPC)      │  │ Service │  │  Service   │
-        └───────────────┘  └─────────┘  └────────────┘
-                                │
-                    ┌───────────▼───────────┐
-                    │  Interaction Service  │
-                    │ (Whiteboard, Voting)  │
-                    └───────────────────────┘
-                                │
-                    ┌───────────┼
-                    │           │
-        ┌───────────▼───┐  ┌────▼────────┐
-        │ Audio Service │  │   Semantic  │
-        │   (Python)    │  │   Service   │
-        └───────────────┘  └─────────────┘
+                    ┌─────────────────────┐
+                    │    Client Apps      │
+                    │   (Web/Mobile)      │
+                    └──────────┬──────────┘
+                               │ HTTP/WebSocket
+                               ▼
+                    ┌─────────────────────┐
+                    │   API Gateway       │
+                    │ (Port 3000)         │
+                    │ • Authentication    │
+                    │ • Request Routing   │
+                    │ • Organization      │
+                    └──────────┬──────────┘
+                               │ gRPC
+        ┌──────────────────────┼──────────────────────┐
+        │                      │                      │
+        ▼                      ▼                      ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│  Auth Service   │  │  Room Service   │  │  Chat Service   │
+│  (Port 30008)   │  │  (Port 30005)   │  │  (Port 30007)   │
+│ • JWT Auth      │  │ • Room Mgmt     │  │ • Real-time     │
+│ • Organization  │  │ • Participants  │  │   Messaging     │
+│ • User Mgmt     │  │ • Permissions   │  │ • Message       │
+└─────────────────┘  └─────────────────┘  │   History       │
+                               │          └─────────────────┘
+                               ▼
+                    ┌─────────────────────┐
+                    │   SFU Service       │
+                    │  (Port 30004)       │
+                    │ • WebRTC Media      │
+                    │ • Video/Audio       │
+                    │ • Screen Share      │
+                    └──────────┬──────────┘
+                               │
+        ┌──────────────────────┼──────────────────────┐
+        │                      │                      │
+        ▼                      ▼                      ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│ Audio Service   │  │Semantic Service │  │Interaction Svc  │
+│ (Port 30008)    │  │ (Port 30006)    │  │ (Port 30010)    │
+│ • Whisper AI    │  │ • Vector Search │  │ • Whiteboard    │
+│ • Transcription │  │ • Qdrant DB     │  │ • Voting/Polls  │
+│ • Organization  │  │ • AI Embeddings │  │ • Quiz Mgmt     │
+└─────────┬───────┘  └─────────────────┘  └─────────────────┘
+          │
+          ▼
+┌─────────────────┐
+│ Chatbot Service │
+│ (Port 30009)    │
+│ • OpenChat-3.5  │
+│ • GPU Support   │
+│ • Organization  │
+└─────────────────┘
 ```
 
-### Technology Stack
+## 🛠️ Technology Stack
 
-#### **Backend Framework**
+### **Backend Framework**
+- **NestJS**: Progressive Node.js framework for scalable applications
+- **TypeScript**: Type-safe JavaScript development
+- **Python**: AI/ML services with advanced libraries
 
--   **NestJS** - Progressive Node.js framework for scalable server-side applications
--   **TypeScript** - Type-safe JavaScript for enhanced developer experience
--   **Node.js 18+** - High-performance JavaScript runtime
+### **Communication & Protocols**
+- **gRPC**: High-performance inter-service communication
+- **WebSocket**: Real-time bidirectional communication
+- **WebRTC**: Peer-to-peer media streaming
+- **REST API**: Standard HTTP endpoints
 
-#### **Communication Protocols**
+### **AI & Machine Learning**
+- **OpenAI Whisper**: Advanced speech-to-text transcription
+- **Sentence Transformers**: Semantic text embeddings
+- **OpenChat-3.5**: LLM for intelligent chatbot responses
+- **Qdrant**: Vector database for semantic search
 
--   **gRPC** - High-performance RPC framework for inter-service communication
--   **WebSocket** - Real-time bidirectional communication
--   **REST API** - Standard HTTP-based API endpoints
--   **WebRTC** - Peer-to-peer real-time communication
+### **Media & Real-time**
+- **Mediasoup**: WebRTC SFU for media routing
+- **Socket.io**: Real-time event handling
+- **WebRTC**: Browser-native media streaming
 
-#### **Media Processing**
+### **Databases & Storage**
+- **MySQL**: Relational data for auth and organizations
+- **Qdrant**: Vector database for transcript embeddings
 
--   **SFU (Selective Forwarding Unit)** - Optimized media routing
--   **WebRTC** - Browser-native media streaming
--   **Whisper AI** - Advanced speech-to-text transcription
--   **Adaptive Bitrate** - Dynamic quality adjustment
+### **Development & Deployment**
+- **Protocol Buffers**: Efficient service communication
+- **Docker**: Containerization and deployment
+- **JWT**: Secure authentication tokens
 
-#### **AI & Analytics**
+## 🔧 Microservices Overview
 
--   **OpenAI Whisper** - Real-time audio transcription
--   **Sentence Transformers** - Semantic text analysis
--   **Qdrant Vector Database** - Efficient vector search
--   **Python FastAPI** - High-performance AI services
+| Service | Purpose | Technology | Port | Key Features |
+|---------|---------|------------|------|--------------|
+| **API Gateway** | Main entry point, routing, auth | NestJS, TypeScript | 3000 | HTTP/WebSocket routing, JWT auth, organization context |
+| **Auth Service** | Authentication & user management | NestJS, PostgreSQL | 30008 | JWT tokens, organization management, Google OAuth |
+| **Room Service** | Meeting room lifecycle | NestJS, MongoDB | 30005 | Room creation, participant management, permissions |
+| **SFU Service** | Media streaming & WebRTC | NestJS, Mediasoup | 30004 | Video/audio routing, screen sharing, media optimization |
+| **Chat Service** | Real-time messaging | NestJS, In-memory | 30007 | Room-based chat, message history, real-time delivery |
+| **Audio Service** | Speech transcription | Python, Whisper AI | 30008 | Real-time STT, organization-aware, multi-language |
+| **Semantic Service** | Transcript search & analysis | Python, Qdrant | 30006 | Vector embeddings, semantic search, organization isolation |
+| **Chatbot Service** | AI-powered Q&A | Python, OpenChat-3.5 | 30009 | GPU acceleration, transcript-based responses, LoRA fine-tuning |
+| **Interaction Service** | Interactive meeting tools | NestJS, MongoDB | 30010 | Whiteboard, voting, polls, quizzes, analytics |
 
-#### **Development Tools**
+### 🔄 Service Communication Flow
 
--   **Protocol Buffers** - Efficient data serialization
--   **ESLint** - Code quality and consistency
--   **Jest** - Comprehensive testing framework
--   **Docker** - Containerization and deployment
+```
+1. Client → API Gateway (HTTP/WebSocket)
+   ├── Authentication via Auth Service
+   ├── Room operations via Room Service
+   ├── Media streaming via SFU Service
+   └── Chat messages via Chat Service
 
----
+2. SFU Service → Audio Service (gRPC)
+   └── Real-time audio transcription
 
-## Service Architecture
+3. Audio Service → Semantic Service (gRPC)
+   └── Vector embedding and storage
 
-### Core Services
+4. API Gateway → Chatbot Service (gRPC)
+   ├── Query Semantic Service for context
+   └── Generate AI responses
 
-| Service                 | Purpose                                   | Protocol     | Port  |
-| ----------------------- | ----------------------------------------- | ------------ | ----- |
-| **API Gateway**         | Main entry point, routing, authentication | HTTP/WS/gRPC | 3000  |
-| **Chat Service**        | Real-time messaging, message history      | gRPC         | 30002 |
-| **Room Service**        | Meeting room management, permissions      | gRPC         | 30001 |
-| **SFU Service**         | Media forwarding, stream management       | gRPC/WebRTC  | 30004 |
-| **Interaction Service** | Whiteboard, voting, polls management      | gRPC         | 30003 |
-| **Audio Service**       | Real-time speech transcription            | gRPC         | 30005 |
-| **Semantic Service**    | Vector search, transcript analysis        | gRPC         | 30006 |
+5. Interaction Service ↔ API Gateway
+   └── Whiteboard, voting, quiz management
+```
 
-### Service Details
-
-#### **API Gateway (vionex-api-getway)**
-
--   **Main entry point** for all client requests
--   **WebSocket gateway** for real-time communication
--   **HTTP REST API** endpoints
--   **gRPC client** for microservice communication
--   **Authentication & authorization** handling
--   **Request routing** to appropriate services
-
-#### **Chat Service (vionex-chat-service)**
-
--   **Real-time messaging** with WebSocket support
--   **Message persistence** and history
--   **Room-based chat** functionality
--   **Message broadcasting** to participants
--   **Chat moderation** features
-
-#### **Room Service (vionex-room-service)**
-
--   **Meeting room management** and lifecycle
--   **Participant management** and permissions
--   **Room settings** and configurations
--   **Access control** and security
--   **Room analytics** and monitoring
-
-#### **SFU Service (vionex-sfu-service)**
-
--   **Media streaming** with WebRTC
--   **Selective Forwarding Unit** implementation
--   **Video/audio routing** optimization
--   **Bandwidth management** and adaptation
--   **Screen sharing** capabilities
--   **Media quality control**
-
-#### **Interaction Service (vionex-interaction-service)**
-
--   **Interactive whiteboard** functionality
--   **Real-time collaborative drawing**
--   **Live polling and voting** systems
--   **Survey management** and results
--   **Participant engagement** tools
--   **Analytics and reporting**
-
-#### **Audio Service (vionex-audio-service)**
-
--   **Real-time audio transcription** with OpenAI Whisper
--   **Speech-to-text processing** for live meetings
--   **Multi-language support** for global accessibility
--   **Audio quality optimization** and noise reduction
--   **Transcript persistence** and semantic analysis integration
--   **WebRTC audio stream processing**
-
-#### **Semantic Service (vionex-semantic-service)**
-
--   **Vector-based search** for transcript content
--   **Semantic analysis** of meeting conversations
--   **AI-powered content discovery** and insights
--   **Qdrant vector database** for efficient similarity search
--   **Meeting intelligence** and conversation analytics
--   **Advanced NLP processing** with Sentence Transformers
-
-### Communication Flow
-
-1. **Client Connection** → API Gateway (WebSocket/HTTP)
-2. **Service Discovery** → gRPC inter-service communication
-3. **Media Streaming** → SFU Service (WebRTC)
-4. **Audio Processing** → Audio Service (Whisper AI)
-5. **Semantic Analysis** → Semantic Service (Vector Search)
-6. **Real-time Features** → Dedicated microservices
-7. **Data Persistence** → Service-specific storage solutions
-
----
-
-## Project Structure
+## 📁 Project Structure
 
 ```
 vionex-backend/
-├── protos/                        # Protocol Buffer definitions
-│   ├── audio.proto                # Audio service interfaces
-│   ├── chat.proto                 # Chat service interfaces
-│   ├── interaction.proto          # Interaction service interfaces
-│   ├── room.proto                 # Room service interfaces
-│   ├── semantic.proto             # Semantic service interfaces
-│   ├── sfu.proto                  # SFU service interfaces
-│   ├── voting.proto               # Voting functionality
-│   └── whiteboard.proto           # Whiteboard functionality
+├── protos/                          # Protocol Buffer definitions (shared)
+│   ├── auth.proto                   # Authentication service interfaces
+│   ├── room.proto                   # Room management interfaces
+│   ├── sfu.proto                    # SFU service interfaces
+│   ├── chat.proto                   # Chat service interfaces
+│   ├── audio.proto                  # Audio service interfaces
+│   ├── semantic.proto               # Semantic service interfaces
+│   ├── chatbot.proto                # Chatbot service interfaces
+│   ├── interaction.proto            # Interaction service interfaces
+│   ├── voting.proto                 # Voting functionality
+│   └── whiteboard.proto             # Whiteboard functionality
 │
-├── vionex-api-getway/             # Main API Gateway
-│   ├── src/                       # Gateway source code
-│   ├── secrets/                   # SSL certificates
-│   └── package.json               # Gateway dependencies
+├── vionex-api-getway/               # API Gateway Service
+│   ├── src/                         # Gateway source code
+│   │   ├── websocket/               # WebSocket handlers
+│   │   ├── grpc-clients/           # gRPC client connections
+│   │   └── auth/                   # Authentication middleware
+│   ├── secrets/                    # SSL certificates
+│   └── package.json
 │
-├── vionex-chat-service/           # Chat microservice
-│   ├── src/                       # Chat service source
-│   └── package.json               # Chat dependencies
+├── vionex-auth-service/             # Authentication Service
+│   ├── src/                        # Auth service source
+│   │   ├── entities/               # User & organization entities
+│   │   ├── auth.controller.ts      # Auth endpoints
+│   │   └── organization.controller.ts # Organization management
+│   └── package.json
 │
-├── vionex-room-service/           # Room management service
-│   ├── src/                       # Room service source
-│   └── package.json               # Room dependencies
+├── vionex-room-service/             # Room Management Service
+│   ├── src/                        # Room service source
+│   │   ├── room.controller.ts      # Room management
+│   │   ├── participant.service.ts  # Participant handling
+│   │   └── room.gateway.ts         # WebSocket gateway
+│   └── package.json
 │
-├── vionex-sfu-service/            # Media streaming service
-│   ├── src/                       # SFU service source
-│   └── package.json               # SFU dependencies
+├── vionex-sfu-service/              # SFU Media Service
+│   ├── src/                        # SFU service source
+│   │   ├── sfu.controller.ts       # Media endpoints
+│   │   ├── media/                  # Producer/Consumer management
+│   │   └── room/                   # Room management
+│   └── package.json
 │
-├── vionex-interaction-service/    # Whiteboard & voting service
-│   ├── src/                       # Interaction source
-│   └── package.json               # Interaction dependencies
+├── vionex-chat-service/             # Chat Service
+│   ├── src/                        # Chat service source
+│   │   ├── chat.controller.ts      # Message endpoints
+│   │   ├── chat.service.ts         # Message logic
+│   │   └── interfaces/             # Message interfaces
+│   └── package.json
 │
-├── vionex-audio-service/          # Audio transcription service
-│   ├── service/                   # Audio processing modules
-│   ├── clients/                   # gRPC clients
-│   ├── core/                      # Core configurations
-│   ├── proto/                     # Generated protobuf files
-│   └── requirements.txt           # Python dependencies
+├── vionex-audio-service/            # Audio Transcription Service
+│   ├── service/                    # Audio processing modules
+│   │   ├── audio_service_clean.py  # Main service file
+│   │   └── whisper_processor.py    # Whisper integration
+│   ├── clients/                    # gRPC clients
+│   ├── core/                       # Configuration
+│   ├── proto/                      # Generated protobuf files
+│   └── requirements.txt
 │
-├── vionex-semantic-service/       # Semantic search service
-│   ├── services/                  # Semantic processing modules
-│   ├── core/                      # Vector database & models
-│   ├── proto/                     # Generated protobuf files
-│   └── requirements.txt           # Python dependencies
+├── vionex-semantic-service/         # Semantic Search Service
+│   ├── services/                   # Semantic processing
+│   │   └── semantic_processor.py   # Core semantic logic
+│   ├── core/                       # Vector DB & models
+│   │   ├── vectordb.py            # Qdrant client
+│   │   └── model.py               # AI model handling
+│   ├── proto/                      # Generated protobuf files
+│   └── requirements.txt
 │
-├── run-*.bat                      # Windows batch scripts
-├── docker-compose.yml             # Docker services configuration
-├── LICENSE                        # Project license
-└── README.md                      # This file
+├── vionex-chatbot-service/          # AI Chatbot Service
+│   ├── src/                        # Chatbot source
+│   │   ├── chatbot_server.py       # gRPC server
+│   │   └── chatbot_service.py      # AI logic
+│   ├── models/                     # Model cache
+│   ├── proto/                      # Generated protobuf files
+│   └── requirements.txt
+│
+├── vionex-interaction-service/      # Interaction Service
+│   ├── src/                        # Interaction source
+│   │   ├── voting.controller.ts    # Voting endpoints
+│   │   ├── quiz.controller.ts      # Quiz management
+│   │   ├── whiteboard.controller.ts# Whiteboard endpoints
+│   │   └── analytics.service.ts    # Analytics processing
+│   └── package.json
+
+├── docker-compose.yml              # Docker services configuration
+├── LICENSE                         # Project license
+└── README.md                       # This documentation
 ```
 
----
-
-## Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
+- **Node.js** 18.0+ for TypeScript services
+- **Python** 3.8+ for AI services  
+- **MySQL** for authentication data
+- **Qdrant** for vector embeddings
+- **Docker** (recommended) for easy deployment
 
--   **Node.js** 18.0.0 or higher
--   **npm** 8.0.0 or higher
--   **Python** 3.8.0 or higher (for AI services)
--   **pip** for Python package management
--   **Git** for version control
+### Environment Setup
 
-### Installation
+Each service requires its own `.env` configuration:
 
+### Installation & Running
+
+#### Option 1: Docker (Recommended)
 ```bash
-# Clone the repository
+# Clone repository
 git clone https://github.com/xuantruongg03/vionex-backend.git
 cd vionex-backend
 
-# Install dependencies for Node.js services
-cd vionex-api-getway
-npm install
-cd ..
-
-cd vionex-chat-service
-npm install
-cd ..
-
-cd vionex-room-service
-npm install
-cd ..
-
-cd vionex-sfu-service
-npm install
-cd ..
-
-cd vionex-interaction-service
-npm install
-cd ..
-
-# Install dependencies for Python services
-cd vionex-audio-service
-pip install -r requirements.txt
-cd ..
-
-cd vionex-semantic-service
-pip install -r requirements.txt
-cd ..
-```
-
-### Running Services
-
-#### Option 1: Using Batch Scripts (Windows)
-
-```bash
-# Start API Gateway
-.\run-gateway.bat
-
-# Start Chat Service
-.\run-chat.bat
-
-# Start Room Service
-.\run-room.bat
-
-# Start SFU Service
-.\run-sfu.bat
-
-# Start Interaction Service
-.\run-interaction.bat
-
-# Start Audio Service
-.\run\run-audio.bat
-
-# Start Semantic Service
-.\run\run-semantic.bat
-```
-
-#### Option 2: Individual Services
-
-```bash
-# Start API Gateway
-cd vionex-api-getway
-npm run start:dev
-
-# Start Chat Service
-cd vionex-chat-service
-npm run start:dev
-
-# Start Room Service
-cd vionex-room-service
-npm run start:dev
-
-# Start SFU Service
-cd vionex-sfu-service
-npm run start:dev
-
-# Start Interaction Service
-cd vionex-interaction-service
-npm run start:dev
-
-# Start Audio Service
-cd vionex-audio-service
-python audio_service_clean.py
-
-# Start Semantic Service
-cd vionex-semantic-service
-python main.py
-```
-
-### Development Mode
-
-```bash
-# Run each service in development mode with hot reload
-cd [service-directory]
-npm run start:dev
-
-# Run tests for each service
-cd [service-directory]
-npm run test
-
-# Run e2e tests for each service
-cd [service-directory]
-npm run test:e2e
-```
-
-### Building Services
-
-```bash
-# Build each service
-cd [service-directory]
-npm run build
-```
-
----
-
-## Environment Configuration
-
-Each service requires its own environment configuration:
-
-### API Gateway (.env)
-
-```bash
-PORT=3000
-NODE_ENV=development
-GRPC_CHAT_URL=localhost:50051
-GRPC_ROOM_URL=localhost:50052
-GRPC_SFU_URL=localhost:50053
-GRPC_INTERACTION_URL=localhost:50054
-GRPC_AUDIO_URL=localhost:50055
-GRPC_SEMANTIC_URL=localhost:50056
-```
-
-### Chat Service (.env)
-
-```bash
-PORT=50051
-NODE_ENV=development
-```
-
-### Room Service (.env)
-
-```bash
-PORT=50052
-NODE_ENV=development
-```
-
-### SFU Service (.env)
-
-```bash
-PORT=50053
-NODE_ENV=development
-MEDIASOUP_LISTEN_IP=0.0.0.0
-MEDIASOUP_ANNOUNCED_IP=127.0.0.1
-```
-
-### Interaction Service (.env)
-
-```bash
-PORT=50054
-NODE_ENV=development
-```
-
-### Audio Service (.env)
-
-```bash
-GRPC_PORT=50055
-SEMANTIC_SERVICE_HOST=localhost
-SEMANTIC_SERVICE_PORT=50056
-MIN_AUDIO_DURATION=1.0
-SAMPLE_RATE=16000
-```
-
-### Semantic Service (.env)
-
-```bash
-GRPC_PORT=50056
-QDRANT_HOST=localhost
-QDRANT_PORT=6333
-COLLECTION_NAME=transcripts
-```
-
----
-
-## Performance & Scalability
-
--   **Concurrent Users**: Supports 10,000+ simultaneous connections
--   **Media Quality**: Up to 4K video resolution with adaptive streaming
--   **Latency**: < 100ms for real-time features
--   **Horizontal Scaling**: Microservices can be scaled independently
--   **Load Balancing**: Built-in support for multiple instance deployment
-
----
-
-## Security Features
-
--   **JWT Authentication** - Secure token-based authentication
--   **Role-based Access Control** - Granular permission management
--   **End-to-end Encryption** - Secure media and message transmission
--   **CORS Protection** - Cross-origin request security
--   **Rate Limiting** - API abuse prevention
--   **Input Validation** - Comprehensive request sanitization
-
----
-
-## API Documentation
-
-### Protocol Buffers
-
--   **gRPC Services**: Protocol buffer definitions in `/protos` directory
-    -   `audio.proto` - Audio service interfaces
-    -   `chat.proto` - Chat service interfaces
-    -   `interaction.proto` - Interaction service interfaces
-    -   `room.proto` - Room management interfaces
-    -   `semantic.proto` - Semantic service interfaces
-    -   `sfu.proto` - SFU service interfaces
-    -   `voting.proto` - Voting functionality
-    -   `whiteboard.proto` - Whiteboard functionality
-
-### API Endpoints
-
--   **REST API**: Available at `/api/docs` when API Gateway is running
--   **WebSocket Events**: Real-time event documentation
--   **gRPC Services**: Each service runs on dedicated ports (50051-50056)
-
-### Service Ports
-
--   **API Gateway**: 3000 (HTTP/WebSocket)
--   **Chat Service**: 50051 (gRPC)
--   **Room Service**: 50052 (gRPC)
--   **SFU Service**: 50053 (gRPC)
--   **Interaction Service**: 50054 (gRPC)
--   **Audio Service**: 50055 (gRPC)
--   **Semantic Service**: 50056 (gRPC)
-
----
-
-## Contributing
-
-We welcome contributions from the community! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting pull requests.
-
-### Development Workflow
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
-
----
-
-## License
-
-This project is licensed under a custom **Research and Educational License**.
-
--   **Permitted**: Educational use, research, contributions
--   **Restricted**: Commercial use without explicit permission
-
-See the [LICENSE](LICENSE) file for full details.
-
-For commercial licensing inquiries, please contact us.
-
----
-
-## Deployment
-
-### Production Deployment
-
-#### Using Docker (Recommended)
-
-```bash
-# Build Docker images for each service
-docker build -t vionex-gateway ./vionex-api-getway
-docker build -t vionex-chat ./vionex-chat-service
-docker build -t vionex-room ./vionex-room-service
-docker build -t vionex-sfu ./vionex-sfu-service
-docker build -t vionex-interaction ./vionex-interaction-service
-docker build -t vionex-audio ./vionex-audio-service
-docker build -t vionex-semantic ./vionex-semantic-service
-
-# Run with Docker Compose
+# Start all services with Docker Compose
 docker-compose up -d
+
+# View logs
+docker-compose logs -f
 ```
 
-#### Manual Deployment
-
+#### Option 2: Manual Development Setup
 ```bash
-# Build Node.js services
-cd vionex-api-getway && npm run build && cd ..
-cd vionex-chat-service && npm run build && cd ..
-cd vionex-room-service && npm run build && cd ..
-cd vionex-sfu-service && npm run build && cd ..
-cd vionex-interaction-service && npm run build && cd ..
+# Install Node.js services
+cd vionex-api-getway && npm install && cd ..
+cd vionex-auth-service && npm install && cd ..
+cd vionex-room-service && npm install && cd ..
+cd vionex-sfu-service && npm install && cd ..
+cd vionex-chat-service && npm install && cd ..
+cd vionex-interaction-service && npm install && cd ..
 
-# Python services don't need building, just ensure dependencies are installed
+# Install Python services
 cd vionex-audio-service && pip install -r requirements.txt && cd ..
 cd vionex-semantic-service && pip install -r requirements.txt && cd ..
+cd vionex-chatbot-service && pip install -r requirements.txt && cd ..
 
-# Start services in production mode
-npm run start:prod
+# Start external dependencies
+docker run -p 5432:5432 -e POSTGRES_PASSWORD=password postgres:13
+docker run -p 27017:27017 mongo:5
+docker run -p 6333:6333 qdrant/qdrant
+
+# Generate proto files for each service
+cd vionex-[service-name] && npm run proto:generate && cd ..
+
+# Start services (separate terminals)
+cd vionex-api-getway && npm run start:dev
+cd vionex-auth-service && npm run start:dev  
+cd vionex-room-service && npm run start:dev
+cd vionex-sfu-service && npm run start:dev
+cd vionex-chat-service && npm run start:dev
+cd vionex-interaction-service && npm run start:dev
+cd vionex-audio-service && python audio_service_clean.py
+cd vionex-semantic-service && python main.py
+cd vionex-chatbot-service && python src/chatbot_server.py
 ```
 
-#### Using PM2
-
+### Service Health Check
 ```bash
-# Install PM2 globally
-npm install -g pm2
+# Check all services are running
+curl http://localhost:3000/health
 
-# Start services with PM2
-pm2 start ecosystem.config.js
-```
+## 🔐 Security & Organization Features
 
-### Monitoring & Logging
+### Multi-Tenant Architecture
+- **Organization Isolation**: Complete data segregation by organization ID
+- **Transcript Security**: Organization-aware transcript storage and search
+- **Access Control**: Role-based permissions (Owner, Member)
+- **JWT Authentication**: Secure token-based authentication
+- **API Security**: gRPC and REST endpoint protection
 
--   **Health Checks**: Each service provides `/health` endpoint
--   **Metrics**: Prometheus metrics available at `/metrics`
--   **Logging**: Structured logging with Winston
--   **Tracing**: Distributed tracing with OpenTelemetry
+### AI Security & Privacy
+- **Local Processing**: Whisper transcription runs locally
+- **Vector Isolation**: Qdrant collections separated by organization
+- **Model Privacy**: No data sent to external AI services
+- **Secure Search**: Semantic search respects organization boundaries
 
----
+## 📊 Performance & Scalability
 
-## Troubleshooting
+### System Capabilities
+- **Concurrent Users**: 10,000+ simultaneous connections
+- **Media Quality**: Up to 4K video with adaptive streaming  
+- **AI Performance**: Real-time transcription with <2s latency
+- **Search Speed**: Vector search results in <50ms
+- **Horizontal Scaling**: Independent service scaling
 
-### Common Issues
+### Resource Requirements
+- **API Gateway**: 512MB RAM, 1 CPU core
+- **Auth Service**: 256MB RAM, 0.5 CPU core
+- **Media Services**: 1GB RAM, 2 CPU cores
+- **AI Services**: 2-4GB RAM, GPU recommended for Chatbot
 
-#### Port Already in Use
+### gRPC Services
+Each service exposes gRPC endpoints defined in `/protos`:
+- **auth.proto**: Authentication and organization management
+- **room.proto**: Room lifecycle and participant management  
+- **sfu.proto**: Media streaming and WebRTC signaling
+- **chat.proto**: Real-time messaging interfaces
+- **audio.proto**: Transcription service with organization context
+- **semantic.proto**: Vector search with organization filtering
+- **chatbot.proto**: AI responses with organization-aware context
+- **interaction.proto**: Interactive tools and analytics
 
-```bash
-# Check which process is using the port
-netstat -ano | findstr :50051
-# Kill the process (replace PID with actual process ID)
-taskkill /PID <PID> /F
-```
+## 📜 License
 
-#### gRPC Connection Issues
+This project is licensed under a **Custom Research and Educational License**.
 
--   Ensure all services are running on correct ports
--   Check firewall settings
--   Verify environment variables are set correctly
+- ✅ **Permitted**: Educational use, research, contributions, personal projects
+- ❌ **Restricted**: Commercial use without explicit permission
+- 📧 **Contact**: For commercial licensing inquiries
 
-#### Build Errors
+See the [LICENSE](LICENSE) file for complete terms.
 
-```bash
-# Clean node_modules and reinstall
-rm -rf node_modules package-lock.json
-npm install
+## 🤝 Contributing
 
-# Clear TypeScript cache
-npx tsc --build --clean
-```
+We welcome contributions! Please see individual service READMEs for specific development guidelines.
 
-#### Git Submodule Issues
+**Built with ❤️ by the Vionex Team**
 
-If you encounter Git issues with nested repositories:
-
-```bash
-# Remove nested .git directories
-cd vionex-interaction-service
-rm -rf .git
-cd ..
-git add .
-```
-
-### Performance Optimization
-
-#### Memory Management
-
--   Monitor service memory usage with `npm run start:prod`
--   Use PM2 for production deployment
--   Configure appropriate heap sizes for Node.js
-
-#### Network Optimization
-
--   Use HTTP/2 for API Gateway
--   Enable gRPC compression
--   Configure appropriate timeout values
-
----
+For support, questions, or commercial licensing: **lexuantruong098@gmail.com**

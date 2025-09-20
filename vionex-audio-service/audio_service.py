@@ -88,7 +88,11 @@ class AudioService(audio_pb2_grpc.AudioServiceServicer):
             if not self._validate_audio_request(request):
                 return self._create_error_response("Invalid audio request")
 
-            logger.info(f"Processing audio from {request.userId} in room {request.roomId}")
+            logger.info(f"Processing audio from {request.userId} in room {request.roomId}" + 
+                       (f" for organization {request.organizationId}" if hasattr(request, 'organizationId') and request.organizationId else ""))
+            
+            # Get organization_id from request if provided
+            organization_id = getattr(request, 'organizationId', None) if hasattr(request, 'organizationId') else None
             
             # Process audio asynchronously using the audio processor
             # This runs Whisper transcription in a thread executor
@@ -99,7 +103,8 @@ class AudioService(audio_pb2_grpc.AudioServiceServicer):
                 user_id=request.userId,
                 sample_rate=request.sampleRate or 16000,  # Default to 16kHz if not specified
                 channels=request.channels or 1,           # Default to mono if not specified
-                duration=request.duration
+                duration=request.duration,
+                organization_id=organization_id
             ))
             
             # Update statistics based on processing result

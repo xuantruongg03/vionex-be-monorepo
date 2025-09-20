@@ -52,6 +52,7 @@ export default interface AudioGRPCService {
         duration: number;
         sampleRate: number;
         channels: number;
+        organizationId?: string; // Organization ID for multi-tenant isolation
     }): Observable<{
         success: boolean;
         transcript?: string;

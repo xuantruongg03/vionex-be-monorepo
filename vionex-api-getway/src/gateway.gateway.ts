@@ -639,11 +639,17 @@ export class GatewayGateway
                 data.roomId ||
                 (await this.helperService.getRoomIdBySocketId(client.id));
 
-            console.log(`[Gateway] Setting RTP capabilities for peer ${peerId} in room ${roomId}`);
-            console.log(`[Gateway] RTP capabilities codecs count: ${data.rtpCapabilities?.codecs?.length || 0}`);
+            console.log(
+                `[Gateway] Setting RTP capabilities for peer ${peerId} in room ${roomId}`,
+            );
+            console.log(
+                `[Gateway] RTP capabilities codecs count: ${data.rtpCapabilities?.codecs?.length || 0}`,
+            );
 
             if (!peerId || !roomId) {
-                console.error(`[Gateway] Invalid participant or room info - peerId: ${peerId}, roomId: ${roomId}`);
+                console.error(
+                    `[Gateway] Invalid participant or room info - peerId: ${peerId}, roomId: ${roomId}`,
+                );
                 client.emit('sfu:error', {
                     message: 'Invalid participant or room information',
                 });
@@ -661,19 +667,30 @@ export class GatewayGateway
 
             // Store RTP capabilities in room service for persistence and retrieval
             try {
-                console.log(`[Gateway] Storing RTP capabilities in room service for peer ${peerId}`);
-                const rtpResult = await this.roomClient.updateParticipantRtpCapabilities(
-                    peerId,
-                    data.rtpCapabilities,
+                console.log(
+                    `[Gateway] Storing RTP capabilities in room service for peer ${peerId}`,
                 );
-                
+                const rtpResult =
+                    await this.roomClient.updateParticipantRtpCapabilities(
+                        peerId,
+                        data.rtpCapabilities,
+                    );
+
                 if (rtpResult.success) {
-                    console.log(`[Gateway] Successfully stored RTP capabilities for peer ${peerId}`);
+                    console.log(
+                        `[Gateway] Successfully stored RTP capabilities for peer ${peerId}`,
+                    );
                 } else {
-                    console.warn('[Gateway] Failed to store RTP capabilities in room service:', rtpResult.error);
+                    console.warn(
+                        '[Gateway] Failed to store RTP capabilities in room service:',
+                        rtpResult.error,
+                    );
                 }
             } catch (error) {
-                console.warn('[Gateway] Error storing RTP capabilities in room service:', error);
+                console.warn(
+                    '[Gateway] Error storing RTP capabilities in room service:',
+                    error,
+                );
                 // Don't fail the whole operation for this
             }
 
@@ -1322,6 +1339,7 @@ export class GatewayGateway
             sampleRate: number;
             channels: number;
             isFinal?: boolean; // Indicates if this is the final chunk or periodic chunk
+            organizationId?: string; // Organization ID for multi-tenant isolation
         },
     ) {
         const isFinal = data.isFinal !== false; // Default to true for backward compatibility
@@ -1418,6 +1436,7 @@ export class GatewayGateway
                 duration: data.duration,
                 sampleRate: data.sampleRate || 16000,
                 channels: data.channels || 1,
+                organizationId: data.organizationId, // Forward organization ID
             });
 
             console.log(
@@ -2615,7 +2634,13 @@ export class GatewayGateway
     @SubscribeMessage('chatbot:ask')
     async handleChatbotAsk(
         @ConnectedSocket() client: Socket,
-        @MessageBody() data: { id: string; roomId: string; text: string },
+        @MessageBody()
+        data: {
+            id: string;
+            roomId: string;
+            text: string;
+            organizationId?: string;
+        },
     ) {
         try {
             console.log(`[Chatbot] Request from ${client.id}:`, {
@@ -2678,6 +2703,7 @@ export class GatewayGateway
             const response = await this.chatbotClient.askChatBot({
                 question: data.text.trim(),
                 room_id: data.roomId,
+                organization_id: data.organizationId,
             });
 
             // Send final response (for now, no streaming)

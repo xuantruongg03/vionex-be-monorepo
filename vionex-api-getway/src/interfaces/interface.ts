@@ -63,6 +63,7 @@ export interface ChatBotGrpcServiceInterface {
     askChatBot(data: {
         question: string;
         room_id: string;
+        organization_id?: string;
     }): Observable<{ answer: string }>;
 }
 

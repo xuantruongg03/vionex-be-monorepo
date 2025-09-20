@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0esemantic.proto\x12\x08semantic\"\x91\x01\n\x15SaveTranscriptRequest\x12\x0f\n\x07room_id\x18\x01 \x01(\t\x12\x0f\n\x07speaker\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\x12\x16\n\ttimestamp\x18\x04 \x01(\tH\x00\x88\x01\x01\x12\x15\n\x08language\x18\x05 \x01(\tH\x01\x88\x01\x01\x42\x0c\n\n_timestampB\x0b\n\t_language\":\n\x16SaveTranscriptResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\"X\n\x18SearchTranscriptsRequest\x12\r\n\x05query\x18\x01 \x01(\t\x12\x0f\n\x07room_id\x18\x02 \x01(\t\x12\x12\n\x05limit\x18\x03 \x01(\x05H\x00\x88\x01\x01\x42\x08\n\x06_limit\"H\n\x19SearchTranscriptsResponse\x12+\n\x07results\x18\x01 \x03(\x0b\x32\x1a.semantic.TranscriptResult\"b\n\x10TranscriptResult\x12\x0f\n\x07room_id\x18\x01 \x01(\t\x12\x0c\n\x04text\x18\x02 \x01(\t\x12\x11\n\ttimestamp\x18\x03 \x01(\t\x12\x12\n\x05score\x18\x04 \x01(\x02H\x00\x88\x01\x01\x42\x08\n\x06_score2\xc4\x01\n\x0fSemanticService\x12S\n\x0eSaveTranscript\x12\x1f.semantic.SaveTranscriptRequest\x1a .semantic.SaveTranscriptResponse\x12\\\n\x11SearchTranscripts\x12\".semantic.SearchTranscriptsRequest\x1a#.semantic.SearchTranscriptsResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0esemantic.proto\x12\x08semantic\"\xc3\x01\n\x15SaveTranscriptRequest\x12\x0f\n\x07room_id\x18\x01 \x01(\t\x12\x0f\n\x07speaker\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\x12\x16\n\ttimestamp\x18\x04 \x01(\tH\x00\x88\x01\x01\x12\x15\n\x08language\x18\x05 \x01(\tH\x01\x88\x01\x01\x12\x1c\n\x0forganization_id\x18\x06 \x01(\tH\x02\x88\x01\x01\x42\x0c\n\n_timestampB\x0b\n\t_languageB\x12\n\x10_organization_id\":\n\x16SaveTranscriptResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\"\x8a\x01\n\x18SearchTranscriptsRequest\x12\r\n\x05query\x18\x01 \x01(\t\x12\x0f\n\x07room_id\x18\x02 \x01(\t\x12\x12\n\x05limit\x18\x03 \x01(\x05H\x00\x88\x01\x01\x12\x1c\n\x0forganization_id\x18\x04 \x01(\tH\x01\x88\x01\x01\x42\x08\n\x06_limitB\x12\n\x10_organization_id\"H\n\x19SearchTranscriptsResponse\x12+\n\x07results\x18\x01 \x03(\x0b\x32\x1a.semantic.TranscriptResult\"b\n\x10TranscriptResult\x12\x0f\n\x07room_id\x18\x01 \x01(\t\x12\x0c\n\x04text\x18\x02 \x01(\t\x12\x11\n\ttimestamp\x18\x03 \x01(\t\x12\x12\n\x05score\x18\x04 \x01(\x02H\x00\x88\x01\x01\x42\x08\n\x06_score2\xc4\x01\n\x0fSemanticService\x12S\n\x0eSaveTranscript\x12\x1f.semantic.SaveTranscriptRequest\x1a .semantic.SaveTranscriptResponse\x12\\\n\x11SearchTranscripts\x12\".semantic.SearchTranscriptsRequest\x1a#.semantic.SearchTranscriptsResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,15 +32,15 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'semantic_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_SAVETRANSCRIPTREQUEST']._serialized_start=29
-  _globals['_SAVETRANSCRIPTREQUEST']._serialized_end=174
-  _globals['_SAVETRANSCRIPTRESPONSE']._serialized_start=176
-  _globals['_SAVETRANSCRIPTRESPONSE']._serialized_end=234
-  _globals['_SEARCHTRANSCRIPTSREQUEST']._serialized_start=236
-  _globals['_SEARCHTRANSCRIPTSREQUEST']._serialized_end=324
-  _globals['_SEARCHTRANSCRIPTSRESPONSE']._serialized_start=326
-  _globals['_SEARCHTRANSCRIPTSRESPONSE']._serialized_end=398
-  _globals['_TRANSCRIPTRESULT']._serialized_start=400
-  _globals['_TRANSCRIPTRESULT']._serialized_end=498
-  _globals['_SEMANTICSERVICE']._serialized_start=501
-  _globals['_SEMANTICSERVICE']._serialized_end=697
+  _globals['_SAVETRANSCRIPTREQUEST']._serialized_end=224
+  _globals['_SAVETRANSCRIPTRESPONSE']._serialized_start=226
+  _globals['_SAVETRANSCRIPTRESPONSE']._serialized_end=284
+  _globals['_SEARCHTRANSCRIPTSREQUEST']._serialized_start=287
+  _globals['_SEARCHTRANSCRIPTSREQUEST']._serialized_end=425
+  _globals['_SEARCHTRANSCRIPTSRESPONSE']._serialized_start=427
+  _globals['_SEARCHTRANSCRIPTSRESPONSE']._serialized_end=499
+  _globals['_TRANSCRIPTRESULT']._serialized_start=501
+  _globals['_TRANSCRIPTRESULT']._serialized_end=599
+  _globals['_SEMANTICSERVICE']._serialized_start=602
+  _globals['_SEMANTICSERVICE']._serialized_end=798
 # @@protoc_insertion_point(module_scope)

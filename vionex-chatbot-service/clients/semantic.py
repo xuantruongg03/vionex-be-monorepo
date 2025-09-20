@@ -28,19 +28,25 @@ class SemanticClient:
         self.stub = stub
         print("Semantic Client initialized")
 
-    async def search(self, room_id: str, text: str):
+    async def search(self, room_id: str, text: str, organization_id: str = None):
         """Search for a transcript using the semantic service."""
         try:
             # Create request with required fields
-            request = semantic_pb2.SearchTranscriptsRequest(
-                room_id=room_id,
-                question=text,
-            )
+            request_params = {
+                'room_id': room_id,
+                'query': text,
+            }
+            
+            # Add organization_id if provided
+            if organization_id:
+                request_params['organization_id'] = organization_id
+            
+            request = semantic_pb2.SearchTranscriptsRequest(**request_params)
             
             response = self.stub.SearchTranscripts(request)
-            return response.success
+            return response.results
             
         except Exception as e:
             print(f"Error calling semantic service: {e}")
-            return False
+            return []
     

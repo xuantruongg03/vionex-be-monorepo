@@ -9,6 +9,7 @@ service ChatbotService {
 message AskChatBotRequest {
     string question = 1;
     string room_id = 2;
+    string organization_id = 3;
 }
 
 message AskChatBotResponse {

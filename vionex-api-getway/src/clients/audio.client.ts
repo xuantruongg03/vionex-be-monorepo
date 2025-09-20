@@ -55,6 +55,7 @@ export class AudioClientService implements OnModuleInit {
         duration: number;
         sampleRate: number;
         channels: number;
+        organizationId?: string; // Organization ID for multi-tenant isolation
     }) {
         try {
             // Add timeout to prevent hanging calls
