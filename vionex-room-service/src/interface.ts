@@ -319,6 +319,4 @@ export {
     VerifyRoomAccessResponse,
     GetOrgRoomsRequest,
     GetOrgRoomsResponse,
-    // VerifyOrgRoomSessionRequest, // REMOVED
-    // VerifyOrgRoomSessionResponse, // REMOVED
 };

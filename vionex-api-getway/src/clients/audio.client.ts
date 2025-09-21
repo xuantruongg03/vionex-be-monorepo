@@ -34,13 +34,6 @@ export class AudioClientService implements OnModuleInit {
         return rs;
     }
 
-    /**
-     * Legacy method for backward compatibility
-     */
-    async allocateTranslationPortLegacy(roomId: string, userId: string) {
-        return this.allocateTranslationPort(roomId, userId);
-    }
-
     async releasePort(roomId: string, userId: string) {
         const data = { roomId, userId };
         return await firstValueFrom(this.audioService.releasePort(data));

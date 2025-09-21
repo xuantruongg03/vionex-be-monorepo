@@ -688,7 +688,4 @@ export class RoomGrpcController {
             };
         }
     }
-
-    // NOTE: VerifyOrgRoomSession method removed - org room access now handled by VerifyRoomAccess
-    // Users should call VerifyRoomAccess with org room ID instead
 }
