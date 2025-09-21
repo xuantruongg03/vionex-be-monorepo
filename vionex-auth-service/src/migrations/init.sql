@@ -10,9 +10,11 @@ USE `vionex_auth_service`;
 CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(36) PRIMARY KEY,
     email VARCHAR(255) NOT NULL UNIQUE,
-    password VARCHAR(255) NOT NULL,
+    password VARCHAR(255) NULL,
     name VARCHAR(255) NULL,
     avatar VARCHAR(500) NULL,
+    googleId VARCHAR(255) NULL,
+    provider VARCHAR(20) DEFAULT 'local',
     otp VARCHAR(10) NULL,
     isActive BOOLEAN DEFAULT TRUE,
     refreshToken TEXT NULL,
@@ -46,6 +48,8 @@ FOREIGN KEY (orgId) REFERENCES organizations(id) ON DELETE SET NULL;
 
 -- Create indexes for better performance
 CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_googleId ON users(googleId);
+CREATE INDEX idx_users_provider ON users(provider);
 CREATE INDEX idx_users_orgId ON users(orgId);
 CREATE INDEX idx_users_role ON users(role);
 CREATE INDEX idx_users_deletedAt ON users(deletedAt);
