@@ -1,5 +1,6 @@
 
 import logging
+import torch
 from core.model import translation_models, translation_tokenizers
 
 logger = logging.getLogger(__name__)
@@ -39,11 +40,31 @@ class TranslateProcess:
             # Tokenize input sentences
             inputs = tokenizer(text_input, return_tensors="pt", padding=True, truncation=True)
             
-            # Generate translations
-            translated = model.generate(**inputs)
+            # Move inputs to the same device as the model
+            try:
+                device = next(model.parameters()).device
+                inputs = {k: v.to(device) for k, v in inputs.items()}
+            except Exception as device_error:
+                logger.warning(f"[TranslateProcess] Could not move inputs to model device: {device_error}")
+                # Continue with inputs on original device (CPU fallback)
+            
+            # Generate translations with appropriate settings
+            with torch.no_grad():  # Disable gradient computation for inference
+                translated = model.generate(
+                    **inputs,
+                    max_length=512,  # Prevent excessively long outputs
+                    num_beams=4,     # Balance quality vs speed
+                    early_stopping=True,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                )
             
             # Decode the generated tokens
             result = [tokenizer.decode(t, skip_special_tokens=True) for t in translated]
+            
+            # Clean up GPU memory if using CUDA
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             
             return result
         except Exception as e:
