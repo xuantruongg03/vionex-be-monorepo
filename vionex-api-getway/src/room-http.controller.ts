@@ -19,6 +19,7 @@ import * as mediasoupTypes from 'mediasoup/node/lib/types';
 import { Socket } from 'socket.io';
 import { AuthClientService } from './clients/auth.client';
 import { RoomClientService } from './clients/room.client';
+import { SfuClientService } from './clients/sfu.client';
 import { Participant } from './interfaces/interface';
 import { HttpBroadcastService } from './services/http-broadcast.service';
 import { WebSocketEventService } from './services/websocket-event.service';
@@ -66,6 +67,7 @@ export class RoomHttpController {
         private readonly authClient: AuthClientService,
         private readonly eventService: WebSocketEventService,
         private readonly broadcastService: HttpBroadcastService,
+        private readonly sfuClient: SfuClientService,
     ) {}
 
     @Post(':roomId/transports/:transportId/connect')
@@ -166,6 +168,182 @@ export class RoomHttpController {
                 'Stream updates are now handled via WebSocket. Please use WebSocket API.',
             redirectTo: 'WebSocket sfu:update-stream event',
         };
+    }
+
+    @Post(':roomId/join')
+    async joinRoom(
+        @Param('roomId') roomId: string,
+        @Body() body: { peerId: string; password?: string; userInfo?: any },
+        @Req() req: any,
+    ) {
+        try {
+            console.log(`[HTTP] Join room: ${roomId}, peerId: ${body.peerId}`);
+
+            // Check if room is password protected
+            const isRoomLocked = await this.roomClient.isRoomLocked(roomId);
+            if (isRoomLocked) {
+                if (!body.password) {
+                    throw new BadRequestException('Password required for this room');
+                }
+
+                const isValid = await this.roomClient.verifyRoomPassword(
+                    roomId,
+                    body.password,
+                );
+                if (!isValid) {
+                    throw new BadRequestException('Invalid room password');
+                }
+            }
+
+            // Initialize room if needed
+            let room = await this.roomClient.getRoom(roomId);
+            if (!room.data || !room.data.room_id) {
+                await this.roomClient.createRoom(roomId);
+                room = await this.roomClient.getRoom(roomId);
+            }
+
+            // Check if participant already exists
+            const existingParticipant = await this.roomClient.getParticipantByPeerId(
+                roomId,
+                body.peerId,
+            );
+
+            if (existingParticipant) {
+                console.log(`[HTTP] Participant ${body.peerId} already in room ${roomId}`);
+                return {
+                    success: true,
+                    message: 'Already in room',
+                    participant: existingParticipant,
+                    roomData: room.data,
+                };
+            }
+
+            // Create participant
+            const participant: Participant = {
+                peer_id: body.peerId,
+                socket_id: `http-${body.peerId}-${Date.now()}`, // Temporary socket ID
+                transports: new Map(),
+                producers: new Map(),
+                consumers: new Map(),
+                is_creator: false,
+                time_arrive: new Date(),
+                name: body.userInfo?.name || body.peerId,
+                isAudioEnabled: true,
+                isVideoEnabled: true,
+                isHost: false,
+                user_info: body.userInfo,
+            };
+
+            // Add participant to room
+            await this.roomClient.setParticipant(roomId, participant);
+
+            // Get updated room data
+            const updatedRoom = await this.roomClient.getRoom(roomId);
+
+            console.log(`[HTTP] Successfully joined room: ${roomId}, peerId: ${body.peerId}`);
+
+            return {
+                success: true,
+                message: 'Joined room successfully',
+                participant,
+                roomData: updatedRoom.data,
+                roomId,
+            };
+        } catch (error) {
+            console.error('[HTTP] Join room error:', error);
+            throw error;
+        }
+    }
+
+    @Post(':roomId/connect-websocket')
+    async connectWebSocket(
+        @Param('roomId') roomId: string,
+        @Body() body: { peerId: string; socketId: string },
+        @Req() req: any,
+    ) {
+        try {
+            console.log(`[HTTP] Connect WebSocket: ${roomId}, peerId: ${body.peerId}, socketId: ${body.socketId}`);
+
+            // Get participant
+            const participant = await this.roomClient.getParticipantByPeerId(
+                roomId,
+                body.peerId,
+            );
+
+            if (!participant) {
+                throw new BadRequestException('Participant not found. Please join room first via HTTP.');
+            }
+
+            // Update participant with real socket ID
+            participant.socket_id = body.socketId;
+            await this.roomClient.setParticipant(roomId, participant);
+
+            // Broadcast to other participants that user is now connected via WebSocket
+            this.broadcastService.broadcastToRoom(roomId, 'sfu:peer-websocket-connected', {
+                roomId,
+                peerId: body.peerId,
+                socketId: body.socketId,
+            });
+
+            console.log(`[HTTP] WebSocket connected for ${body.peerId} in room ${roomId}`);
+
+            return {
+                success: true,
+                message: 'WebSocket connected successfully',
+                participant,
+            };
+        } catch (error) {
+            console.error('[HTTP] Connect WebSocket error:', error);
+            throw error;
+        }
+    }
+
+    @Post(':roomId/setup-media')
+    async setupMedia(
+        @Param('roomId') roomId: string,
+        @Body() body: { peerId: string },
+        @Req() req: any,
+    ) {
+        try {
+            console.log(`[HTTP] Setup media: ${roomId}, peerId: ${body.peerId}`);
+
+            // Get participant
+            const participant = await this.roomClient.getParticipantByPeerId(
+                roomId,
+                body.peerId,
+            );
+
+            if (!participant) {
+                throw new BadRequestException('Participant not found');
+            }
+
+            // Create media room in SFU service if needed
+            // This ensures media room is ready before any WebRTC operations
+            try {
+                const mediaRoomResult = await this.sfuClient.createMediaRoom(roomId);
+                console.log(`[HTTP] Media room created/exists for ${roomId}`);
+                
+                // Parse the result if it's a string
+                let mediaRoom;
+                if (typeof mediaRoomResult === 'string') {
+                    mediaRoom = JSON.parse(mediaRoomResult);
+                } else {
+                    mediaRoom = mediaRoomResult;
+                }
+                
+                return {
+                    success: true,
+                    message: 'Media setup completed',
+                    routerRtpCapabilities: mediaRoom?.router?.rtpCapabilities || mediaRoom?.rtpCapabilities,
+                };
+            } catch (error) {
+                console.error(`[HTTP] Failed to setup media room: ${error.message}`);
+                throw new BadRequestException('Failed to setup media room');
+            }
+        } catch (error) {
+            console.error('[HTTP] Setup media error:', error);
+            throw error;
+        }
     }
 
     @Post(':roomId/leave')

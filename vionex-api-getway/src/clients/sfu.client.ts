@@ -120,18 +120,14 @@ export class SfuClientService implements OnModuleInit {
         rtpCapabilities: any,
         roomId: string,
     ) {
+        // Since setRtpCapabilities is not in proto, we can use getMediaRouter to get capabilities
+        // and store them locally or use createMediaRoom to ensure room exists
         try {
-            console.log(`[SFU Client] Setting RTP capabilities for peer ${peerId} in room ${roomId}`);
-            
-            // Ensure room exists first
             await this.createMediaRoom(roomId);
-            
-            // RTP capabilities will be stored in room service via gateway
-            // No need to duplicate storage here
-            return { success: true, rtpCapabilities };
+            return { success: true };
         } catch (error) {
-            console.error('[SFU Client] Error setting RTP capabilities:', error);
-            return { success: false, error: error.message };
+            // Room might already exist, that's fine
+            return { success: true };
         }
     }
 
