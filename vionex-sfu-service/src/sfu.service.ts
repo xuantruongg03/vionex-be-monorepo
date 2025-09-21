@@ -939,13 +939,22 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             // Store producer in media room
             mediaRoom.producers.set(streamId, producer);
 
-            // Create and store the stream object
+            // Create and store the stream object with enhanced metadata
+            const enhancedMetadata = {
+                ...data.metadata,
+                isScreenShare: isScreenShare,
+                type: isScreenShare
+                    ? streamType
+                    : data.metadata?.type || 'webcam',
+                streamType: streamType,
+            };
+
             const stream = this.createStream(
                 streamId,
                 data.participant.peerId || data.participant.peer_id,
                 producer.id,
                 data.rtpParameters,
-                data.metadata,
+                enhancedMetadata,
                 data.roomId,
             );
 

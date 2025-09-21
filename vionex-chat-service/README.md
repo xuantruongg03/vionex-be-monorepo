@@ -11,70 +11,65 @@
 
 # 💬 Vionex Chat Service
 
-A microservice dedicated to handling chat features within the Vionex video meeting system. This service manages real-time messaging, chat history, and user interactions within meeting rooms.
+Real-time messaging microservice for video meeting rooms with organization-aware chat management.
 
-## ✨ Key Features
+## ✨ Features
 
-- **Real-time Messaging**: Send and receive messages in real-time
-- **Message History**: Store and retrieve chat history
-- **Room-based Chat**: Chat functionality organized by meeting rooms
-- **Message Notifications**: Notify users of new messages
-- **Message Validation**: Content filtering and validation
-- **Multi-platform Support**: Support for various client platforms
+- **Real-time Messaging**: Send and receive messages in meeting rooms
+- **Organization Support**: Multi-tenant chat with organization isolation
+- **Message History**: Store and retrieve chat history by room
+- **gRPC Communication**: High-performance service communication
+- **Message Validation**: Content filtering and message validation
+- **Room-based Chat**: Chat scoped to specific meeting rooms
 
 ## 🛠️ Technologies
 
-- **Framework**: NestJS v11
+- **Framework**: NestJS
 - **Language**: TypeScript
-- **Communication**: gRPC (@grpc/grpc-js)
-- **ID Generation**: NanoID v5
-- **Configuration**: @nestjs/config
-- **Microservices**: @nestjs/microservices
-- **Runtime**: Node.js
+- **Communication**: gRPC
+- **Database**: MongoDB (optional for persistence)
+- **ID Generation**: NanoID
+- **Storage**: In-memory message store
 
 ## 📁 Project Structure
 
 ```
 src/
-├── chat/
-│   ├── chat.controller.ts     # gRPC controller
-│   ├── chat.service.ts        # Business logic
-│   └── dto/                   # Data transfer objects
-├── shared/
-│   ├── interfaces/            # TypeScript interfaces
-│   └── utils/                 # Utility functions
-├── app.module.ts              # Root module
-└── main.ts                   # Application entry point
+├── chat.controller.ts        # gRPC message endpoints
+├── chat.service.ts           # Message management logic
+├── interfaces/
+│   └── chat.interface.ts     # Message interfaces
+├── dto/
+│   └── chat.dto.ts          # Data transfer objects
+├── app.module.ts            # Module configuration
+└── main.ts                  # Entry point
 ```
 
-## Environment Variables
+## 🔧 Environment Variables
 
 ```bash
-# Service Configuration
-PORT=50051
+# Server
+CHAT_GRPC_PORT=30007
 NODE_ENV=development
 
 # gRPC Configuration
 GRPC_HOST=0.0.0.0
-GRPC_PORT=50051
 
-# Database Configuration
-DATABASE_URL=mongodb://localhost:27017/vionex-chat
 
 # Logging
-LOG_LEVEL=debug
+LOG_LEVEL=info
 ```
 
-## 🏗️ Architecture
+## 📋 Installation
 
-```
-┌─────────────────┐    gRPC    ┌──────────────────┐
-│   API Gateway   │◄─────────►│   Chat Service   │
-└─────────────────┘            └──────────────────┘
-                                        │
-                                        ▼
-                                ┌──────────────────┐
-                                │   Message Store  │
-                                │   (In-Memory)    │
-                                └──────────────────┘
+```bash
+# Install dependencies
+npm install
+
+# Run service
+npm run start:dev
+
+# Run with Docker
+docker build -t vionex-chat-service .
+docker run -p 30007:30007 --env-file .env vionex-chat-service
 ```

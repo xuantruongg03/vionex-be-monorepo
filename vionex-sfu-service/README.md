@@ -12,58 +12,48 @@
 
 # 📡 Vionex SFU Service
 
-A microservice specialized in handling media streaming for the Vionex video meeting system. This service uses Mediasoup to provide high-performance, low-latency video/audio streaming capabilities.
+Selective Forwarding Unit (SFU) microservice for high-performance video/audio streaming using Mediasoup WebRTC.
 
-## ✨ Key Features
+## ✨ Features
 
-- **Video Streaming**: High-quality video streaming
-- **Audio Processing**: Real-time audio processing
-- **Screen Sharing**: Screen sharing capabilities
-- **Media Routing**: Intelligent media routing
-- **Low Latency**: Ultra-low latency streaming
-- **Bandwidth Optimization**: Optimized bandwidth usage
-- **Media Controls**: Media controls (mute, camera on/off)
-- **Scalable Architecture**: Horizontally scalable architecture
+- **Video/Audio Streaming**: High-quality real-time media streaming
+- **Screen Sharing**: Desktop and application screen sharing
+- **Media Routing**: Intelligent media routing and bandwidth optimization
+- **WebRTC Support**: Full WebRTC implementation with SFU architecture
+- **Low Latency**: Ultra-low latency streaming for real-time communication
+- **Scalable Media**: Horizontally scalable media processing
 
 ## 🛠️ Technologies
 
-- **Framework**: NestJS v11
+- **Framework**: NestJS
 - **Language**: TypeScript
 - **Media Server**: Mediasoup v3.16
-- **Real-time**: Socket.io v4.8
-- **Communication**: gRPC (@grpc/grpc-js)
-- **HTTP Client**: Axios
-- **Protocol**: WebRTC
-- **Runtime**: Node.js
+- **Real-time**: Socket.io
+- **Communication**: gRPC, WebRTC
+- **Protocol**: WebRTC SFU architecture
 
 ## 📁 Project Structure
 
 ```
 src/
-├── sfu/
-│   ├── sfu.controller.ts      # gRPC controller
-│   ├── sfu.service.ts         # Business logic
-│   ├── sfu.gateway.ts         # WebSocket gateway
-│   └── mediasoup/             # Mediasoup integration
+├── sfu.controller.ts         # gRPC media endpoints
+├── sfu.service.ts            # SFU logic and media management
+├── sfu.gateway.ts            # WebSocket gateway for WebRTC
 ├── media/
-│   ├── producer.service.ts    # Media producer management
-│   ├── consumer.service.ts    # Media consumer management
-│   └── transport.service.ts   # Transport management
+│   ├── producer.service.ts   # Media producer management
+│   ├── consumer.service.ts   # Media consumer management
+│   └── transport.service.ts  # WebRTC transport management
 ├── room/
-│   ├── room-manager.ts        # Room management
-│   └── participant.manager.ts # Participant tracking
-├── shared/
-│   ├── interfaces/            # TypeScript interfaces
-│   └── utils/                 # Utility functions
-├── app.module.ts              # Root module
-└── main.ts                   # Application entry point
+│   └── room-manager.ts       # Room and participant management
+├── app.module.ts             # Module configuration
+└── main.ts                   # Entry point
 ```
 
 ## 🔧 Environment Variables
 
 ```bash
-# Service Configuration
-PORT=50053
+# Server
+SFU_GRPC_PORT=30004
 NODE_ENV=development
 
 # Mediasoup Configuration
@@ -86,29 +76,16 @@ MAX_BITRATE=3000000
 MAX_PARTICIPANTS_PER_ROUTER=100
 ```
 
-## 🏗️ Media Pipeline Architecture
+## 📋 Installation
 
-```
-┌─────────────────┐    WebRTC    ┌──────────────────┐
-│   Web Client    │◄───────────►│   SFU Service    │
-└─────────────────┘              └──────────────────┘
-                                          │
-                                          ▼
-                                  ┌─────────────────┐
-                                  │  Mediasoup SFU  │
-                                  │    Routers      │
-                                  └─────────────────┘
-                                          │
-                    ┌─────────────────────┼─────────────────────┐
-                    ▼                     ▼                     ▼
-            ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-            │   Producer   │    │   Producer   │    │   Producer   │
-            │  (Client A)  │    │  (Client B)  │    │  (Client C)  │
-            └──────────────┘    └──────────────┘    └──────────────┘
-                    │                     │                     │
-                    ▼                     ▼                     ▼
-            ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-            │   Consumer   │    │   Consumer   │    │   Consumer   │
-            │ (Other Peers)│    │ (Other Peers)│    │ (Other Peers)│
-            └──────────────┘    └──────────────┘    └──────────────┘
+```bash
+# Install dependencies
+npm install
+
+# Run service
+npm run start:dev
+
+# Run with Docker
+docker build -t vionex-sfu-service .
+docker run -p 30004:30004 -p 40000-49999:40000-49999/udp --env-file .env vionex-sfu-service
 ```

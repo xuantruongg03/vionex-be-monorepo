@@ -64,6 +64,7 @@ message ProcessAudioBufferRequest {
   double duration = 5;
   int32 sampleRate = 6;
   int32 channels = 7;
+  optional string organizationId = 8; // Organization ID for multi-tenant isolation
 }
 
 /**

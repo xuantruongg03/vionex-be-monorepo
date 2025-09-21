@@ -12,272 +12,79 @@
 
 # 🎤 Vionex Audio Service
 
-A high-performance microservice for real-time audio processing and speech recognition in the Vionex video conferencing platform. Built with OpenAI's Faster-Whisper for accurate speech-to-text conversion.
+Audio processing microservice for speech-to-text conversion using Faster-Whisper with organization isolation support.
 
-## ✨ Key Features
+## ✨ Features
 
--   **Real-time Speech Recognition**: Convert audio streams to text using OpenAI Faster-Whisper
--   **Multi-language Support**: Automatic language detection and transcription
--   **Audio Buffer Processing**: Efficient PCM audio buffer handling
--   **Transcript Management**: Automatic transcript saving and user session management
--   **Quality Analysis**: Audio quality assessment and hallucination detection
--   **Streaming Support**: Real-time audio streaming via gRPC
--   **Performance Optimized**: Threaded processing for low-latency transcription
+- **Speech Recognition**: Real-time audio to text conversion using Faster-Whisper
+- **Multi-language Support**: Automatic language detection
+- **Audio Buffer Processing**: Efficient PCM audio buffer handling
+- **Organization Isolation**: Multi-tenant transcript storage
+- **Quality Analysis**: Audio quality assessment
 
 ## 🛠️ Technologies
 
--   **Language**: Python 3.8+
--   **AI Engine**: OpenAI Faster-Whisper
--   **Communication**: gRPC (grpcio, grpcio-tools)
--   **Audio Processing**: NumPy, PyDub
--   **Configuration**: python-dotenv
--   **Containerization**: Docker
--   **Audio Format**: PCM 16-bit, WAV support
+- **Language**: Python
+- **AI Engine**: Faster-Whisper
+- **Communication**: gRPC
+- **Audio Processing**: NumPy, PyDub
+- **Containerization**: Docker
 
 ## 📁 Project Structure
 
 ```
-vionex-audio-service/
-├── audio_service_clean.py     # Main application entry point
+src/
 ├── core/
-│   ├── config.py             # Configuration management
-│   └── model.py              # Whisper model initialization
-├── service/
-│   ├── audio_processor.py    # Core audio processing logic
-├── proto/                    # Generated gRPC protocol files
-├── transcripts/              # Stored transcript files
-├── requirements.txt          # Python dependencies
-├── Dockerfile               # Docker configuration
-└── README.md                # This file
+│   ├── config.py             # Configuration
+│   └── model.py              # Whisper model
+├── services/
+│   └── audio_processor.py    # Audio processing
+├── proto/                    # gRPC protocol files
+├── transcripts/              # Transcript storage
+├── main.py                   # Entry point
+├── requirements.txt          # Dependencies
+└── Dockerfile               # Docker config
 ```
 
-## 📋 Environment Configuration
-
-Create a `.env` file with the following variables:
+## � Environment Variables
 
 ```bash
-# Service Configuration
+# Service
 GRPC_PORT=30005
 PYTHON_ENV=development
 
-# Audio Configuration
+# Audio
 SAMPLE_RATE=16000
 MIN_AUDIO_DURATION=0.5
 CHANNELS=1
 
-# Whisper Configuration
+# Whisper
 WHISPER_MODEL=base
 WHISPER_DEVICE=cpu
 
-# Storage Configuration
+# Storage
 TRANSCRIPT_DIR=./transcripts
 
 # Logging
 LOG_LEVEL=INFO
 ```
 
-## 🏗️ Architecture
-
-```
-┌─────────────────┐    gRPC    ┌──────────────────┐
-│   API Gateway   │◄─────────►│   Audio Service  │
-└─────────────────┘            └──────────────────┘
-                                        │
-                                        ▼
-                              ┌──────────────────┐
-                              │  Audio Processor │
-                              │  (Buffer → Array)│
-                              └──────────────────┘
-                                        │
-                                        ▼
-                              ┌──────────────────┐
-                              │  Faster-Whisper │
-                              │  (Speech-to-Text)│
-                              └──────────────────┘
-                                        │
-                                        ▼
-                              ┌──────────────────┐
-                              │  Transcript      │
-                              │  Storage (JSON)  │
-                              └──────────────────┘
-```
-
-## 🚀 Getting Started
-
-### Prerequisites
-
--   Python 3.8 or higher
--   Docker (optional)
--   FFmpeg (for audio processing)
-
-### Installation
-
-1. **Clone the repository**
-
-    ```bash
-    git clone <repository-url>
-    cd vionex-audio-service
-    ```
-
-2. **Install Python dependencies**
-
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-3. **Generate proto files** (if needed)
-
-    ```bash
-    python -m grpc_tools.protoc -I../protos ../protos/audio.proto --python_out=./proto --grpc_python_out=./proto
-    ```
-
-4. **Set up environment variables**
-
-    ```bash
-    # Create .env file with your configuration
-    cp .env.example .env
-    ```
-
-5. **Create transcript directory**
-    ```bash
-    mkdir transcripts
-    ```
-
-### Running the Service
-
-#### Local Development
+## � Installation
 
 ```bash
-python audio_service_clean.py
+# Install dependencies
+pip install -r requirements.txt
+
+# Generate proto files
+python -m grpc_tools.protoc -I../protos ../protos/audio.proto --python_out=./proto --grpc_python_out=./proto
+
+# Create environment file
+cp .env.example .env
+
+# Run service
+python main.py
+
+# Run with Docker
+docker build -t vionex-audio-service .
+docker run -p 30005:30005 --env-file .env vionex-audio-service
 ```
-
-#### Using Docker
-
-1. **Build the Docker image**
-
-    ```bash
-    docker build -t vionex-audio-service .
-    ```
-
-2. **Run the Docker container**
-
-    ```bash
-    # Pull
-    docker pull lexuantruong098/vionex-audio-service-gpu:latest
-
-    # CPU Version
-    docker run --rm -it \
-      -p 30005:30005 -p 35000-35400:35000-35400/udp \
-      --env-file .env \
-      -v "${PWD}/transcripts:/app/transcripts" \
-      vionex-audio-service
-
-    # GPU Version
-    docker run --gpus all --rm -it \
-      -p 30005:30005 -p 35000-35400:35000-35400/udp \
-      --env-file .env \
-      -v "${PWD}/transcripts:/app/transcripts" \
-      -v "${PWD}/models/XTTS-v2:/root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2" \
-      lexuantruong098/vionex-audio-service-gpu:latest
-
-    # Production (Background)
-    docker run --gpus all -d --name vionex-audio-gpu \
-      -p 30005:30005 -p 35000-35400:35000-35400/udp \
-      --env-file .env \
-      --restart unless-stopped \
-      -v "/opt/vionex/transcripts:/app/transcripts" \
-      lexuantruong098/vionex-audio-service-gpu:latest
-    ```
-
-## 🔧 Configuration
-
-### Audio Processing Settings
-
--   **Sample Rate**: 16000 Hz (Whisper requirement)
--   **Channels**: Mono (converted automatically)
--   **Format**: 16-bit PCM audio buffers
--   **Min Duration**: 0.5 seconds minimum audio length
-
-### Whisper Model Options
-
--   **Model Sizes**: tiny, base, small, medium, large
--   **Device**: CPU or GPU processing
--   **Language**: Auto-detect or specify language code
--   **Temperature**: 0.0 for deterministic output
-
-## 📡 gRPC API
-
-### Service Methods
-
-#### `ProcessAudioBuffer`
-
-Process audio buffer and return transcription result.
-
-**Request:**
-
-```protobuf
-message AudioBufferRequest {
-  bytes audio_buffer = 1;
-  string room_id = 2;
-  string user_id = 3;
-  int32 sample_rate = 4;
-  int32 channels = 5;
-  float duration = 6;
-}
-```
-
-**Response:**
-
-```protobuf
-message AudioBufferResponse {
-  bool success = 1;
-  string message = 2;
-  string transcript = 3;
-  float processing_time = 4;
-  bool transcript_saved = 5;
-}
-```
-
-#### `StartAudioStream`
-
-Start real-time audio streaming session.
-
-#### `StopAudioStream`
-
-Stop audio streaming session.
-
-#### `GetTranscript`
-
-Retrieve stored transcript for a room.
-
-#### `HealthCheck`
-
-Service health status check.
-
-## 📊 Performance Metrics
-
--   **Latency**: < 2 seconds for 5-second audio clips
--   **Accuracy**: 90%+ for clear speech
--   **Throughput**: Multiple concurrent sessions
--   **Memory**: ~1-2GB RAM usage (depends on model)
-
-## 🔍 Monitoring & Debugging
-
-### Logging Levels
-
--   **INFO**: Processing status, transcript results, audio metrics
--   **DEBUG**: Detailed processing steps, audio analysis
--   **WARNING**: Audio quality issues, potential problems
--   **ERROR**: Processing failures, system errors
-
-### Key Metrics Logged
-
--   Audio buffer size and duration
--   Audio RMS levels and quality
--   Processing time per request
--   Transcript length and confidence
--   Success/failure rates
-
-## 📄 License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

@@ -256,7 +256,10 @@ export class GatewayGateway
                         });
                     }
                 } catch (err) {
-                    console.log('[Gateway] Error listing cabins for participant:', err);
+                    console.log(
+                        '[Gateway] Error listing cabins for participant:',
+                        err,
+                    );
                 }
             }
 
@@ -636,7 +639,17 @@ export class GatewayGateway
                 data.roomId ||
                 (await this.helperService.getRoomIdBySocketId(client.id));
 
+            console.log(
+                `[Gateway] Setting RTP capabilities for peer ${peerId} in room ${roomId}`,
+            );
+            console.log(
+                `[Gateway] RTP capabilities codecs count: ${data.rtpCapabilities?.codecs?.length || 0}`,
+            );
+
             if (!peerId || !roomId) {
+                console.error(
+                    `[Gateway] Invalid participant or room info - peerId: ${peerId}, roomId: ${roomId}`,
+                );
                 client.emit('sfu:error', {
                     message: 'Invalid participant or room information',
                 });
@@ -652,82 +665,38 @@ export class GatewayGateway
                 roomId,
             );
 
+            // Store RTP capabilities in room service for persistence and retrieval
+            try {
+                console.log(
+                    `[Gateway] Storing RTP capabilities in room service for peer ${peerId}`,
+                );
+                const rtpResult =
+                    await this.roomClient.updateParticipantRtpCapabilities(
+                        peerId,
+                        data.rtpCapabilities,
+                    );
+
+                if (rtpResult.success) {
+                    console.log(
+                        `[Gateway] Successfully stored RTP capabilities for peer ${peerId}`,
+                    );
+                } else {
+                    console.warn(
+                        '[Gateway] Failed to store RTP capabilities in room service:',
+                        rtpResult.error,
+                    );
+                }
+            } catch (error) {
+                console.warn(
+                    '[Gateway] Error storing RTP capabilities in room service:',
+                    error,
+                );
+                // Don't fail the whole operation for this
+            }
+
             client.emit('sfu:rtp-capabilities-set', { success: true });
             return { success: true };
         } catch (error) {
-            client.emit('sfu:error', { message: error.message });
-            return { success: false, error: error.message };
-        }
-    }
-
-    @SubscribeMessage('sfu:join-complete')
-    async handleJoinComplete(
-        @ConnectedSocket() client: Socket,
-        @MessageBody()
-        data: {
-            roomId: string;
-            peerId: string;
-            routerRtpCapabilities?: any;
-        },
-    ) {
-        try {
-            console.log(`[Gateway] Completing hybrid join for ${data.peerId} in room ${data.roomId}`);
-
-            // Verify participant exists (should have been created via HTTP)
-            const participant = await this.roomClient.getParticipantByPeerId(
-                data.roomId,
-                data.peerId,
-            );
-
-            if (!participant) {
-                throw new Error('Participant not found. Please join via HTTP first.');
-            }
-
-            // Store participant mapping for WebSocket events
-            this.helperService.storeParticipantMapping(
-                client.id,
-                data.peerId,
-                data.roomId,
-                participant,
-            );
-
-            // Ensure participant is in socket room
-            client.join(data.roomId);
-
-            // Emit join success with router capabilities
-            this.eventService.emitToClient(client, 'sfu:join-success', {
-                peerId: participant.peer_id,
-                isCreator: participant.is_creator,
-                roomId: data.roomId,
-            });
-
-            // Send router capabilities if available
-            if (data.routerRtpCapabilities) {
-                this.eventService.emitToClient(
-                    client,
-                    'sfu:router-capabilities',
-                    {
-                        routerRtpCapabilities: data.routerRtpCapabilities,
-                    },
-                );
-            }
-
-            // Notify other participants
-            client.to(data.roomId).emit('sfu:new-peer-join', {
-                roomId: data.roomId,
-                user: {
-                    peerId: participant.peer_id,
-                    isCreator: participant.is_creator,
-                    timeArrive: participant.time_arrive,
-                    name: participant.user_info?.name || participant.peer_id,
-                },
-            });
-
-            console.log(`[Gateway] Hybrid join completed for ${data.peerId} in room ${data.roomId}`);
-
-            return { success: true };
-        } catch (error) {
-            console.error('[Gateway] Join complete error:', error);
             client.emit('sfu:error', { message: error.message });
             return { success: false, error: error.message };
         }
@@ -1370,6 +1339,7 @@ export class GatewayGateway
             sampleRate: number;
             channels: number;
             isFinal?: boolean; // Indicates if this is the final chunk or periodic chunk
+            organizationId?: string; // Organization ID for multi-tenant isolation
         },
     ) {
         const isFinal = data.isFinal !== false; // Default to true for backward compatibility
@@ -1466,6 +1436,7 @@ export class GatewayGateway
                 duration: data.duration,
                 sampleRate: data.sampleRate || 16000,
                 channels: data.channels || 1,
+                organizationId: data.organizationId, // Forward organization ID
             });
 
             console.log(
@@ -2663,7 +2634,13 @@ export class GatewayGateway
     @SubscribeMessage('chatbot:ask')
     async handleChatbotAsk(
         @ConnectedSocket() client: Socket,
-        @MessageBody() data: { id: string; roomId: string; text: string },
+        @MessageBody()
+        data: {
+            id: string;
+            roomId: string;
+            text: string;
+            organizationId?: string;
+        },
     ) {
         try {
             console.log(`[Chatbot] Request from ${client.id}:`, {
@@ -2726,6 +2703,7 @@ export class GatewayGateway
             const response = await this.chatbotClient.askChatBot({
                 question: data.text.trim(),
                 room_id: data.roomId,
+                organization_id: data.organizationId,
             });
 
             // Send final response (for now, no streaming)

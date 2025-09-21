@@ -27,6 +27,50 @@ export class StreamService {
                 `[StreamService] Unpublishing stream ${streamId} from participant ${participantId} in room ${roomId}`,
             );
 
+            // Get stream metadata before unpublishing to determine if it's screen share
+            let isScreenShare = false;
+            try {
+                const streamsResponse = await this.sfuClient.getStreams(roomId);
+                const streams = (streamsResponse as any)?.streams || [];
+
+                // Try to find by streamId first, then by producerId
+                let foundStream = streams.find(
+                    (s: any) => (s.streamId || s.stream_id) === streamId,
+                );
+
+                // If not found by streamId, try to find by producerId (UUID format)
+                if (!foundStream) {
+                    foundStream = streams.find(
+                        (s: any) =>
+                            (s.producerId || s.producer_id) === streamId,
+                    );
+                }
+
+                if (foundStream && foundStream.metadata) {
+                    const metadata =
+                        typeof foundStream.metadata === 'string'
+                            ? JSON.parse(foundStream.metadata)
+                            : foundStream.metadata;
+                    isScreenShare =
+                        metadata?.isScreenShare ||
+                        metadata?.type === 'screen' ||
+                        metadata?.type === 'screen_audio' ||
+                        false;
+                }
+            } catch (metadataError) {
+                isScreenShare = streamId.includes('screen') || false;
+
+                // Additional check: if streamId is UUID format, check metadata from different source
+                if (
+                    !isScreenShare &&
+                    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                        streamId,
+                    )
+                ) {
+                    // For UUID format, we need better detection - this will be enhanced
+                }
+            }
+
             // Method 1: Try to unpublish specific stream first (preferred method)
             try {
                 await this.sfuClient.unpublishStream({
@@ -34,42 +78,63 @@ export class StreamService {
                     stream_id: streamId,
                     participant_id: participantId,
                 });
-                console.log(
-                    `[StreamService] Successfully unpublished stream ${streamId} via unpublishStream`,
-                );
             } catch (error) {
-                console.warn(
-                    `[StreamService] unpublishStream failed for ${streamId}, trying removeStream:`,
-                    error,
-                );
-
-                // Method 2: Fallback to removeStream
-                try {
-                    await this.sfuClient.removeStream({ stream_id: streamId });
-                    console.log(
-                        `[StreamService] Successfully removed stream ${streamId} via removeStream`,
-                    );
-                } catch (removeError) {
+                // Check if error is due to stream not found (race condition)
+                const errorMsg = error?.message || error?.toString() || '';
+                if (
+                    errorMsg.includes('not found') ||
+                    errorMsg.includes('Not found')
+                ) {
+                } else {
                     console.warn(
-                        `[StreamService] removeStream also failed for ${streamId}, trying removeParticipantMedia:`,
-                        removeError,
+                        `[StreamService] unpublishStream failed for ${streamId}, trying removeStream:`,
+                        error,
                     );
 
-                    // Method 3: Last resort - removeParticipantMedia (this will remove all media for participant)
-                    const removeMediaResponse =
-                        await this.sfuClient.removeParticipantMedia({
-                            room_id: roomId,
-                            participant_id: participantId,
+                    // Method 2: Fallback to removeStream
+                    try {
+                        await this.sfuClient.removeStream({
+                            stream_id: streamId,
                         });
-
-                    if (
-                        removeMediaResponse &&
-                        (removeMediaResponse as any).removed_streams
-                    ) {
                         console.log(
-                            `[StreamService] removeParticipantMedia removed streams:`,
-                            (removeMediaResponse as any).removed_streams,
+                            `[StreamService] Successfully removed stream ${streamId} via removeStream`,
                         );
+                    } catch (removeError) {
+                        const removeErrorMsg =
+                            removeError?.message ||
+                            removeError?.toString() ||
+                            '';
+                        if (
+                            removeErrorMsg.includes('not found') ||
+                            removeErrorMsg.includes('Not found')
+                        ) {
+                            console.log(
+                                `[StreamService] Stream ${streamId} already removed via removeStream - race condition, treating as success`,
+                            );
+                        } else {
+                            console.warn(
+                                `[StreamService] removeStream also failed for ${streamId}, trying removeParticipantMedia:`,
+                                removeError,
+                            );
+
+                            // Method 3: Last resort - removeParticipantMedia (this will remove all media for participant)
+                            const removeMediaResponse =
+                                await this.sfuClient.removeParticipantMedia({
+                                    room_id: roomId,
+                                    participant_id: participantId,
+                                });
+
+                            if (
+                                removeMediaResponse &&
+                                (removeMediaResponse as any).removed_streams
+                            ) {
+                                console.log(
+                                    `[StreamService] removeParticipantMedia removed streams:`,
+                                    (removeMediaResponse as any)
+                                        .removed_streams,
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -82,11 +147,8 @@ export class StreamService {
                     streamId: streamId,
                     publisherId: participantId,
                     roomId: roomId,
+                    isScreenShare: isScreenShare,
                 },
-            );
-
-            console.log(
-                `[StreamService] Successfully unpublished stream ${streamId} and broadcasted event`,
             );
 
             return {
@@ -117,10 +179,6 @@ export class StreamService {
     }> {
         try {
             const { roomId, participantId, streamIds } = data;
-
-            console.log(
-                `[StreamService] Unpublishing all streams for participant ${participantId} in room ${roomId}`,
-            );
 
             // Remove all participant media via SFU
             const removeMediaResponse =
@@ -162,10 +220,6 @@ export class StreamService {
                 );
             }
 
-            console.log(
-                `[StreamService] Successfully unpublished ${removedStreams.length} streams for participant ${participantId}`,
-            );
-
             return {
                 success: true,
                 message: `Successfully unpublished ${removedStreams.length} streams`,
@@ -205,10 +259,7 @@ export class StreamService {
             );
 
             if (!stream) {
-                console.warn(
-                    `[StreamService] Stream ${streamId} not found in room ${roomId}`,
-                );
-                return false;
+                return true;
             }
 
             const publisherId = stream.publisherId || stream.publisher_id;

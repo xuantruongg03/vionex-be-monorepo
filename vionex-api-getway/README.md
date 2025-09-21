@@ -12,71 +12,76 @@
 
 # 🚀 Vionex API Gateway Service
 
-The main entry point for the Vionex video meeting system, handling WebSocket signaling and REST API endpoints. This service acts as an intermediary connecting clients to backend microservices.
+API Gateway service for Vionex video meeting system - handles client requests routing, WebSocket signaling, and microservices communication.
 
 ## ✨ Key Features
 
-- **WebSocket Gateway**: Real-time signaling for video calls
-- **REST API Endpoints**: HTTP APIs for basic operations
-- **Message Forwarding**: Route messages to microservices
-- **Authentication & Authorization**: User authentication and permissions
-- **gRPC Client**: Communication with microservices via gRPC
-- **Media Signaling**: WebRTC signaling for video/audio
+- **WebSocket Gateway**: Real-time communication for video calls
+- **REST API Gateway**: HTTP endpoint routing to backend services
+- **Organization Support**: Multi-tenant request handling
+- **Authentication**: JWT-based security
+- **gRPC Communication**: Backend microservices integration
 
 ## 🛠️ Technologies
 
-- **Framework**: NestJS v11
+- **Framework**: NestJS
 - **Language**: TypeScript
-- **Real-time**: Socket.io v4.8
-- **Media**: Mediasoup v3.16
-- **Communication**: gRPC (@grpc/grpc-js)
-- **HTTP Client**: Axios
+- **WebSocket**: Socket.io
+- **Communication**: gRPC
+- **Authentication**: JWT
 - **Runtime**: Node.js
 
 ## 📁 Project Structure
 
 ```
 src/
-├── chat-http.controller.ts    # HTTP endpoints for chat
-├── gateway.controller.ts      # Main REST API controller
+├── clients/                   # gRPC clients
+├── handlers/                  # WebSocket handlers
+├── helpers/                   # Utilities
+├── interfaces/                # TypeScript interfaces
+├── auth.controller.ts         # Auth endpoints
+├── gateway.controller.ts      # Main controller
 ├── gateway.gateway.ts         # WebSocket gateway
-├── gateway.module.ts          # Module configuration
-└── main.ts                   # Application entry point
+├── gateway.module.ts          # Module config
+├── organization.controller.ts # Organization endpoints
+├── room-http.controller.ts    # Room endpoints
+└── main.ts                    # Entry point
 ```
 
 ## 🔧 Environment Variables
 
 ```bash
-# Server Configuration
+# Server
 PORT=3000
 NODE_ENV=development
 
 # gRPC Services
-CHAT_SERVICE_URL=localhost:50051
-ROOM_SERVICE_URL=localhost:50052
-SFU_SERVICE_URL=localhost:50053
-INTERACTION_SERVICE_URL=localhost:50054
+ROOM_SERVICE_HOST=localhost
+ROOM_SERVICE_GRPC_PORT=30001
+CHAT_SERVICE_HOST=localhost
+CHAT_SERVICE_GRPC_PORT=30002
+SFU_SERVICE_HOST=localhost
+SFU_SERVICE_GRPC_PORT=30004
+AUDIO_SERVICE_HOST=localhost
+AUDIO_SERVICE_GRPC_PORT=30005
+CHATBOT_SERVICE_HOST=localhost
+CHATBOT_SERVICE_GRPC_PORT=30007
+AUTH_SERVICE_HOST=localhost
+AUTH_SERVICE_GRPC_PORT=30008
 
-# WebSocket Configuration
-CORS_ORIGIN=http://localhost:5173
+## 📋 Installation
 
-# SSL Certificates (place in secrets/ directory)
-# private-key.pem
-# public-certificate.pem
-```
+```bash
+# Install dependencies
+npm install
 
-## 🏗️ Architecture
+# Create environment file
+cp .env.example .env
 
-```
-┌─────────────────┐    ┌──────────────────┐
-│   Web Client    │◄──►│  API Gateway     │
-└─────────────────┘    └──────────────────┘
-                                │
-                    ┌───────────┼───────────┐
-                    │           │           │
-                    ▼           ▼           ▼
-            ┌──────────┐ ┌──────────┐ ┌──────────┐
-            │   Chat   │ │   Room   │ │   SFU    │
-            │ Service  │ │ Service  │ │ Service  │
-            └──────────┘ └──────────┘ └──────────┘
+# Run development
+npm run start:dev
+
+# Build production
+npm run build
+npm run start:prod
 ```

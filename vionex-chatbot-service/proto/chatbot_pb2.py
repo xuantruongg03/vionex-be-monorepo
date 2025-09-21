@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rchatbot.proto\x12\x07\x63hatbot\"6\n\x11\x41skChatBotRequest\x12\x10\n\x08question\x18\x01 \x01(\t\x12\x0f\n\x07room_id\x18\x02 \x01(\t\"$\n\x12\x41skChatBotResponse\x12\x0e\n\x06\x61nswer\x18\x01 \x01(\t2W\n\x0e\x43hatbotService\x12\x45\n\nAskChatBot\x12\x1a.chatbot.AskChatBotRequest\x1a\x1b.chatbot.AskChatBotResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rchatbot.proto\x12\x07\x63hatbot\"O\n\x11\x41skChatBotRequest\x12\x10\n\x08question\x18\x01 \x01(\t\x12\x0f\n\x07room_id\x18\x02 \x01(\t\x12\x17\n\x0forganization_id\x18\x03 \x01(\t\"$\n\x12\x41skChatBotResponse\x12\x0e\n\x06\x61nswer\x18\x01 \x01(\t2W\n\x0e\x43hatbotService\x12\x45\n\nAskChatBot\x12\x1a.chatbot.AskChatBotRequest\x1a\x1b.chatbot.AskChatBotResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,9 +32,9 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'chatbot_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_ASKCHATBOTREQUEST']._serialized_start=26
-  _globals['_ASKCHATBOTREQUEST']._serialized_end=80
-  _globals['_ASKCHATBOTRESPONSE']._serialized_start=82
-  _globals['_ASKCHATBOTRESPONSE']._serialized_end=118
-  _globals['_CHATBOTSERVICE']._serialized_start=120
-  _globals['_CHATBOTSERVICE']._serialized_end=207
+  _globals['_ASKCHATBOTREQUEST']._serialized_end=105
+  _globals['_ASKCHATBOTRESPONSE']._serialized_start=107
+  _globals['_ASKCHATBOTRESPONSE']._serialized_end=143
+  _globals['_CHATBOTSERVICE']._serialized_start=145
+  _globals['_CHATBOTSERVICE']._serialized_end=232
 # @@protoc_insertion_point(module_scope)

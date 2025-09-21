@@ -23,20 +23,42 @@ class ChatBotProcessor:
             logger.info(f"Loaded model")
 
     def create_prompt(self, question: str, data: str) -> str:
-        """Create prompt for the model"""
-        return f"Question: {question}\nData: {data}"
+        """
+        Create a role-based prompt for the model as a meeting secretary.
+        The model should only answer using the given transcript.
+        If no relevant information is found, return a fallback message.
+        The answer must always be in the same language as the question,
+        even if the transcript is in another language.
+        """
+        return (
+            "You are a smart meeting secretary. "
+            "Your task is to answer the participant's question strictly based on the provided transcript. "
+            "If the transcript does not contain relevant information, reply with: 'No relevant information found in the meeting.' "
+            "Always respond in the same language as the question, even if the transcript is written in another language.\n\n"
+            f"Transcript:\n{data}\n\n"
+            f"Question: {question}\n"
+            "Answer concisely and accurately:"
+        )
 
-    def ask(self, question: str, room_id: str) -> str:
+
+    def ask(self, question: str, room_id: str, organization_id: str = None) -> str:
         try:
             # Call semantic service to search data
-            response = self.semantic_client.search(room_id=room_id, text=question)
-            if response:
+            results = self.semantic_client.search(room_id=room_id, text=question, organization_id=organization_id)
+            if results and len(results) > 0:
+                # Extract text from results and combine them
+                transcript_data = []
+                for result in results:
+                    transcript_data.append(result.text)
+                combined_transcript = "\n".join(transcript_data)
+                
                 # Create prompt with the response data
-                prompt = self.create_prompt(question, response)
+                prompt = self.create_prompt(question, combined_transcript)
                 
                 # Generate response using the model
                 generated_response = self.model.generate(prompt)
-                logger.info(f"Generated response: {generated_response} for question: {question} with data: {response}")
+                logger.info(f"Generated response: {generated_response} for question: {question} with {len(results)} results" + 
+                           (f" for organization {organization_id}" if organization_id else ""))
                 return generated_response
             else:
                 logger.warning("No response from semantic service")

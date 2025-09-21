@@ -12,59 +12,45 @@
 
 # 🏠 Vionex Room Service
 
-A microservice that manages meeting rooms within the Vionex system. This service handles room creation, management, and monitoring, including participant management and room state tracking.
+Meeting room management microservice handling room creation, participant management, and session coordination.
 
-## ✨ Key Features
+## ✨ Features
 
-- **Room Management**: Create, delete and manage meeting rooms
-- **Participant Management**: Handle room participants and permissions
-- **Access Control**: Room access control and security
-- **Room Analytics**: Room statistics and reporting
-- **Real-time Status**: Monitor room status in real-time
-- **Session Management**: Handle meeting sessions
-- **Room Settings**: Configure room-specific settings
+- **Room Management**: Create, delete, and manage meeting rooms
+- **Participant Management**: Handle participants and permissions
+- **Access Control**: Room security and access management
+- **Session Management**: Meeting session lifecycle management
+- **Real-time Status**: Monitor room status and activities
+- **Room Analytics**: Statistics and usage reporting
 
 ## 🛠️ Technologies
 
-- **Framework**: NestJS v11
+- **Framework**: NestJS
 - **Language**: TypeScript
-- **Communication**: gRPC (@grpc/grpc-js)
+- **Communication**: gRPC
+- **WebRTC**: Mediasoup SFU
 - **Documentation**: Swagger/OpenAPI
-- **Media**: Mediasoup v3.16
-- **Configuration**: @nestjs/config
-- **API Documentation**: swagger-ui-express
-- **Runtime**: Node.js
+- **Storage**: MongoDB
 
 ## 📁 Project Structure
 
 ```
 src/
-├── room/
-│   ├── room.controller.ts     # gRPC controller
-│   ├── room.service.ts        # Business logic
-│   ├── room.gateway.ts        # WebSocket gateway
-│   └── dto/                   # Data transfer objects
-├── participant/
-│   ├── participant.service.ts # Participant management
-│   └── participant.model.ts   # Participant entity
-├── shared/
-│   ├── interfaces/            # TypeScript interfaces
-│   ├── guards/               # Authentication guards
-│   └── decorators/           # Custom decorators
-├── app.module.ts              # Root module
-└── main.ts                   # Application entry point
+├── room.controller.ts        # Room management endpoints
+├── room.service.ts           # Room logic and state management
+├── room.gateway.ts           # WebSocket gateway for real-time
+├── participant.service.ts    # Participant management
+├── dto/
+│   └── room.dto.ts          # Data transfer objects
+├── interfaces/
+│   └── room.interface.ts    # Room interfaces
+├── app.module.ts            # Module configuration
+└── main.ts                  # Entry point
 ```
 
-## Environment Variables
+## 🔧 Environment Variables
 
 ```bash
-# Service Configuration
-PORT=50052
-NODE_ENV=development
-
-# gRPC Configuration
-GRPC_HOST=0.0.0.0
-GRPC_PORT=50052
 
 # Mediasoup Configuration
 MEDIASOUP_LISTEN_IP=0.0.0.0
@@ -73,26 +59,19 @@ MEDIASOUP_ANNOUNCED_IP=127.0.0.1
 # Room Configuration
 MAX_PARTICIPANTS_PER_ROOM=50
 ROOM_TIMEOUT_MINUTES=30
-
-# Database Configuration
-DATABASE_URL=mongodb://localhost:27017/vionex-rooms
+DEFAULT_ROOM_SETTINGS={}
 ```
 
-## 🏗️ Architecture
+## 📋 Installation
 
-```
-┌─────────────────┐    gRPC    ┌──────────────────┐
-│   API Gateway   │◄─────────►│   Room Service   │
-└─────────────────┘            └──────────────────┘
-                                        │
-                                        ▼
-                                ┌──────────────────┐
-                                │   Room Manager   │
-                                │   (In-Memory)    │
-                                └──────────────────┘
-                                        │
-                                        ▼
-                                ┌──────────────────┐
-                                │  Mediasoup SFU   │
-                                └──────────────────┘
+```bash
+# Install dependencies
+npm install
+
+# Run service
+npm run start:dev
+
+# Run with Docker
+docker build -t vionex-room-service .
+docker run -p 30005:30005 --env-file .env vionex-room-service
 ```
