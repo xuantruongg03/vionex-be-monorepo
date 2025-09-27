@@ -1,8 +1,9 @@
-from faster_whisper import WhisperModel
+# WHISPER REPLACED WITH WAV2VEC2 FOR BETTER STREAMING PERFORMANCE
+# from faster_whisper import WhisperModel
 from core.config import (
-    WHISPER_MODEL, 
+    # WHISPER_MODEL, 
     TYPE_ENGINE, 
-    WHISPER_COMPUTE_TYPE,
+    # WHISPER_COMPUTE_TYPE,
     TTS_TEMPERATURE,
     TTS_LENGTH_PENALTY, 
     TTS_REPETITION_PENALTY,
@@ -14,14 +15,16 @@ from core.config import (
     THERMAL_THROTTLE_TEMP
 )
 
+# WHISPER MODEL DISABLED - NOW USING WAV2VEC2 IN STT PIPELINE
 # Load model whisper with device-appropriate compute type
 # Use float16 for CUDA/GPU, int8 for CPU to avoid compute type errors
-if TYPE_ENGINE == "cuda":
-    compute_type = WHISPER_COMPUTE_TYPE  # Use configured compute type for GPU
-else:
-    compute_type = "int8"  # Use int8 for CPU to avoid float16 errors
+# if TYPE_ENGINE == "cuda":
+#     compute_type = WHISPER_COMPUTE_TYPE  # Use configured compute type for GPU
+# else:
+#     compute_type = "int8"  # Use int8 for CPU to avoid float16 errors
 
-whisper_model = WhisperModel(WHISPER_MODEL, device=TYPE_ENGINE, compute_type=compute_type)
+# whisper_model = WhisperModel(WHISPER_MODEL, device=TYPE_ENGINE, compute_type=compute_type)
+whisper_model = None  # Disabled - using Wav2Vec2 instead
 
 from transformers import MarianTokenizer, MarianMTModel
 import os

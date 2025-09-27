@@ -3,7 +3,6 @@ import logging
 import threading
 import time
 import queue
-import os
 from typing import Dict, Optional, Any, TYPE_CHECKING, List
 from dataclasses import dataclass, field
 from enum import Enum
@@ -23,38 +22,6 @@ from .socket_pool import get_shared_socket_manager
 from .codec_utils import opus_codec_manager, AudioProcessingUtils, RTPUtils
 
 logger = logging.getLogger(__name__)
-
-def save_audio_data_to_file(audio_data: bytes, cabin_id: str, data_type: str = "chunk"):
-    """
-    Hàm đơn giản để lưu audio data ra file WAV
-    
-    Args:
-        audio_data: Raw PCM audio data (16-bit mono @ 16kHz)
-        cabin_id: ID của cabin để tạo tên file unique
-        data_type: Loại data (chunk, translated, etc.)
-    """
-    try:
-        # Tạo thư mục lưu file nếu chưa có
-        save_dir = os.path.join("audio_debug", cabin_id)
-        os.makedirs(save_dir, exist_ok=True)
-        
-        # Tạo tên file với timestamp
-        timestamp = int(time.time() * 1000)  # millisecond timestamp
-        filename = f"{data_type}_{timestamp}.wav"
-        filepath = os.path.join(save_dir, filename)
-        
-        # Convert PCM to WAV format
-        import wave
-        with wave.open(filepath, 'wb') as wav_file:
-            wav_file.setnchannels(1)      # Mono
-            wav_file.setsampwidth(2)      # 16-bit (2 bytes)
-            wav_file.setframerate(16000)  # 16kHz
-            wav_file.writeframes(audio_data)
-        
-        logger.debug(f"[AUDIO-DEBUG] Saved {len(audio_data)} bytes to {filepath}")
-        
-    except Exception as e:
-        logger.warning(f"[AUDIO-DEBUG] Failed to save audio data: {e}")
 
 class CabinStatus(Enum):
     """
@@ -389,9 +356,6 @@ class TranslationCabinManager:
             # REALTIME PROCESSING: Add to sliding buffer and enqueue when ready
             complete_chunk = cabin.audio_buffer.add_audio_chunk(pcm_16k_mono)
             if complete_chunk:
-                # Lưu chunk vào file để debug
-                save_audio_data_to_file(complete_chunk, cabin.cabin_id, "chunk")
-                
                 try:
                     cabin.chunk_queue.put_nowait(complete_chunk)
                 except queue.Full:
