@@ -6,47 +6,20 @@ import subprocess
 import torch
 import torchaudio
 from typing import Any, Dict, Optional
-from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
+from core.model import wav2vec2_models, wav2vec2_processors
 
 logger = logging.getLogger(__name__)
 
-# Global Wav2Vec2 models - initialized once for performance
-_wav2vec2_models = {}
-_wav2vec2_processors = {}
-
 def get_wav2vec2_model(language: str):
-    """Get or load Wav2Vec2 model for specific language"""
-    global _wav2vec2_models, _wav2vec2_processors
+    """Get Wav2Vec2 model for specific language from core models"""
+    model = wav2vec2_models.get(language)
+    processor = wav2vec2_processors.get(language)
     
-    # Model mapping for different languages
-    model_map = {
-        "vi": "nguyenvulebinh/wav2vec2-base-vietnamese-250h",
-        "en": "facebook/wav2vec2-base-960h", 
-        "lo": "facebook/wav2vec2-base-960h"  # Fallback to English for Lao
-    }
+    if model is None or processor is None:
+        logger.error(f"Wav2Vec2 model for {language} not available. Check core/model.py loading.")
+        return None, None
     
-    model_name = model_map.get(language, "nguyenvulebinh/wav2vec2-base-vietnamese-250h")
-    
-    if language not in _wav2vec2_models:
-        try:
-            logger.info(f"Loading Wav2Vec2 model for {language}: {model_name}")
-            processor = Wav2Vec2Processor.from_pretrained(model_name)
-            model = Wav2Vec2ForCTC.from_pretrained(model_name)
-            
-            # Move to GPU if available
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            model = model.to(device)
-            
-            _wav2vec2_models[language] = model
-            _wav2vec2_processors[language] = processor
-            
-            logger.info(f"Loaded Wav2Vec2 model for {language} on {device}")
-            
-        except Exception as e:
-            logger.error(f"Failed to load Wav2Vec2 model for {language}: {e}")
-            return None, None
-    
-    return _wav2vec2_models[language], _wav2vec2_processors[language]
+    return model, processor
 
 class STTPipeline:
     def __init__(self, source_language: str = "vi"):
@@ -60,7 +33,7 @@ class STTPipeline:
             "lo": "en"  # Use English model for Lao as fallback
         }
         
-        # Preload model for this language
+        # Get pre-loaded model from core for this language
         self.model, self.processor = get_wav2vec2_model(self.source_language)
 
     def remove_overlap(self, curr: str, prev: str, min_words=2) -> str:
