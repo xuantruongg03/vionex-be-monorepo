@@ -3,11 +3,15 @@ import logging
 import threading
 import time
 import queue
-from typing import Dict, Optional, Any, TYPE_CHECKING
+from typing import Dict, Optional, Any, TYPE_CHECKING, List
 from dataclasses import dataclass, field
 from enum import Enum
+import time
+import logging
+import asyncio
+import threading
+import queue
 from service.pipline_processor.VAD import VoiceActivityDetector
-from service.pipline_processor.sliding_windows import SmartAudioBuffer
 from core.config import SFU_SERVICE_HOST
 
 if TYPE_CHECKING:
@@ -35,6 +39,80 @@ class CabinStatus(Enum):
     ERROR = "error"
 
 @dataclass
+class HybridChunkBuffer:
+    """
+    Hybrid chunk buffer:
+    - Giai đoạn khởi động: cần ít nhất 2s audio mới xuất chunk đầu tiên
+    - Sau đó: cửa sổ 1.0s, bước 0.7s (overlap 0.3s)
+    - Mọi tính toán dựa trên độ dài buffer, không dùng clock
+    """
+
+    init_buffer: float = 2.0       # 2s đầu tiên để lấy ngữ cảnh
+    window_duration: float = 1.0   # mỗi chunk dài 1.0s
+    step_duration: float = 0.7     # overlap 0.3s
+    sample_rate: int = 16000       # 16kHz mono PCM16
+
+    def __post_init__(self):
+        self._buffer: bytearray = bytearray()
+        self._next_start_bytes: int = 0
+        self._bytes_per_sample: int = 2
+        self._started: bool = False
+
+        self._window_bytes = int(self.window_duration * self.sample_rate * self._bytes_per_sample)
+        self._step_bytes = int(self.step_duration * self.sample_rate * self._bytes_per_sample)
+        self._init_bytes = int(self.init_buffer * self.sample_rate * self._bytes_per_sample)
+
+    def add_audio_chunk(self, audio_data: bytes) -> Optional[bytes]:
+        """Thêm PCM vào buffer, trả về một cửa sổ khi sẵn sàng."""
+        if not audio_data:
+            return None
+
+        self._buffer.extend(audio_data)
+
+        # Chưa đủ 2s → chưa phát
+        if not self._started:
+            if len(self._buffer) >= self._init_bytes:
+                self._started = True
+            else:
+                return None
+
+        # Sau khi start: kiểm tra có đủ dữ liệu cho 1 window
+        if (len(self._buffer) - self._next_start_bytes) >= self._window_bytes:
+            start = self._next_start_bytes
+            end = start + self._window_bytes
+            window = bytes(self._buffer[start:end])
+
+            # Slide buffer: tiến 0.7s
+            self._next_start_bytes += self._step_bytes
+
+            # Dọn buffer định kỳ để tránh phình
+            if self._next_start_bytes >= self._step_bytes * 4:
+                self._buffer = bytearray(self._buffer[self._next_start_bytes:])
+                self._next_start_bytes = 0
+
+            return window
+
+        return None
+
+    def get_processing_stats(self) -> dict:
+        total_dur = len(self._buffer) / (self.sample_rate * self._bytes_per_sample)
+        pending_dur = (len(self._buffer) - self._next_start_bytes) / (self.sample_rate * self._bytes_per_sample)
+        return {
+            "buffer_duration": round(total_dur, 3),
+            "pending_duration": round(pending_dur, 3),
+            "init_buffer": self.init_buffer,
+            "window_size": self.window_duration,
+            "step_size": self.step_duration,
+            "overlap": self.window_duration - self.step_duration,
+            "started": self._started,
+        }
+
+    def clear(self):
+        self._buffer.clear()
+        self._next_start_bytes = 0
+        self._started = False
+
+@dataclass        
 class TranslationCabin:
    
     cabin_id: str
@@ -48,12 +126,14 @@ class TranslationCabin:
     running: bool = False
     
     # Audio processing pipeline components
-    audio_buffer: SmartAudioBuffer = field(default_factory=SmartAudioBuffer)
+    audio_buffer: HybridChunkBuffer = field(default_factory=HybridChunkBuffer)
     vad: VoiceActivityDetector = field(default_factory=VoiceActivityDetector)
     
-    # Threading and queue management
-    audio_queue: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=200))  # Limit queue size
-    processor_thread: Optional[threading.Thread] = None
+    # Cached translation pipeline to avoid recreation overhead
+    _cached_pipeline: Optional['TranslationPipeline'] = None
+    
+    # Processing state
+    processing_lock: threading.Lock = field(default_factory=threading.Lock)
     
     # Audio timing and statistics
     first_packet_time: Optional[float] = None
@@ -69,6 +149,12 @@ class TranslationCabin:
     _rtp_seq_num: int = 0
     _rtp_timestamp: int = 0
     _rtp_ssrc: Optional[int] = None
+
+    # Processing infra
+    chunk_queue: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=64))
+    processor_thread: Optional[threading.Thread] = None
+    thread: Optional[threading.Thread] = None
+    _event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 class TranslationCabinManager:
@@ -93,6 +179,45 @@ class TranslationCabinManager:
         
         # Memory monitoring settings
         self.enable_memory_monitoring = True  # Set to False to disable monitoring
+
+    def get_or_create_pipeline(self, cabin: TranslationCabin) -> 'TranslationPipeline':
+        """
+        Get cached translation pipeline or create new one
+        
+        Avoids recreation overhead for each chunk by caching pipeline per cabin.
+        Pipeline is invalidated if language configuration changes.
+        """
+        try:
+            # Check if cached pipeline exists and is valid
+            if cabin._cached_pipeline is not None:
+                # Verify language configuration hasn't changed
+                if (cabin._cached_pipeline.source_language == cabin.source_language and 
+                    cabin._cached_pipeline.target_language == cabin.target_language):
+                    return cabin._cached_pipeline
+                else:
+                    # Language changed, cleanup old pipeline
+                    logger.info(f"[PIPELINE-CACHE] Language changed, recreating pipeline for {cabin.cabin_id}")
+                    try:
+                        cabin._cached_pipeline.cleanup()
+                    except:
+                        pass
+                    cabin._cached_pipeline = None
+            
+            # Create new pipeline
+            from service.pipline_processor.translation_pipeline import TranslationPipeline
+            cabin._cached_pipeline = TranslationPipeline(
+                source_language=cabin.source_language,
+                target_language=cabin.target_language,
+                user_id=cabin.user_id,
+                room_id=cabin.room_id
+            )
+            
+            logger.info(f"[PIPELINE-CACHE] Created new pipeline for {cabin.cabin_id}: {cabin.source_language} → {cabin.target_language}")
+            return cabin._cached_pipeline
+            
+        except Exception as e:
+            logger.error(f"[PIPELINE-CACHE] Error creating pipeline for {cabin.cabin_id}: {e}")
+            raise
 
     def create_cabin(
         self, 
@@ -168,19 +293,11 @@ class TranslationCabinManager:
                 cabin.running = True
                 cabin.status = CabinStatus.LISTENING
                 
-                # Step 7: Start audio processing thread for real-time translation
-                cabin.processor_thread = threading.Thread(
-                    target=self._audio_processor,
-                    args=(cabin,),
-                    daemon=True
-                )
-                cabin.processor_thread.start()
-                
-                # Brief wait to ensure thread startup
-                time.sleep(0.1)
-                
                 # Step 8: Register cabin in manager's tracking registry
                 self.cabins[cabin_id] = cabin
+
+                # Start single processor thread for this cabin
+                self._start_processor_thread(cabin)
                 
                 # Step 9: Return cabin configuration for SFU integration
                 return {
@@ -201,9 +318,8 @@ class TranslationCabinManager:
 
     def _process_rtp_packet(self, cabin: TranslationCabin, rtp_data: bytes):
         """
-        Process RTP packet received from SharedSocketManager router
-        This replaces the old _audio_receiver thread approach
-        
+        Process RTP packet with realtime chunk processing
+        Flow: RTP → decode → downsample → chunk buffer → process immediately
         """
         try:
             if not cabin.running:
@@ -237,210 +353,128 @@ class TranslationCabinManager:
             # Cleanup intermediate data immediately
             del pcm_48k_stereo
 
-            # Add to FIFO queue for translation processing
-            try:
-                cabin.audio_queue.put(pcm_16k_mono, block=False)
-            except queue.Full:
-                # Queue is full, drop oldest item and add new one
+            # REALTIME PROCESSING: Add to sliding buffer and enqueue when ready
+            complete_chunk = cabin.audio_buffer.add_audio_chunk(pcm_16k_mono)
+            if complete_chunk:
                 try:
-                    cabin.audio_queue.get_nowait()  # Remove oldest
-                    cabin.audio_queue.put(pcm_16k_mono, block=False)  # Add new
-                    logger.debug(f"[AUDIO-CALLBACK] Queue full, dropped oldest audio chunk for {cabin.cabin_id}")
-                except queue.Empty:
-                    pass  # Queue became empty between calls
+                    cabin.chunk_queue.put_nowait(complete_chunk)
+                except queue.Full:
+                    # Drop oldest by getting once and pushing again
+                    try:
+                        _ = cabin.chunk_queue.get_nowait()
+                    except Exception:
+                        pass
+                    try:
+                        cabin.chunk_queue.put_nowait(complete_chunk)
+                    except Exception:
+                        pass
             
         except Exception as e:
             logger.error(f"[AUDIO-CALLBACK] Error processing RTP packet for {cabin.cabin_id}: {e}")
 
-    def _audio_processor(self, cabin: TranslationCabin):
-        """
-        Audio processor thread - continuously processes audio data from FIFO queue
-        """
-        # Import here to avoid circular imports
-        from service.pipline_processor.translation_pipeline import TranslationPipeline
-        
-        # Step 1: Setup dedicated asyncio event loop for this thread
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        # Step 2: Initialize translation pipeline for language pair
-        try:
-            pipeline = TranslationPipeline(
-                source_language=cabin.source_language,
-                target_language=cabin.target_language,
-                user_id=cabin.user_id,    # Pass user_id for voice cloning
-                room_id=cabin.room_id     # Pass room_id for voice cloning
-            )
-        except Exception as e:
-            logger.error(f"[PROCESSOR] Failed to initialize translation pipeline: {e}")
-            return
-        
-        # Processing statistics
-        processing_count = 0
-        bypass_vad = True
-        last_cleanup = time.time()
-        CLEANUP_INTERVAL = 600  # 10 minutes
-        
-        # Step 3: Main audio processing loop
-        try:
-            while cabin.running:
-                try:
-                    # Get queued audio data (with timeout for clean shutdown)
+    def _start_processor_thread(self, cabin: TranslationCabin):
+        """Start a single background thread with its own event loop to process chunks sequentially."""
+        def worker():
+            try:
+                loop = asyncio.new_event_loop()
+                cabin._event_loop = loop
+                asyncio.set_event_loop(loop)
+                while cabin.running:
                     try:
-                        audio_data = cabin.audio_queue.get(timeout=1.0)
-                        processing_count += 1
+                        # Block for a short time to allow batching
+                        chunk = cabin.chunk_queue.get(timeout=0.1)
                     except queue.Empty:
-                        # Periodic cleanup check during idle time
-                        current_time = time.time()
-                        if current_time - last_cleanup > CLEANUP_INTERVAL:
-                            try:
-                                import gc
-                                collected = gc.collect()
-                                last_cleanup = current_time
-                                logger.debug(f"[PROCESSOR] Periodic cleanup: collected {collected} objects")
-                            except Exception as cleanup_error:
-                                logger.warning(f"[PROCESSOR] Cleanup error: {cleanup_error}")
-                        
-                        logger.debug(f"[PROCESSOR] Audio queue empty")
                         continue
-                    
-                    # VAD speech detection
-                    has_speech = bypass_vad or cabin.vad.detect_speech(audio_data)
-                    
-                    # Debug VAD performance every 500 audio chunks
-                    if processing_count % 500 == 0:
-                        buffer_info = cabin.audio_buffer.get_processing_stats() if hasattr(cabin.audio_buffer, 'get_processing_stats') else {}
-                        logger.info(f"[VAD-DEBUG] Processing #{processing_count}: speech={has_speech}, bypass={bypass_vad}, buffer_size={buffer_info.get('buffer_size', 0)} bytes")
-                    
-                    if not has_speech:
-                        # No speech detected → Send original audio as passthrough
-                        try:
-                            loop.run_until_complete(self._send_audio_to_sfu(cabin, audio_data, "passthrough"))
-                        except Exception as e:
-                            logger.debug(f"[PASSTHROUGH] Error sending passthrough audio: {e}")
-                        continue
-                    else:
-                        # Speech detected → Process through translation pipeline
-                        window_info = cabin.audio_buffer.add_audio_chunk(audio_data)
-                        
-                        buffer_stats = cabin.audio_buffer.get_processing_stats()
+                    try:
+                        loop.run_until_complete(self._process_chunk_realtime(cabin, chunk))
+                    except Exception as e:
+                        logger.error(f"[WORKER] Error processing chunk: {e}")
+                # Drain remaining items gracefully on stop
+                while True:
+                    try:
+                        chunk = cabin.chunk_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    try:
+                        loop.run_until_complete(self._process_chunk_realtime(cabin, chunk))
+                    except Exception:
+                        break
+            finally:
+                try:
+                    if cabin._event_loop:
+                        cabin._event_loop.stop()
+                        cabin._event_loop.close()
+                        cabin._event_loop = None
+                except Exception:
+                    pass
 
-                        if window_info:
-                            processing_count += 1
-                            cabin.status = CabinStatus.TRANSLATING
-                            try:
-                                loop.run_until_complete(
-                                    self._process_audio_window(cabin, pipeline, window_info['audio_data'])
-                                )
-                            except Exception as e:
-                                logger.error(f"[DEBUG] Error processing window: {e}")
-                            
-                            cabin.status = CabinStatus.LISTENING
-                        else:
-                            buffer_stats = cabin.audio_buffer.get_processing_stats()
-                            if buffer_stats['buffer_duration_seconds'] > 6.0:
-                                force_window = cabin.audio_buffer.force_process_current_buffer("long_accumulation")
-                                if force_window:
-                                    processing_count += 1
-                                    cabin.status = CabinStatus.TRANSLATING
-                                    
-                                    try:
-                                        loop.run_until_complete(
-                                            self._process_audio_window(cabin, pipeline, force_window['audio_data'])
-                                        )
-                                    except Exception as e:
-                                        logger.error(f"[DEBUG] Error processing forced window: {e}")
-                                    
-                                    cabin.status = CabinStatus.LISTENING
-                    
-                    # Mark task as done
-                    cabin.audio_queue.task_done()
-                    
-                    # Cleanup audio_data immediately after processing
-                    del audio_data
+        if cabin.processor_thread and cabin.processor_thread.is_alive():
+            return
+        cabin.processor_thread = threading.Thread(target=worker, name=f"cabin-worker-{cabin.cabin_id}", daemon=True)
+        cabin.processor_thread.start()
 
-                except Exception as e:
-                    if cabin.running:
-                        logger.error(f"[PROCESSOR] Error in processing loop: {e}")
-                    break
-
-        except Exception as e:
-            cabin.status = CabinStatus.ERROR
-
-        finally:
-            # Cleanup voice cloning data before closing
-            try:
-                if hasattr(pipeline, 'cleanup_voice_data'):
-                    pipeline.cleanup_voice_data()
-            except Exception as e:
-                logger.error(f"[PROCESSOR] Error cleaning up voice data: {e}")
-            
-            # Force garbage collection before closing
-            try:
-                import gc
-                collected = gc.collect()
-                logger.debug(f"[PROCESSOR] Final cleanup: collected {collected} objects")
-            except Exception as e:
-                logger.warning(f"[PROCESSOR] Final garbage collection error: {e}")
-                
-            # Close the event loop before thread exits
-            try:
-                loop.close()
-            except Exception as e:
-                logger.error(f"[PROCESSOR] Error closing event loop: {e}")
-
-    async def _process_audio_window(
-        self, 
-        cabin: TranslationCabin, 
-        pipeline: 'TranslationPipeline', 
-        audio_window: bytes
-    ):
+    async def _process_chunk_realtime(self, cabin: TranslationCabin, audio_chunk: bytes):
         """
-        Process audio window through complete translation pipeline.
-        
-        Handles the core translation workflow:
-        - Audio format conversion (PCM → WAV)
-        - Pipeline processing (STT → Translation → TTS)  
-        - SFU transmission of translated audio
-        - Performance monitoring and error handling
+        Process audio chunk in realtime: STT → Translation → TTS → Send
         
         Args:
             cabin: Translation cabin instance
-            pipeline: Translation pipeline for STT/Translation/TTS
-            audio_window: Raw PCM audio data to process
+            audio_chunk: Complete 0.8s audio chunk ready for processing
             
-        Process:
-            1. Convert PCM audio to WAV format for pipeline
-            2. Process through translation pipeline
-            3. Send translated audio to SFU for distribution
-            4. Monitor processing time and handle errors
+        Flow:
+            1. VAD check - if no speech, send passthrough
+            2. STT → Translation → TTS pipeline
+            3. Send translated audio to SFU immediately
         """
         start_time = time.time()
         
         try:
-            # Step 1: Convert PCM to WAV format for pipeline processing
-            wav_data = AudioProcessingUtils.pcm_to_wav_bytes(audio_window)
+            # Step 1: VAD speech detection
+            has_speech = cabin.vad.detect_speech(audio_chunk)
+            
+            if not has_speech:
+                # No speech: forward as Opus (encoded) to keep stream smooth
+                await self._send_audio_to_sfu(cabin, audio_chunk, "passthrough")
+                return
+            
+            # Step 2: Speech detected → process through translation pipeline
+            cabin.status = CabinStatus.TRANSLATING
+            
+            # Get cached pipeline to avoid recreation overhead
+            pipeline = self.get_or_create_pipeline(cabin)
+            
+            # Step 3: Convert PCM to WAV and process
+            wav_data = AudioProcessingUtils.pcm_to_wav_bytes(audio_chunk)
             result = await pipeline.process_audio(wav_data)
             
             processing_time = (time.time() - start_time) * 1000
             
-            # Step 2: Handle successful translation result
+            # Step 4: Send translated audio if successful
             if result['success'] and result.get('translated_audio'):
                 translated_audio = result['translated_audio']
-                success = await self._send_audio_to_sfu(cabin, translated_audio, "translated")
-                
-                if success:
-                    pass  # Successfully transmitted to SFU
-                else:
-                    logger.error(f"[PROCESSING] FAILED to send translated audio to SFU")
+
+                # Stream out in small parts if possible to improve smoothness
+                streamed = await self._stream_tts_in_parts(cabin, result.get('translated_text', ''), translated_audio)
+                if not streamed:
+                    success = await self._send_audio_to_sfu(cabin, translated_audio, "translated")
+                    if success:
+                        logger.debug(f"[REALTIME] Processed chunk in {processing_time:.2f}ms")
+                    else:
+                        logger.error(f"[REALTIME] Failed to send translated audio")
             else:
-                logger.error(f"[PROCESSING] Translation failed or no audio generated: {result}")
+                logger.warning(f"[REALTIME] Translation failed: {result}")
+            
+            cabin.status = CabinStatus.LISTENING
             
         except Exception as e:
             processing_time = (time.time() - start_time) * 1000
+            cabin.status = CabinStatus.ERROR
+            logger.error(f"[REALTIME] Error processing chunk in {processing_time:.2f}ms: {e}")
             import traceback
-            logger.error(f"[PROCESSING] ERROR in {processing_time:.2f}ms: {e}")
-            logger.error(f"[PROCESSING] Traceback: {traceback.format_exc()}")
+            logger.error(f"[REALTIME] Traceback: {traceback.format_exc()}")
+            
+            # Reset status for next chunk
+            cabin.status = CabinStatus.LISTENING
 
     def _send_rtp_chunks_to_sfu(self, cabin: TranslationCabin, audio_data: bytes) -> bool:
         """
@@ -603,7 +637,6 @@ class TranslationCabinManager:
             logger.error(f"[RTP-CHUNKS] Traceback: {traceback.format_exc()}")
             return False
 
-
     async def _send_audio_to_sfu(
         self, 
         cabin: TranslationCabin, 
@@ -611,24 +644,67 @@ class TranslationCabinManager:
         audio_type: str = "translated"
     ) -> bool:
         """
-        Send audio back to SFU via RTP packets
-        Works for both translated audio and passthrough audio
+        Send audio back to SFU via RTP packets (Opus @48kHz stereo, 20ms frames).
+        Accepts PCM16 mono @16kHz or WAV; handles resampling/encoding internally.
         """
         try:
-            # For passthrough: forward RTP packet directly
-            if audio_type == "passthrough":
-                # audio_data is already RTP packet, forward directly
-                sfu_host = SFU_SERVICE_HOST
-                sfu_port = cabin.sfu_send_port or cabin.send_port
-                success = self.socket_manager.send_rtp_to_sfu(audio_data, sfu_host, sfu_port)
-                return success
-            else:
-                # For translated: process through audio pipeline
-                success = self._send_rtp_chunks_to_sfu(cabin, audio_data)
-                return success
+            # Always send as encoded RTP chunks for consistency
+            success = self._send_rtp_chunks_to_sfu(cabin, audio_data)
+            return success
             
         except Exception as e:
             logger.error(f"[{audio_type.upper()}] Error sending {audio_type} audio: {e}")
+            return False
+
+    async def _stream_tts_in_parts(self, cabin: TranslationCabin, text: str, fallback_audio: Optional[bytes]) -> bool:
+        """
+        Try to stream TTS in smaller parts to improve perceived latency.
+        If splitting is not beneficial, return False and caller will send fallback in one go.
+        """
+        try:
+            if not text:
+                return False
+
+            # Simple heuristic: if text is short, don't split
+            words = text.split()
+            if len(words) <= 8:
+                return False
+
+            parts: List[str] = []
+            current: List[str] = []
+            for w in words:
+                current.append(w)
+                if len(current) >= 6 or w.endswith(('.', '!', '?', ',')):
+                    parts.append(' '.join(current))
+                    current = []
+            if current:
+                parts.append(' '.join(current))
+
+            # If splitting produced only one part, skip streaming
+            if len(parts) <= 1:
+                return False
+
+            # Generate TTS per part sequentially (keeps order and pacing)
+            from service.pipline_processor.text_to_speech import tts as tts_func
+            loop = cabin._event_loop or asyncio.get_event_loop()
+            for idx, part in enumerate(parts):
+                try:
+                    audio_part = await loop.run_in_executor(
+                        None,
+                        tts_func,
+                        part,
+                        cabin.target_language,
+                        cabin.user_id,
+                        cabin.room_id,
+                    )
+                    if audio_part:
+                        _ = await self._send_audio_to_sfu(cabin, audio_part, "translated-part")
+                except Exception as e:
+                    logger.warning(f"[STREAM-TTS] Part {idx} failed: {e}")
+                    continue
+            return True
+        except Exception as e:
+            logger.debug(f"[STREAM-TTS] Fallback to single audio due to error: {e}")
             return False
 
     def start_cabin(self, cabin_id: str) -> bool:
@@ -748,15 +824,15 @@ class TranslationCabinManager:
             cabin.running = False
             
             # Step 2: Wait for processing threads to finish with timeout
-            if cabin.thread and cabin.thread.is_alive():
+            if getattr(cabin, 'thread', None) and cabin.thread.is_alive():
                 cabin.thread.join(timeout=2.0)
             
-            if cabin.processor_thread and cabin.processor_thread.is_alive():
+            if getattr(cabin, 'processor_thread', None) and cabin.processor_thread.is_alive():
                 cabin.processor_thread.join(timeout=2.0)
             
             # Step 3: Release allocated network ports back to port manager
-            if cabin.rtp_port:
-                port_manager.release_port(cabin.rtp_port)
+            if getattr(cabin, 'receive_port', None):
+                port_manager.release_port(cabin.receive_port)
             
             if cabin.send_port:
                 port_manager.release_port(cabin.send_port)
@@ -764,19 +840,7 @@ class TranslationCabinManager:
             # Step 4: Clear audio processing buffers
             cabin.audio_buffer.clear()
             
-            # Step 5: Empty audio queue to prevent memory leaks (with limit)
-            queue_cleared = 0
-            while not cabin.audio_queue.empty() and queue_cleared < 1000:  # Prevent infinite loop
-                try:
-                    cabin.audio_queue.get_nowait()
-                    queue_cleared += 1
-                except queue.Empty:
-                    break
-                    
-            if queue_cleared >= 1000:
-                logger.warning(f"[CLEANUP] Stopped queue cleanup after {queue_cleared} items for {cabin_id}")
-            else:
-                logger.debug(f"[CLEANUP] Cleared {queue_cleared} items from audio queue for {cabin_id}")
+            # Step 5: No audio queue in realtime mode - nothing to clear
             
             # Step 6: Close optimized network resources
             if hasattr(cabin, '_send_socket') and cabin._send_socket:
@@ -861,15 +925,17 @@ class TranslationCabinManager:
                 # Step 5: Cleanup OPUS codec resources
                 opus_codec_manager.cleanup_cabin(cabin_id)
                 
-                # Clear audio buffers and queue
-                cabin.audio_buffer.clear()
-                queue_cleared = 0
-                while not cabin.audio_queue.empty() and queue_cleared < 500:  # Limit cleanup iterations
+                # Step 6: Cleanup cached pipeline
+                if cabin._cached_pipeline:
                     try:
-                        cabin.audio_queue.get_nowait()
-                        queue_cleared += 1
-                    except queue.Empty:
-                        break
+                        cabin._cached_pipeline.cleanup()
+                        cabin._cached_pipeline = None
+                        logger.debug(f"[CABIN-MANAGER] Cleaned up cached pipeline for {cabin_id}")
+                    except Exception as e:
+                        logger.warning(f"[CABIN-MANAGER] Error cleaning up pipeline: {e}")
+                
+                # Clear audio buffers (no queue in realtime mode)
+                cabin.audio_buffer.clear()
                 
                 # Force garbage collection after resource cleanup
                 import gc

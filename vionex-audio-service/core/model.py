@@ -90,7 +90,12 @@ print(f"Loaded {len(translation_models)} translation models successfully")
 
 # Load model tts
 from TTS.api import TTS
+import os
 
+# Set environment variable to automatically accept license for non-interactive environments
+os.environ["COQUI_TOS_AGREED"] = "1"
+
+# Initialize TTS model with automatic license acceptance
 tts_model = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2").to(TYPE_ENGINE)
 
 # Apply optimization parameters from config

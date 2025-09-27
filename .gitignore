@@ -7,6 +7,8 @@
 **/build
 **/models
 
+todo.md
+
 # IDE/editor files
 .vscode/
 .idea/
