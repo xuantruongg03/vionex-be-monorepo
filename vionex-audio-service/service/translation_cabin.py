@@ -48,8 +48,8 @@ class HybridChunkBuffer:
     """
 
     init_buffer: float = 0.5       # 0.5s đầu tiên để lấy ngữ cảnh
-    window_duration: float = 0.8   # mỗi chunk dài 0.8s
-    step_duration: float = 0.25     # overlap 0.4s
+    window_duration: float = 2.0   # mỗi chunk dài 0.8s
+    step_duration: float = 1.0     # overlap 0.4s
     sample_rate: int = 16000       # 16kHz mono PCM16
 
     def __post_init__(self):

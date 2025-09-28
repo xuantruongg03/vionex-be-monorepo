@@ -75,7 +75,7 @@ class STTPipeline:
 
             if result and result["text"]:
                 # Remove overlap first
-                cleaned_text = self.remove_overlap(result["text"], self.prev_text)
+                cleaned_text = self.remove_overlap(result["text"], self.prev_text, min_words=3)
                 
                 # Limit to max 20 words
                 limited_text = self.limit_words(cleaned_text, max_words=20)
@@ -133,8 +133,8 @@ def _transcribe(audio_array: np.ndarray, language: str = "vi") -> Dict[str, Any]
             best_of=1,
             temperature=0.0,
             word_timestamps=True,
-            condition_on_previous_text=True,  # cho phép nối mượt context
-            vad_filter=True,
+            condition_on_previous_text=False,  # cho phép nối mượt context
+            vad_filter=False,
             no_speech_threshold=0.3
         )
 
