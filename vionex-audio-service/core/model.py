@@ -1,8 +1,9 @@
-from faster_whisper import WhisperModel
+# WHISPER REPLACED WITH WAV2VEC2 FOR BETTER STREAMING PERFORMANCE
+# from faster_whisper import WhisperModel
 from core.config import (
-    WHISPER_MODEL, 
+    # WHISPER_MODEL, 
     TYPE_ENGINE, 
-    WHISPER_COMPUTE_TYPE,
+    # WHISPER_COMPUTE_TYPE,
     TTS_TEMPERATURE,
     TTS_LENGTH_PENALTY, 
     TTS_REPETITION_PENALTY,
@@ -14,14 +15,48 @@ from core.config import (
     THERMAL_THROTTLE_TEMP
 )
 
-# Load model whisper with device-appropriate compute type
-# Use float16 for CUDA/GPU, int8 for CPU to avoid compute type errors
-if TYPE_ENGINE == "cuda":
-    compute_type = WHISPER_COMPUTE_TYPE  # Use configured compute type for GPU
-else:
-    compute_type = "int8"  # Use int8 for CPU to avoid float16 errors
+# whisper_model = WhisperModel(WHISPER_MODEL, device=TYPE_ENGINE, compute_type=compute_type)
+whisper_model = None  # Disabled - using Wav2Vec2 instead
 
-whisper_model = WhisperModel(WHISPER_MODEL, device=TYPE_ENGINE, compute_type=compute_type)
+# Load Wav2Vec2 models for STT (replaces Whisper)
+from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
+import torch
+
+# Global Wav2Vec2 models - loaded once at startup
+wav2vec2_models = {}
+wav2vec2_processors = {}
+
+# Model mapping for different languages
+wav2vec2_model_map = {
+    "vi": "nguyenvulebinh/wav2vec2-base-vietnamese-250h",
+    "en": "facebook/wav2vec2-base-960h", 
+    "lo": "facebook/wav2vec2-base-960h"  # Fallback to English for Lao
+}
+
+# Load Wav2Vec2 models at startup
+print("Loading Wav2Vec2 models for STT...")
+for language, model_name in wav2vec2_model_map.items():
+    try:
+        print(f"Loading Wav2Vec2 model for {language}: {model_name}")
+        
+        processor = Wav2Vec2Processor.from_pretrained(model_name)
+        model = Wav2Vec2ForCTC.from_pretrained(model_name)
+        
+        # Move to GPU if available
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
+        
+        wav2vec2_models[language] = model
+        wav2vec2_processors[language] = processor
+        
+        print(f"Successfully loaded Wav2Vec2 model for {language} on {device}")
+        
+    except Exception as e:
+        print(f"Error loading Wav2Vec2 model for {language}: {e}")
+        wav2vec2_models[language] = None
+        wav2vec2_processors[language] = None
+
+print(f"Loaded {len([m for m in wav2vec2_models.values() if m is not None])} Wav2Vec2 models successfully")
 
 from transformers import MarianTokenizer, MarianMTModel
 import os
