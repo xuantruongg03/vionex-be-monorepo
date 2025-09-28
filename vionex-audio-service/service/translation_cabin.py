@@ -47,9 +47,9 @@ class HybridChunkBuffer:
     - Mọi tính toán dựa trên độ dài buffer, không dùng clock
     """
 
-    init_buffer: float = 2.0       # 2s đầu tiên để lấy ngữ cảnh
-    window_duration: float = 1.0   # mỗi chunk dài 1.0s
-    step_duration: float = 0.7     # overlap 0.3s
+    init_buffer: float = 0.5       # 0.5s đầu tiên để lấy ngữ cảnh
+    window_duration: float = 0.8   # mỗi chunk dài 0.8s
+    step_duration: float = 0.25     # overlap 0.4s
     sample_rate: int = 16000       # 16kHz mono PCM16
 
     def __post_init__(self):
@@ -445,24 +445,27 @@ class TranslationCabinManager:
             
             # Step 3: Convert PCM to WAV and process
             wav_data = AudioProcessingUtils.pcm_to_wav_bytes(audio_chunk)
-            result = await pipeline.process_audio(wav_data)
             
-            processing_time = (time.time() - start_time) * 1000
+            # Fire-and-forget: pipeline sẽ tự xử lý và gửi kết quả
+            asyncio.create_task(self._process_and_send(cabin, wav_data, start_time))
+            cabin.status = CabinStatus.LISTENING
             
-            # Step 4: Send translated audio if successful
-            if result['success'] and result.get('translated_audio'):
-                translated_audio = result['translated_audio']
+            # processing_time = (time.time() - start_time) * 1000
+            
+            # # Step 4: Send translated audio if successful
+            # if result['success'] and result.get('translated_audio'):
+            #     translated_audio = result['translated_audio']
 
-                # Stream out in small parts if possible to improve smoothness
-                streamed = await self._stream_tts_in_parts(cabin, result.get('translated_text', ''), translated_audio)
-                if not streamed:
-                    success = await self._send_audio_to_sfu(cabin, translated_audio, "translated")
-                    if success:
-                        logger.debug(f"[REALTIME] Processed chunk in {processing_time:.2f}ms")
-                    else:
-                        logger.error(f"[REALTIME] Failed to send translated audio")
-            else:
-                logger.warning(f"[REALTIME] Translation failed: {result}")
+            #     # Stream out in small parts if possible to improve smoothness
+            #     streamed = await self._stream_tts_in_parts(cabin, result.get('translated_text', ''), translated_audio)
+            #     if not streamed:
+            #         success = await self._send_audio_to_sfu(cabin, translated_audio, "translated")
+            #         if success:
+            #             logger.debug(f"[REALTIME] Processed chunk in {processing_time:.2f}ms")
+            #         else:
+            #             logger.error(f"[REALTIME] Failed to send translated audio")
+            # else:
+            #     logger.warning(f"[REALTIME] Translation failed: {result}")
             
             cabin.status = CabinStatus.LISTENING
             
@@ -475,6 +478,32 @@ class TranslationCabinManager:
             
             # Reset status for next chunk
             cabin.status = CabinStatus.LISTENING
+
+    async def _process_and_send(self, cabin: TranslationCabin, wav_data: bytes, start_time: float):
+        try:
+            pipeline = self.get_or_create_pipeline(cabin)
+            result = await pipeline.process_audio(wav_data)
+
+            processing_time = (time.time() - start_time) * 1000
+
+            if result['success'] and result.get('translated_audio'):
+                translated_audio = result['translated_audio']
+
+                # Stream out in small parts if possible to improve smoothness
+                streamed = await self._stream_tts_in_parts(
+                    cabin, result.get('translated_text', ''), translated_audio
+                )
+                if not streamed:
+                    success = await self._send_audio_to_sfu(cabin, translated_audio, "translated")
+                    if success:
+                        logger.debug(f"[REALTIME] Processed chunk in {processing_time:.2f}ms")
+                    else:
+                        logger.error(f"[REALTIME] Failed to send translated audio")
+            else:
+                logger.warning(f"[REALTIME] Translation failed: {result}")
+
+        except Exception as e:
+            logger.error(f"[REALTIME] Error in _process_and_send: {e}")
 
     def _send_rtp_chunks_to_sfu(self, cabin: TranslationCabin, audio_data: bytes) -> bool:
         """

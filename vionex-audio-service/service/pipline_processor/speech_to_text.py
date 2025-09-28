@@ -3,38 +3,23 @@ import difflib
 import logging
 import numpy as np
 import subprocess
-import torch
-import torchaudio
 from typing import Any, Dict, Optional
-from core.model import wav2vec2_models, wav2vec2_processors
+
+from core.model import whisper_model
 
 logger = logging.getLogger(__name__)
-
-def get_wav2vec2_model(language: str):
-    """Get Wav2Vec2 model for specific language from core models"""
-    model = wav2vec2_models.get(language)
-    processor = wav2vec2_processors.get(language)
-    
-    if model is None or processor is None:
-        logger.error(f"Wav2Vec2 model for {language} not available. Check core/model.py loading.")
-        return None, None
-    
-    return model, processor
 
 class STTPipeline:
     def __init__(self, source_language: str = "vi"):
         self.prev_text = ""
         self.source_language = source_language
         
-        # Language mapping for Wav2Vec2
-        self.wav2vec2_lang_map = {
+        # Language mapping for Whisper
+        self.whisper_lang_map = {
             "vi": "vi",
             "en": "en", 
-            "lo": "en"  # Use English model for Lao as fallback
+            "lo": "lo"  # Whisper supports Lao
         }
-        
-        # Get pre-loaded model from core for this language
-        self.model, self.processor = get_wav2vec2_model(self.source_language)
 
     def remove_overlap(self, curr: str, prev: str, min_words=2) -> str:
         """Enhanced overlap removal using difflib for better accuracy"""
@@ -74,14 +59,18 @@ class STTPipeline:
 
     async def speech_to_text(self, audio_data: bytes) -> Optional[Dict[str, Any]]:
         try:
-            if not self.model or not self.processor:
-                logger.warning("Wav2Vec2 model not available")
+            if not whisper_model:
+                logger.warning("Whisper model not available")
                 return None
 
-            audio_array = decode_audio_to_array(audio_data)
+            # audio_array = decode_audio_to_array(audio_data)
+            audio_array = pcm16_to_float32(audio_data)
+
+            # Use dynamic language or auto-detection
+            whisper_lang = self.whisper_lang_map.get(self.source_language, "vi")
             
             result = await asyncio.get_event_loop().run_in_executor(
-                None, _wav2vec2_transcribe, audio_array, self.model, self.processor, self.source_language
+                None, _transcribe, audio_array, whisper_lang
             )
 
             if result and result["text"]:
@@ -113,8 +102,11 @@ class STTPipeline:
             return result
 
         except Exception as e:
-            logger.error(f"Error in Wav2Vec2 STT: {e}")
+            logger.error(f"Error in STT: {e}")
             return None
+
+def pcm16_to_float32(audio_bytes: bytes) -> np.ndarray:
+    return np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
 
 def decode_audio_to_array(audio_bytes: bytes) -> np.ndarray:
     """Decode audio bytes to 16kHz mono float32 numpy array using ffmpeg"""
@@ -130,98 +122,36 @@ def decode_audio_to_array(audio_bytes: bytes) -> np.ndarray:
     return audio_array
 
 
-# async def _speech_to_text(audio_data: bytes) -> Optional[Dict[str, Any]]:
-#     """Convert audio to text using Whisper"""
-#     try:
-#         if not whisper_model:
-#             logger.warning("Whisper model not available")
-#             return None
-
-#         # Decode audio bytes properly
-#         audio_array = decode_audio_to_array(audio_data)
-
-#         # Run transcription in thread
-#         result = await asyncio.get_event_loop().run_in_executor(
-#             None, _transcribe, audio_array, "vi"  # Default to Vietnamese
-#         )
-#         return result
-
-#     except Exception as e:
-#         logger.error(f"Error in speech to text: {e}")
-#         return None
-
-
-def _wav2vec2_transcribe(audio_array: np.ndarray, model, processor, language: str = "vi") -> Dict[str, Any]:
-    """Synchronous Wav2Vec2 transcription optimized for streaming"""
+def _transcribe(audio_array: np.ndarray, language: str = "vi") -> Dict[str, Any]:
+    """Synchronous Whisper transcription using faster-whisper with enhanced config"""
     try:
-        # Ensure audio is float32 and normalized
-        if audio_array.dtype != np.float32:
-            audio_array = audio_array.astype(np.float32)
-        
-        # Normalize audio to [-1, 1] range
-        max_val = np.abs(audio_array).max()
-        if max_val > 0:
-            audio_array = audio_array / max_val
-        
-        # Process audio with Wav2Vec2 processor
-        inputs = processor(
-            audio_array, 
-            sampling_rate=16000, 
-            return_tensors="pt", 
-            padding=True
+        segments, info = whisper_model.transcribe(
+            audio_array,
+            language=language,
+            task="transcribe",
+            beam_size=1,                      # giảm search → nhanh hơn nhiều
+            best_of=1,
+            temperature=0.0,
+            word_timestamps=True,
+            condition_on_previous_text=True,  # cho phép nối mượt context
+            vad_filter=True,
+            no_speech_threshold=0.3
         )
-        
-        # Move to same device as model
-        device = next(model.parameters()).device
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-        
-        # Inference
-        with torch.no_grad():
-            logits = model(**inputs).logits
-        
-        # Decode predictions
-        predicted_ids = torch.argmax(logits, dim=-1)
-        transcription = processor.batch_decode(predicted_ids)[0]
-        
-        # Clean up transcription
-        transcription = transcription.strip().lower()
-        
-        # Remove special tokens and clean text
-        transcription = transcription.replace('[UNK]', '').replace('[PAD]', '').strip()
-        
-        # Basic post-processing for Vietnamese
-        if language == "vi":
-            transcription = _postprocess_vietnamese_text(transcription)
-        
+
+        segments_list = list(segments)
+        full_text = ' '.join([segment.text for segment in segments_list])
         return {
-            'text': transcription,
-            'language': language,
-            'segments': [{
-                'text': transcription,
-                'start': 0.0,
-                'end': len(audio_array) / 16000.0,  # Duration in seconds
-                'words': []
-            }]
+            'text': full_text.strip(),
+            'language': info.language if hasattr(info, 'language') else language,
+            'segments': [
+                {
+                    'text': segment.text,
+                    'start': segment.start,
+                    'end': segment.end,
+                    'words': getattr(segment, 'words', [])  # Include word-level timestamps
+                } for segment in segments_list
+            ]
         }
 
     except Exception as e:
-        logger.error(f"Error in Wav2Vec2 transcription: {e}")
         return {'text': '', 'language': language, 'segments': []}
-
-def _postprocess_vietnamese_text(text: str) -> str:
-    """Post-process Vietnamese text from Wav2Vec2"""
-    try:
-        # Basic cleaning
-        text = text.strip()
-        
-        # Remove extra spaces
-        import re
-        text = re.sub(r'\s+', ' ', text)
-        
-        # Capitalize first letter
-        if text:
-            text = text[0].upper() + text[1:]
-        
-        return text
-    except:
-        return text
