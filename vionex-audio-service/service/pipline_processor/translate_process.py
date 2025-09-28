@@ -46,25 +46,25 @@ class TranslateProcess:
                 inputs = {k: v.to(device) for k, v in inputs.items()}
             except Exception as device_error:
                 logger.warning(f"[TranslateProcess] Could not move inputs to model device: {device_error}")
-                # Continue with inputs on original device (CPU fallback)
-            
-            # Generate translations with appropriate settings
+
             with torch.no_grad():  # Disable gradient computation for inference
                 translated = model.generate(
                     **inputs,
-                    max_length=512,  # Prevent excessively long outputs
-                    num_beams=4,     # Balance quality vs speed
+                    max_new_tokens=64,          # giới hạn output ngắn hơn
+                    num_beams=1,                # greedy decode → nhanh hơn
+                    do_sample=False,
                     early_stopping=True,
                     pad_token_id=tokenizer.pad_token_id,
                     eos_token_id=tokenizer.eos_token_id,
                 )
+
             
             # Decode the generated tokens
             result = [tokenizer.decode(t, skip_special_tokens=True) for t in translated]
             
             # Clean up GPU memory if using CUDA
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            # if torch.cuda.is_available():
+            #     torch.cuda.empty_cache()
             
             return result
         except Exception as e:

@@ -63,7 +63,8 @@ class STTPipeline:
                 logger.warning("Whisper model not available")
                 return None
 
-            audio_array = decode_audio_to_array(audio_data)
+            # audio_array = decode_audio_to_array(audio_data)
+            audio_array = pcm16_to_float32(audio_data)
 
             # Use dynamic language or auto-detection
             whisper_lang = self.whisper_lang_map.get(self.source_language, "vi")
@@ -104,6 +105,9 @@ class STTPipeline:
             logger.error(f"Error in STT: {e}")
             return None
 
+def pcm16_to_float32(audio_bytes: bytes) -> np.ndarray:
+    return np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+
 def decode_audio_to_array(audio_bytes: bytes) -> np.ndarray:
     """Decode audio bytes to 16kHz mono float32 numpy array using ffmpeg"""
     process = subprocess.Popen(
@@ -118,39 +122,22 @@ def decode_audio_to_array(audio_bytes: bytes) -> np.ndarray:
     return audio_array
 
 
-# async def _speech_to_text(audio_data: bytes) -> Optional[Dict[str, Any]]:
-#     """Convert audio to text using Whisper"""
-#     try:
-#         if not whisper_model:
-#             logger.warning("Whisper model not available")
-#             return None
-
-#         # Decode audio bytes properly
-#         audio_array = decode_audio_to_array(audio_data)
-
-#         # Run transcription in thread
-#         result = await asyncio.get_event_loop().run_in_executor(
-#             None, _transcribe, audio_array, "vi"  # Default to Vietnamese
-#         )
-#         return result
-
-#     except Exception as e:
-#         logger.error(f"Error in speech to text: {e}")
-#         return None
-
-
 def _transcribe(audio_array: np.ndarray, language: str = "vi") -> Dict[str, Any]:
     """Synchronous Whisper transcription using faster-whisper with enhanced config"""
     try:
         segments, info = whisper_model.transcribe(
             audio_array,
-            language=language,  # Use dynamic language
-            task='transcribe',
-            beam_size=5,
+            language=language,
+            task="transcribe",
+            beam_size=1,                      # giảm search → nhanh hơn nhiều
+            best_of=1,
             temperature=0.0,
-            word_timestamps=True,  # Enable word timestamps for sliding window
-            condition_on_previous_text=False  # Disable context for better sliding window
+            word_timestamps=True,
+            condition_on_previous_text=True,  # cho phép nối mượt context
+            vad_filter=True,
+            no_speech_threshold=0.3
         )
+
         segments_list = list(segments)
         full_text = ' '.join([segment.text for segment in segments_list])
         return {
