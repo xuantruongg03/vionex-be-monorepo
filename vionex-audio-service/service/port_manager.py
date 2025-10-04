@@ -70,14 +70,17 @@ class PortManager:
             
             # Strategy 2: Find available port in range
             start_port, end_port = self._port_range
+            logger.debug(f"Searching for available port in range {start_port}-{end_port}, currently used: {len(self._used_ports)} ports")
+            
             for port in range(start_port, end_port + 1):
                 if port not in self._used_ports and self._is_port_available_unsafe(local_ip, port):
                     self._mark_port_used_unsafe(port)
-                    logger.info(f"Allocated available port {port}")
+                    logger.info(f"✅ Allocated available port {port} (used ports: {len(self._used_ports)})")
                     return port
             
             # Strategy 3: Fallback to OS auto-assignment
-            logger.warning(f"No ports available in range {start_port}-{end_port}, using OS auto-assignment")
+            logger.error(f"❌ No ports available in range {start_port}-{end_port}! Used: {len(self._used_ports)}/{end_port-start_port+1}")
+            logger.error(f"Currently used ports: {sorted(list(self._used_ports))[:20]}..." if len(self._used_ports) > 20 else f"Currently used ports: {sorted(list(self._used_ports))}")
             return 0
     
     def release_port(self, port: int) -> None:

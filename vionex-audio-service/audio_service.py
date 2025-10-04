@@ -194,30 +194,38 @@ class AudioService(audio_pb2_grpc.AudioServiceServicer):
                 target_language='en'   # Default, will be updated in B3
             )
             
-            # Check if cabin creation failed
+            # Check if cabin creation failed (returns None on failure)
             if not cabin_info:
+                logger.error(f"Failed to create cabin for room={request.roomId}, user={request.userId}")
                 return audio_pb2.PortReply(
                     success=False,
                     port=0,
                     send_port=0,
-                    ready=False
+                    ready=False,
+                    ssrc=0
                 )
+            
+            logger.info(f"✅ Cabin created: room={request.roomId}, user={request.userId}, "
+                       f"ports=({cabin_info['rtp_port']}, {cabin_info['send_port']}), ssrc={cabin_info['ssrc']}")
             
             return audio_pb2.PortReply(
                 success=True,
                 port=cabin_info['rtp_port'],      # Receive port
                 send_port=cabin_info['send_port'], # Send port
-                ssrc=cabin_info['ssrc'],         # SSRC for the producer
+                ssrc=cabin_info['ssrc'],           # SSRC for the producer
                 ready=True
             )
             
         except Exception as e:
             logger.error(f"AllocateTranslationPort error: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return audio_pb2.PortReply(
                 success=False,
                 port=0,
                 send_port=0,
-                ready=False
+                ready=False,
+                ssrc=0
             )
 
     def CreateTranslationProduce(self, request, context):
