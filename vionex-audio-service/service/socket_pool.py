@@ -200,6 +200,7 @@ class SharedSocketManager:
     def _start_rtp_router(self):
         """Start RTP packet routing thread"""
         if self._rx_thread and self._rx_thread.is_alive():
+            logger.warning("[SHARED-SOCKET] RTP router thread already running")
             return
         
         self._rx_thread = threading.Thread(
@@ -208,7 +209,8 @@ class SharedSocketManager:
             name="RTPRouter"
         )
         self._rx_thread.start()
-        logger.info("[SHARED-SOCKET] Started RTP packet router thread")
+        logger.info("[SHARED-SOCKET] ✅ Started RTP packet router thread")
+        logger.info(f"[SHARED-SOCKET] Thread ID: {self._rx_thread.ident}, Alive: {self._rx_thread.is_alive()}")
     
     def _rtp_packet_router(self):
         """
@@ -217,11 +219,14 @@ class SharedSocketManager:
         Receives RTP packets from SFU and routes them to appropriate 
         cabin callbacks based on SSRC mapping.
         """
+        logger.info("[RTP-ROUTER] 🚀 RTP packet router thread started!")
+        logger.info(f"[RTP-ROUTER] Listening on socket: {self.rx_sock}")
         packet_count = 0
         
         while self.running:
             try:
                 if not self.rx_sock:
+                    logger.error("[RTP-ROUTER] ❌ RX socket is None!")
                     time.sleep(0.1)
                     continue
                 
