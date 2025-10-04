@@ -1,6 +1,5 @@
 import logging
 import socket as socket_module
-import select
 import threading
 import time
 import struct
@@ -87,7 +86,6 @@ class SharedSocketManager:
             self.rx_sock.setsockopt(socket_module.SOL_SOCKET, socket_module.SO_RCVBUF, 1 << 20)  # 1MB buffer
             self.rx_sock.bind(("0.0.0.0", audio_rx_port))
             self.rx_sock.settimeout(1.0)
-            logger.info(f"[SHARED-SOCKET] RX socket bound to 0.0.0.0:{audio_rx_port}")
 
             # TX socket: Send all RTP packets to SFU
             self.tx_sock = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_DGRAM)
@@ -95,28 +93,12 @@ class SharedSocketManager:
 
             if tx_source_port > 0:  # Bind source port if SFU requires comedia:false
                 self.tx_sock.bind(("0.0.0.0", tx_source_port))
-                logger.info(f"[SHARED-SOCKET] TX socket bound to 0.0.0.0:{tx_source_port}")
-            else:
-                logger.info(f"[SHARED-SOCKET] TX socket created with ephemeral port")
 
             self.running = True
-            
-            # Start RTP packet routing thread
-            logger.info(f"[SHARED-SOCKET] Starting RTP router thread...")
             self._start_rtp_router()
-            
-            # Wait a moment to ensure router thread started
             time.sleep(0.1)
             
-            logger.info(f"[SHARED-SOCKET] Initialized RX:{audio_rx_port}, TX source:{tx_source_port or 'ephemeral'}")
-            
-            # DEV: Log test mode status
-            if self.test_mode:
-                logger.warning(f"[SHARED-SOCKET] TEST MODE ENABLED - Will learn client addresses from incoming RTP")
-                logger.warning(f"[SHARED-SOCKET] Translated audio will be sent back to learned addresses")
-            else:
-                logger.info(f"[SHARED-SOCKET] Production mode - Using configured SFU addresses")
-            
+            logger.info(f"[SHARED-SOCKET] Initialized (RX:{audio_rx_port}, test_mode={self.test_mode})")
             return True
             
         except Exception as e:
@@ -210,8 +192,6 @@ class SharedSocketManager:
             name="RTPRouter"
         )
         self._rx_thread.start()
-        logger.info("[SHARED-SOCKET] ✅ Started RTP packet router thread")
-        logger.info(f"[SHARED-SOCKET] Thread ID: {self._rx_thread.ident}, Alive: {self._rx_thread.is_alive()}")
     
     def _rtp_packet_router(self):
         """
@@ -220,13 +200,8 @@ class SharedSocketManager:
         Receives RTP packets from SFU and routes them to appropriate 
         cabin callbacks based on SSRC mapping.
         """
-        logger.info("[RTP-ROUTER] 🚀 RTP packet router thread started!")
-        logger.info(f"[RTP-ROUTER] Listening on socket: {self.rx_sock}")
-        logger.info(f"[RTP-ROUTER] Socket FD: {self.rx_sock.fileno()}")
-        logger.info(f"[RTP-ROUTER] Socket timeout: {self.rx_sock.gettimeout()}")
-        logger.info(f"[RTP-ROUTER] Using select() with 1s timeout for heartbeat")
+        logger.info("[RTP-ROUTER] Started")
         packet_count = 0
-        last_log_time = time.time()
         
         while self.running:
             try:
@@ -235,26 +210,13 @@ class SharedSocketManager:
                     time.sleep(0.1)
                     continue
                 
-                # Use select() to check if data is available (with timeout)
-                readable, _, _ = select.select([self.rx_sock], [], [], 1.0)
-                
-                # Check heartbeat
-                current_time = time.time()
-                if current_time - last_log_time > 10:
-                    logger.info(f"[RTP-ROUTER] ⏰ Heartbeat - waiting for packets... (received {packet_count} so far)")
-                    last_log_time = current_time
-                
-                if not readable:
-                    # No data available, continue loop
-                    continue
-                
-                # Data is available, receive it
+                # Receive RTP packet from SFU/client
                 data, addr = self.rx_sock.recvfrom(4096)
                 packet_count += 1
                 
-                # DEV: Log first packet and every 100 packets
-                if packet_count == 1 or packet_count % 100 == 0:
-                    logger.info(f"[RTP-RX] 📥 Packet #{packet_count} from {addr[0]}:{addr[1]}, size={len(data)} bytes")
+                # Log first packet only
+                if packet_count == 1:
+                    logger.info(f"[RTP-RX] First packet from {addr[0]}:{addr[1]}")
                 
                 if len(data) < 12:  # Minimum RTP header size
                     logger.warning(f"[RTP-RX] Packet too small: {len(data)} bytes")
@@ -271,9 +233,7 @@ class SharedSocketManager:
                         # DEV: This allows sending RTP back to test clients behind NAT
                         if self.test_mode and cabin_id not in self.cabin_to_client_address:
                             self.cabin_to_client_address[cabin_id] = addr  # DEV: Store (ip, port)
-                            logger.info(f"[TEST-MODE] ✅ Learned client address for cabin {cabin_id}")
-                            logger.info(f"[TEST-MODE]    Client: {addr[0]}:{addr[1]}")
-                            logger.info(f"[TEST-MODE]    RTP packets will be sent back to this address")
+                            logger.info(f"[TEST-MODE] Learned client: {addr[0]}:{addr[1]}")
                         
                         callback = self.cabin_callbacks[cabin_id]
                         try:
@@ -305,11 +265,11 @@ class SharedSocketManager:
                                         logger.error(f"[RTP-ROUTER] Error in auto-routed callback for {cabin_id}: {e}")
                                 continue
                         
+            except socket_module.timeout:
+                continue  # Normal timeout, keep running
             except Exception as e:
                 if self.running:  # Only log if we should be running
                     logger.error(f"[RTP-ROUTER] Error: {e}")
-                    import traceback
-                    logger.error(f"[RTP-ROUTER] Traceback: {traceback.format_exc()}")
                 time.sleep(0.1)
         
         # logger.info("[RTP-ROUTER] RTP packet router stopped")
@@ -435,14 +395,9 @@ def get_shared_socket_manager() -> SharedSocketManager:
         RuntimeError: If initialization fails
     """
     global shared_socket_manager
-    logger.info("[SHARED-SOCKET] 🔍 get_shared_socket_manager() called")
     if shared_socket_manager is None:
-        logger.info("[SHARED-SOCKET] Creating new SharedSocketManager instance...")
         shared_socket_manager = SharedSocketManager()
         if not shared_socket_manager.initialize_shared_sockets():
-            logger.error("[SHARED-SOCKET] Failed to initialize shared socket manager!")
+            logger.error("[SHARED-SOCKET] Failed to initialize!")
             raise RuntimeError("Failed to initialize shared socket manager")
-        logger.info("[SHARED-SOCKET] SharedSocketManager created and initialized successfully")
-    else:
-        logger.info("[SHARED-SOCKET] Using existing SharedSocketManager instance")
     return shared_socket_manager

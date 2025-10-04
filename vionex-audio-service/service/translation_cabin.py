@@ -233,16 +233,11 @@ class TranslationCabinManager:
     
     def __init__(self):
         """Initialize cabin manager with shared socket infrastructure"""
-        logger.info("[CABIN-MANAGER] 🔧 Initializing TranslationCabinManager...")
         self.cabins: Dict[str, TranslationCabin] = {}
         self._lock = threading.Lock()
-        logger.info("[CABIN-MANAGER] 📡 Getting shared socket manager...")
         self.socket_manager = get_shared_socket_manager()
-        logger.info("[CABIN-MANAGER] ✅ Socket manager obtained")
-        
-        # Memory monitoring settings
-        self.enable_memory_monitoring = True  # Set to False to disable monitoring
-        logger.info("[CABIN-MANAGER] ✅ Initialization complete")
+        self.enable_memory_monitoring = True
+        logger.info("[CABIN-MANAGER] Initialized")
 
     def get_or_create_pipeline(self, cabin: TranslationCabin) -> 'TranslationPipeline':
         """
@@ -316,8 +311,13 @@ class TranslationCabinManager:
                 # Step 1: Generate deterministic cabin ID
                 cabin_id = f"{room_id}_{user_id}_{source_language}_{target_language}"
                 
+                logger.info(f"[CABIN-MANAGER] 🏗️ Creating cabin: {cabin_id}")
+                logger.info(f"[CABIN-MANAGER]    Room: {room_id}, User: {user_id}")
+                logger.info(f"[CABIN-MANAGER]    Languages: {source_language} → {target_language}")
+                
                 # Step 2: Check for existing cabin (reuse pattern)
                 if cabin_id in self.cabins:
+                    logger.info(f"[CABIN-MANAGER] ♻️ Reusing existing cabin: {cabin_id}")
                     return self.get_cabin_info(cabin_id)
                 
                 # Step 3: Create cabin instance with default state
@@ -362,6 +362,12 @@ class TranslationCabinManager:
                 
                 # Step 8: Register cabin in manager's tracking registry
                 self.cabins[cabin_id] = cabin
+
+                logger.info(f"[CABIN-MANAGER] ✅ Cabin created successfully!")
+                logger.info(f"[CABIN-MANAGER]    Cabin ID: {cabin_id}")
+                logger.info(f"[CABIN-MANAGER]    SSRC: {cabin_ssrc}")
+                logger.info(f"[CABIN-MANAGER]    RX Port: {receive_port}, TX Port: {send_port}")
+                logger.info(f"[CABIN-MANAGER]    Status: {cabin.status.value}")
 
                 # Start single processor thread for this cabin
                 self._start_processor_thread(cabin)
@@ -1113,6 +1119,4 @@ class TranslationCabinManager:
         }
 
 # Global cabin manager instance for service-wide translation cabin operations
-logger.info("[CABIN-MANAGER] 🏗️ Creating global TranslationCabinManager instance...")
 cabin_manager = TranslationCabinManager()
-logger.info("[CABIN-MANAGER] ✅ TranslationCabinManager created successfully")
