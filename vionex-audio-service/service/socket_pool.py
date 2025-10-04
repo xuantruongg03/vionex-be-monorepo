@@ -1,5 +1,6 @@
 import logging
 import socket as socket_module
+import select
 import threading
 import time
 import struct
@@ -223,7 +224,7 @@ class SharedSocketManager:
         logger.info(f"[RTP-ROUTER] Listening on socket: {self.rx_sock}")
         logger.info(f"[RTP-ROUTER] Socket FD: {self.rx_sock.fileno()}")
         logger.info(f"[RTP-ROUTER] Socket timeout: {self.rx_sock.gettimeout()}")
-        logger.info(f"[RTP-ROUTER] Waiting for packets... (will log every 10 seconds)")
+        logger.info(f"[RTP-ROUTER] Using select() with 1s timeout for heartbeat")
         packet_count = 0
         last_log_time = time.time()
         
@@ -234,7 +235,20 @@ class SharedSocketManager:
                     time.sleep(0.1)
                     continue
                 
-                # Receive RTP packet from SFU/client (with timeout)
+                # Use select() to check if data is available (with timeout)
+                readable, _, _ = select.select([self.rx_sock], [], [], 1.0)
+                
+                # Check heartbeat
+                current_time = time.time()
+                if current_time - last_log_time > 10:
+                    logger.info(f"[RTP-ROUTER] ⏰ Heartbeat - waiting for packets... (received {packet_count} so far)")
+                    last_log_time = current_time
+                
+                if not readable:
+                    # No data available, continue loop
+                    continue
+                
+                # Data is available, receive it
                 data, addr = self.rx_sock.recvfrom(4096)
                 packet_count += 1
                 
@@ -291,16 +305,11 @@ class SharedSocketManager:
                                         logger.error(f"[RTP-ROUTER] Error in auto-routed callback for {cabin_id}: {e}")
                                 continue
                         
-            except socket_module.timeout:
-                # Socket timeout - log heartbeat and continue
-                current_time = time.time()
-                if current_time - last_log_time > 10:
-                    logger.info(f"[RTP-ROUTER] ⏰ Still waiting for packets... (received {packet_count} so far)")
-                    last_log_time = current_time
-                continue  # Normal timeout, keep running
             except Exception as e:
                 if self.running:  # Only log if we should be running
                     logger.error(f"[RTP-ROUTER] Error: {e}")
+                    import traceback
+                    logger.error(f"[RTP-ROUTER] Traceback: {traceback.format_exc()}")
                 time.sleep(0.1)
         
         # logger.info("[RTP-ROUTER] RTP packet router stopped")
