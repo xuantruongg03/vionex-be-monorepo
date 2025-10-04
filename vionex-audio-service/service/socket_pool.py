@@ -417,6 +417,7 @@ def get_shared_socket_manager() -> SharedSocketManager:
         RuntimeError: If initialization fails
     """
     global shared_socket_manager
+    logger.info("[SHARED-SOCKET] 🔍 get_shared_socket_manager() called")
     if shared_socket_manager is None:
         logger.info("[SHARED-SOCKET] Creating new SharedSocketManager instance...")
         shared_socket_manager = SharedSocketManager()
