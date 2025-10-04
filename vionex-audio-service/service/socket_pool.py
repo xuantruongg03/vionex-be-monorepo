@@ -234,13 +234,7 @@ class SharedSocketManager:
                     time.sleep(0.1)
                     continue
                 
-                # Log heartbeat every 10 seconds to confirm thread is alive
-                current_time = time.time()
-                if current_time - last_log_time > 10:
-                    logger.info(f"[RTP-ROUTER] ⏰ Still waiting for packets... (received {packet_count} so far)")
-                    last_log_time = current_time
-                
-                # Receive RTP packet from SFU/client
+                # Receive RTP packet from SFU/client (with timeout)
                 data, addr = self.rx_sock.recvfrom(4096)
                 packet_count += 1
                 
@@ -298,6 +292,11 @@ class SharedSocketManager:
                                 continue
                         
             except socket_module.timeout:
+                # Socket timeout - log heartbeat and continue
+                current_time = time.time()
+                if current_time - last_log_time > 10:
+                    logger.info(f"[RTP-ROUTER] ⏰ Still waiting for packets... (received {packet_count} so far)")
+                    last_log_time = current_time
                 continue  # Normal timeout, keep running
             except Exception as e:
                 if self.running:  # Only log if we should be running
