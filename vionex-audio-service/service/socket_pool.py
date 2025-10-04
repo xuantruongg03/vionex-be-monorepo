@@ -221,7 +221,11 @@ class SharedSocketManager:
         """
         logger.info("[RTP-ROUTER] 🚀 RTP packet router thread started!")
         logger.info(f"[RTP-ROUTER] Listening on socket: {self.rx_sock}")
+        logger.info(f"[RTP-ROUTER] Socket FD: {self.rx_sock.fileno()}")
+        logger.info(f"[RTP-ROUTER] Socket timeout: {self.rx_sock.gettimeout()}")
+        logger.info(f"[RTP-ROUTER] Waiting for packets... (will log every 10 seconds)")
         packet_count = 0
+        last_log_time = time.time()
         
         while self.running:
             try:
@@ -229,6 +233,12 @@ class SharedSocketManager:
                     logger.error("[RTP-ROUTER] ❌ RX socket is None!")
                     time.sleep(0.1)
                     continue
+                
+                # Log heartbeat every 10 seconds to confirm thread is alive
+                current_time = time.time()
+                if current_time - last_log_time > 10:
+                    logger.info(f"[RTP-ROUTER] ⏰ Still waiting for packets... (received {packet_count} so far)")
+                    last_log_time = current_time
                 
                 # Receive RTP packet from SFU/client
                 data, addr = self.rx_sock.recvfrom(4096)
