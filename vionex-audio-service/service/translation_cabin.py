@@ -645,7 +645,7 @@ class TranslationCabinManager:
 
                 # Create and send RTP packet
                 rtp_packet = RTPUtils.create_rtp_packet(opus_payload, 100, cabin._rtp_seq_num, cabin._rtp_timestamp, cabin._rtp_ssrc)
-                ok = self.socket_manager.send_rtp_to_sfu(rtp_packet, sfu_host, sfu_port)
+                ok = self.socket_manager.send_rtp_to_sfu(rtp_packet, sfu_host, sfu_port, cabin.cabin_id)  # DEV: Pass cabin_id for test mode
                 if ok:
                     success_count += 1
                 

@@ -335,6 +335,11 @@ def serve():
 
 def main():
     """Main function"""
+    # Initialize file-based logging
+    from core.logger_setup import setup_file_logger
+    log_file = setup_file_logger()
+    logger.info(f"File logging initialized: {log_file}")
+    
     try:
         serve()
     except KeyboardInterrupt:
