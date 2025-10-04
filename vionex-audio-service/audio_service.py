@@ -14,17 +14,18 @@ import time
 from concurrent import futures
 from typing import Dict, Any
 
-from core.config import GRPC_PORT
-from proto import audio_pb2_grpc, audio_pb2
-from service.audio_processor import AudioProcessor
-from service.translation_cabin import cabin_manager
-
-# Setup logging
+# Setup logging FIRST before importing other modules
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Import after logging is configured
+from core.config import GRPC_PORT
+from proto import audio_pb2_grpc, audio_pb2
+from service.audio_processor import AudioProcessor
+from service.translation_cabin import cabin_manager
 
 class AudioService(audio_pb2_grpc.AudioServiceServicer):
     """
