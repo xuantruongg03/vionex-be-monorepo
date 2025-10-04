@@ -11,6 +11,9 @@ import logging
 import asyncio
 import threading
 import queue
+import wave
+import os
+from datetime import datetime
 from service.pipline_processor.VAD import VoiceActivityDetector
 from core.config import SFU_SERVICE_HOST
 
@@ -110,6 +113,60 @@ class HybridChunkBuffer:
     def clear(self):
         self._buffer.clear()
         self._next_start_bytes = 0
+
+class AudioRecorder:
+    """
+    Record incoming audio to WAV files for debugging
+    """
+    def __init__(self, cabin_id: str, save_dir: str = "debug_audio"):
+        self.cabin_id = cabin_id
+        self.save_dir = save_dir
+        self.current_file = None
+        self.wav_writer = None
+        self.packet_count = 0
+        
+        # Create save directory
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # Start new recording file
+        self._start_new_file()
+    
+    def _start_new_file(self):
+        """Start a new WAV file"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{self.cabin_id}_{timestamp}.wav"
+        filepath = os.path.join(self.save_dir, filename)
+        
+        # Close previous file if exists
+        if self.wav_writer:
+            self.wav_writer.close()
+        
+        # Open new WAV file: 16kHz, mono, 16-bit PCM
+        self.current_file = filepath
+        self.wav_writer = wave.open(filepath, 'wb')
+        self.wav_writer.setnchannels(1)  # Mono
+        self.wav_writer.setsampwidth(2)  # 16-bit = 2 bytes
+        self.wav_writer.setframerate(16000)  # 16kHz
+        self.packet_count = 0
+        
+        logger.info(f"[AUDIO-RECORDER] 🎙️ Started recording: {filepath}")
+    
+    def write_audio(self, pcm_16k_mono: bytes):
+        """Write PCM audio to WAV file"""
+        if self.wav_writer:
+            self.wav_writer.writeframes(pcm_16k_mono)
+            self.packet_count += 1
+            
+            # Rotate file every 100 packets (~60 seconds)
+            if self.packet_count >= 100:
+                self._start_new_file()
+    
+    def close(self):
+        """Close WAV file"""
+        if self.wav_writer:
+            self.wav_writer.close()
+            self.wav_writer = None
+            logger.info(f"[AUDIO-RECORDER] ✅ Closed recording: {self.current_file}")
         self._started = False
 
 @dataclass        
@@ -154,6 +211,9 @@ class TranslationCabin:
     chunk_queue: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=64))
     processor_thread: Optional[threading.Thread] = None
     thread: Optional[threading.Thread] = None
+    
+    # Audio recorder for debugging
+    audio_recorder: Optional[AudioRecorder] = None
     _event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
@@ -265,6 +325,9 @@ class TranslationCabinManager:
                     user_id=user_id
                 )
                 
+                # Initialize audio recorder for debugging
+                cabin.audio_recorder = AudioRecorder(cabin_id)
+                
                 # Step 4: Setup SSRC and register with SharedSocketManager
                 # Generate unique SSRC from cabin ID for RTP identification
                 cabin_ssrc = hash(cabin_id) & 0xFFFFFFFF
@@ -349,6 +412,10 @@ class TranslationCabinManager:
             pcm_16k_mono = AudioProcessingUtils.downsample_48k_to_16k(pcm_48k_stereo)
             if not pcm_16k_mono:
                 return
+
+            # 🎙️ SAVE AUDIO TO FILE for debugging
+            if cabin.audio_recorder:
+                cabin.audio_recorder.write_audio(pcm_16k_mono)
 
             # Cleanup intermediate data immediately
             del pcm_48k_stereo
@@ -953,6 +1020,11 @@ class TranslationCabinManager:
                 
                 # Step 5: Cleanup OPUS codec resources
                 opus_codec_manager.cleanup_cabin(cabin_id)
+                
+                # Step 5.5: Close audio recorder
+                if cabin.audio_recorder:
+                    cabin.audio_recorder.close()
+                    cabin.audio_recorder = None
                 
                 # Step 6: Cleanup cached pipeline
                 if cabin._cached_pipeline:

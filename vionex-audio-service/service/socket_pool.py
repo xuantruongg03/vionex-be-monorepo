@@ -229,11 +229,12 @@ class SharedSocketManager:
                 data, addr = self.rx_sock.recvfrom(4096)
                 packet_count += 1
                 
-                # DEV: Log received packet address (every 100 packets to avoid spam)
-                if packet_count % 100 == 0:
-                    logger.debug(f"[RTP-RX] Packet #{packet_count} from {addr[0]}:{addr[1]}")
+                # DEV: Log first packet and every 100 packets
+                if packet_count == 1 or packet_count % 100 == 0:
+                    logger.info(f"[RTP-RX] 📥 Packet #{packet_count} from {addr[0]}:{addr[1]}, size={len(data)} bytes")
                 
                 if len(data) < 12:  # Minimum RTP header size
+                    logger.warning(f"[RTP-RX] Packet too small: {len(data)} bytes")
                     continue
                 
                 # Extract SSRC from RTP header (bytes 8-11)
