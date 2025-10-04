@@ -233,12 +233,16 @@ class TranslationCabinManager:
     
     def __init__(self):
         """Initialize cabin manager with shared socket infrastructure"""
+        logger.info("[CABIN-MANAGER] 🔧 Initializing TranslationCabinManager...")
         self.cabins: Dict[str, TranslationCabin] = {}
         self._lock = threading.Lock()
+        logger.info("[CABIN-MANAGER] 📡 Getting shared socket manager...")
         self.socket_manager = get_shared_socket_manager()
+        logger.info("[CABIN-MANAGER] ✅ Socket manager obtained")
         
         # Memory monitoring settings
         self.enable_memory_monitoring = True  # Set to False to disable monitoring
+        logger.info("[CABIN-MANAGER] ✅ Initialization complete")
 
     def get_or_create_pipeline(self, cabin: TranslationCabin) -> 'TranslationPipeline':
         """
@@ -1109,4 +1113,6 @@ class TranslationCabinManager:
         }
 
 # Global cabin manager instance for service-wide translation cabin operations
+logger.info("[CABIN-MANAGER] 🏗️ Creating global TranslationCabinManager instance...")
 cabin_manager = TranslationCabinManager()
+logger.info("[CABIN-MANAGER] ✅ TranslationCabinManager created successfully")
