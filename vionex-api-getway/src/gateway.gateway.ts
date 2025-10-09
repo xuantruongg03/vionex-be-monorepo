@@ -639,13 +639,6 @@ export class GatewayGateway
                 data.roomId ||
                 (await this.helperService.getRoomIdBySocketId(client.id));
 
-            console.log(
-                `[Gateway] Setting RTP capabilities for peer ${peerId} in room ${roomId}`,
-            );
-            console.log(
-                `[Gateway] RTP capabilities codecs count: ${data.rtpCapabilities?.codecs?.length || 0}`,
-            );
-
             if (!peerId || !roomId) {
                 console.error(
                     `[Gateway] Invalid participant or room info - peerId: ${peerId}, roomId: ${roomId}`,
@@ -667,31 +660,16 @@ export class GatewayGateway
 
             // Store RTP capabilities in room service for persistence and retrieval
             try {
-                console.log(
-                    `[Gateway] Storing RTP capabilities in room service for peer ${peerId}`,
-                );
                 const rtpResult =
                     await this.roomClient.updateParticipantRtpCapabilities(
                         peerId,
                         data.rtpCapabilities,
                     );
-
-                if (rtpResult.success) {
-                    console.log(
-                        `[Gateway] Successfully stored RTP capabilities for peer ${peerId}`,
-                    );
-                } else {
-                    console.warn(
-                        '[Gateway] Failed to store RTP capabilities in room service:',
-                        rtpResult.error,
-                    );
-                }
             } catch (error) {
                 console.warn(
                     '[Gateway] Error storing RTP capabilities in room service:',
                     error,
                 );
-                // Don't fail the whole operation for this
             }
 
             client.emit('sfu:rtp-capabilities-set', { success: true });
@@ -880,13 +858,25 @@ export class GatewayGateway
                 appData: safeMetadata,
             });
 
-            // Emit stream-added to all users in room (including sender)
-            this.io.to(roomId).emit('sfu:stream-added', {
-                streamId: streamId,
-                publisherId: peerId,
-                metadata: safeMetadata,
-                rtpParameters: data.rtpParameters,
-            });
+            // FIXED: Only broadcast stream-added for non-dummy producers
+            // Dummy producers (video: false or audio: false) should not be consumed
+            const isDummyProducer =
+                (data.kind === 'video' && safeMetadata.video === false) ||
+                (data.kind === 'audio' && safeMetadata.audio === false);
+
+            if (!isDummyProducer) {
+                // Emit stream-added to all users in room (including sender)
+                this.io.to(roomId).emit('sfu:stream-added', {
+                    streamId: streamId,
+                    publisherId: peerId,
+                    metadata: safeMetadata,
+                    rtpParameters: data.rtpParameters,
+                });
+            } else {
+                console.log(
+                    `[Gateway] Skipping stream-added broadcast for dummy ${data.kind} producer: ${streamId}`,
+                );
+            }
 
             // If this is a screen share, emit special screen share event
             if (isScreenShare && data.kind === 'video') {
@@ -1663,28 +1653,34 @@ export class GatewayGateway
 
                 // Step 4: Trigger stream consumption for speaking user
                 for (const stream of speakingUserStreams) {
+                    // Handle both snake_case and camelCase from gRPC/TypeScript
+                    const streamId = stream.streamId || stream.stream_id;
+                    const publisherId =
+                        stream.publisherId || stream.publisher_id;
+
+                    // FIX: Validate streamId before emitting
+                    if (!streamId || !publisherId) {
+                        console.warn(
+                            `[Gateway] Skipping invalid stream for speaking user ${speakingPeerId}: streamId=${streamId}, publisherId=${publisherId}`,
+                        );
+                        continue;
+                    }
+
                     // Emit stream-added event to trigger consumption
                     socket.emit('sfu:stream-added', {
-                        streamId: stream.streamId,
-                        stream_id: stream.streamId,
-                        publisherId: speakingPeerId,
-                        publisher_id: speakingPeerId,
+                        streamId: streamId,
+                        stream_id: streamId, // For backward compatibility
+                        publisherId: publisherId,
+                        publisher_id: publisherId, // For backward compatibility
                         metadata: stream.metadata || {
                             isFromSpeaking: true, // Mark as priority from speaking
                             priority: true,
                         },
-                        rtpParameters: stream.rtpParameters,
+                        rtpParameters:
+                            stream.rtpParameters || stream.rtp_parameters,
                     });
-
-                    console.log(
-                        `[Gateway] Sent priority stream ${stream.streamId} to ${participant.peer_id}`,
-                    );
                 }
             }
-
-            console.log(
-                `[Gateway] Successfully handled speaking priority for ${speakingPeerId}`,
-            );
         } catch (error) {
             console.error(`[Gateway] Error handling speaking priority:`, error);
         }
@@ -1734,6 +1730,9 @@ export class GatewayGateway
             const allStreams = await this.sfuClient.getStreams(roomId);
 
             if (!allStreams) {
+                console.log(
+                    `[Gateway] No streams returned from SFU for room ${roomId}`,
+                );
                 return [];
             }
 
@@ -1743,20 +1742,35 @@ export class GatewayGateway
 
             // Filter streams from the speaking user (audio/video, not screen share)
             const userStreams = streams.filter((stream: any) => {
+                // Handle both snake_case (from gRPC) and camelCase (from TypeScript)
                 const streamId = stream.streamId || stream.stream_id;
                 const publisherId = stream.publisherId || stream.publisher_id;
+
+                // Validate stream data
+                if (!streamId || !publisherId) {
+                    console.warn(
+                        `[Gateway] Invalid stream data: streamId=${streamId}, publisherId=${publisherId}`,
+                    );
+                    return false;
+                }
 
                 // Must be from speaking user
                 if (publisherId !== speakingPeerId) return false;
 
                 // Parse stream ID to determine type
                 const parts = streamId.split('_');
+                if (parts.length < 2) {
+                    console.warn(
+                        `[Gateway] Invalid streamId format: ${streamId}`,
+                    );
+                    return false;
+                }
+
                 const mediaType = parts[1]; // video, audio, screen, screen_audio
 
                 // Only prioritize regular audio/video streams, not screen shares
                 return mediaType === 'video' || mediaType === 'audio';
             });
-
             return userStreams;
         } catch (error) {
             console.error(
@@ -1792,10 +1806,6 @@ export class GatewayGateway
                 };
             }
 
-            console.log(
-                `[Gateway] Handling unpublish for stream ${data.streamId} from ${peerId} in room ${roomId}`,
-            );
-
             // Verify stream ownership for security
             const isOwner = await this.streamService.verifyStreamOwnership(
                 data.streamId,
@@ -1828,19 +1838,12 @@ export class GatewayGateway
                     message: result.message,
                 });
 
-                console.log(
-                    `[Gateway] Successfully unpublished stream ${data.streamId} for ${peerId}`,
-                );
             } else {
                 // Send error to the requesting client
                 client.emit('sfu:error', {
                     message: result.message,
                     code: 'UNPUBLISH_FAILED',
                 });
-
-                console.error(
-                    `[Gateway] Failed to unpublish stream ${data.streamId}: ${result.message}`,
-                );
             }
 
             return result;
@@ -2061,16 +2064,11 @@ export class GatewayGateway
                 client.id,
             );
             if (!peerId) {
-                client.emit('sfu:pin-user-response', {
+                return {
                     success: false,
                     message: 'User not authenticated',
-                });
-                return;
+                };
             }
-
-            console.log(
-                `[Gateway] Pin user request from ${peerId} to pin ${data.pinnedPeerId}`,
-            );
 
             // Get participant data for RTP capabilities
             const participant = this.helperService
@@ -2091,15 +2089,6 @@ export class GatewayGateway
                     ? JSON.parse(result.pin_data)
                     : result.pin_data;
 
-            // Emit response to pinner
-            client.emit('sfu:pin-user-response', {
-                success: parsedResult.success,
-                message: parsedResult.message,
-                consumersCreated: parsedResult.consumersCreated || [],
-                alreadyPriority: parsedResult.alreadyPriority,
-                existingConsumer: parsedResult.existingConsumer,
-            });
-
             // Broadcast pin event to room (for UI updates)
             client.to(data.roomId).emit('sfu:user-pinned', {
                 pinnerPeerId: peerId,
@@ -2107,15 +2096,20 @@ export class GatewayGateway
                 roomId: data.roomId,
             });
 
-            console.log(
-                `[Gateway] Pin user successful: ${peerId} pinned ${data.pinnedPeerId}`,
-            );
+            // Return response (will be sent as callback to client)
+            return {
+                success: parsedResult.success,
+                message: parsedResult.message,
+                consumersCreated: parsedResult.consumersCreated || [],
+                alreadyPriority: parsedResult.alreadyPriority,
+                existingConsumer: parsedResult.existingConsumer,
+            };
         } catch (error) {
             console.error(`[Gateway] Error pinning user:`, error);
-            client.emit('sfu:pin-user-response', {
+            return {
                 success: false,
                 message: error.message || 'Failed to pin user',
-            });
+            };
         }
     }
 
@@ -2133,11 +2127,11 @@ export class GatewayGateway
                 client.id,
             );
             if (!peerId) {
-                client.emit('sfu:unpin-user-response', {
+                console.log('[Gateway] Unpin user - User not authenticated');
+                return {
                     success: false,
                     message: 'User not authenticated',
-                });
-                return;
+                };
             }
 
             console.log(
@@ -2155,13 +2149,10 @@ export class GatewayGateway
                     ? JSON.parse(result.unpin_data)
                     : result.unpin_data;
 
-            // Emit response to unpinner
-            client.emit('sfu:unpin-user-response', {
-                success: parsedResult.success,
-                message: parsedResult.message,
-                consumersRemoved: parsedResult.consumersRemoved || [],
-                stillInPriority: parsedResult.stillInPriority,
-            });
+            console.log(
+                `[Gateway] Unpin user successful: ${peerId} unpinned ${data.unpinnedPeerId}`,
+                parsedResult,
+            );
 
             // Broadcast unpin event to room (for UI updates)
             client.to(data.roomId).emit('sfu:user-unpinned', {
@@ -2170,15 +2161,19 @@ export class GatewayGateway
                 roomId: data.roomId,
             });
 
-            console.log(
-                `[Gateway] Unpin user successful: ${peerId} unpinned ${data.unpinnedPeerId}`,
-            );
+            // Return response (will be sent as callback to client)
+            return {
+                success: parsedResult.success,
+                message: parsedResult.message,
+                consumersRemoved: parsedResult.consumersRemoved || [],
+                stillInPriority: parsedResult.stillInPriority,
+            };
         } catch (error) {
             console.error(`[Gateway] Error unpinning user:`, error);
-            client.emit('sfu:unpin-user-response', {
+            return {
                 success: false,
                 message: error.message || 'Failed to unpin user',
-            });
+            };
         }
     }
 

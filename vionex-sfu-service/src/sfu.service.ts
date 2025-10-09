@@ -8,9 +8,14 @@ import {
     sanitizeId,
 } from './utils/sdp-helpers';
 import { WorkerPoolService } from './worker-pool/worker-pool.service';
-
-// SFU Configuration Constants
-export const MAX_PRIORITY_STREAMS = 10; // Maximum number of streams to consume for users 1-10
+import {
+    SMALL_ROOM_MAX_USERS,
+    MAX_PRIORITY_USERS,
+    SPEAKING_THRESHOLD_MS,
+    SPEAKER_CLEANUP_INTERVAL_MS,
+    SPEAKER_INACTIVITY_THRESHOLD_MS,
+    CONSUMER_THRESHOLD,
+} from './constants/sfu.constants';
 
 @Injectable()
 export class SfuService implements OnModuleInit, OnModuleDestroy {
@@ -54,7 +59,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         private readonly workerPool: WorkerPoolService,
     ) {
         // Kích hoạt task cleanup cho active speakers
-        setInterval(() => this.cleanupInactiveSpeakers(), 5000);
+        setInterval(
+            () => this.cleanupInactiveSpeakers(),
+            SPEAKER_CLEANUP_INTERVAL_MS,
+        );
     }
     async onModuleInit() {
         try {
@@ -536,20 +544,22 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             return true;
         }
 
-        // For small rooms (≤10 users), consume all streams
-        if (totalUsers <= 10) {
+        // For small rooms (≤SMALL_ROOM_MAX_USERS), consume all streams
+        if (totalUsers <= SMALL_ROOM_MAX_USERS) {
             return true;
         }
 
-        const isPriorityStream =
-            this.isSpecialUser(roomId, publisherId) ||
-            this.isUserSpeaking(roomId, publisherId);
-
-        if (isPriorityStream) {
+        // PRIORITY 1: Speaking users always consume (bypass limit)
+        if (this.isUserSpeaking(roomId, publisherId)) {
             return true;
         }
 
-        // For 11+ users, check if publisher is in prioritized users list
+        // PRIORITY 2: Special users (screen share, translation, etc.)
+        if (this.isSpecialUser(roomId, publisherId)) {
+            return true;
+        }
+
+        // PRIORITY 3: For large rooms (>SMALL_ROOM_MAX_USERS), check priority list
         const prioritizedUsers = this.getPrioritizedUsers(roomId);
         const isInPriorityList = prioritizedUsers.has(publisherId);
 
@@ -559,27 +569,35 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         return false;
     }
 
-    // This replaces the old static "first 10 streams" logic with intelligent prioritization
+    /**
+     * Get prioritized users for large rooms (>SMALL_ROOM_MAX_USERS)
+     *
+     * Priority allocation (only for rooms with >10 users):
+     * 1. Speaking users (unlimited, within SPEAKING_THRESHOLD_MS)
+     * 2. Special users (unlimited, screen share/translation)
+     * 3. Regular users (limited to MAX_PRIORITY_USERS, FIFO by stream creation time)
+     *
+     * Note: Pinned users are handled separately in shouldUserReceiveStream()
+     */
     private getPrioritizedUsers(roomId: string): Set<string> {
         const prioritizedUsers = new Set<string>();
 
-        // Step 1: Add currently speaking users (highest priority)
+        // Step 1: Add currently speaking users (unlimited slots)
         const roomSpeakers = this.activeSpeakers.get(roomId);
         if (roomSpeakers) {
             const currentTime = new Date();
-            const speakingThreshold = 5000; // 5 seconds
 
             roomSpeakers.forEach((lastSpeakTime, peerId) => {
                 if (
                     currentTime.getTime() - lastSpeakTime.getTime() <
-                    speakingThreshold
+                    SPEAKING_THRESHOLD_MS
                 ) {
                     prioritizedUsers.add(peerId);
                 }
             });
         }
 
-        // Step 2: Add special users (creators, admins, etc.)
+        // Step 2: Add special users (unlimited slots - screen share, translation, etc.)
         const allRoomStreams = this.getStreamsByRoom(roomId);
         const specialUsers = new Set<string>();
         allRoomStreams.forEach((stream) => {
@@ -591,19 +609,21 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             prioritizedUsers.add(userId);
         });
 
-        // Step 3: Fill remaining slots with streams based on priority
+        // Step 3: Fill remaining slots with regular users (limited to MAX_PRIORITY_USERS)
+        // This ensures first-joined users get priority when room is crowded
         const remainingSlots = Math.max(
             0,
-            MAX_PRIORITY_STREAMS - prioritizedUsers.size,
+            MAX_PRIORITY_USERS - prioritizedUsers.size,
         );
         if (remainingSlots > 0) {
-            // Get streams sorted by priority (excluding already prioritized users)
+            // Get streams sorted by priority (FIFO - older streams first)
+            // Exclude already prioritized users (speaking/special)
             const sortedStreams = this.sortStreamsByPriority(
                 allRoomStreams,
                 roomId,
             ).filter((stream) => !prioritizedUsers.has(stream.publisherId));
 
-            // Add users from highest priority streams until we reach the limit
+            // Add users from highest priority streams until we reach MAX_PRIORITY_USERS
             const addedUsers = new Set<string>();
             for (const stream of sortedStreams) {
                 if (addedUsers.size >= remainingSlots) break;
@@ -617,17 +637,17 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         return prioritizedUsers;
     }
 
-    //TODO: Additional method to get recent speakers (from old code)
-    private getRecentSpeakers(roomId: string, limit: number): string[] {
-        // Logic này có thể được mở rộng để track speaking activity
-        // Hiện tại chỉ return empty array
-        return [];
-    }
+    // //TODO: Additional method to get recent speakers (from old code)
+    // private getRecentSpeakers(roomId: string, limit: number): string[] {
+    //     // Logic này có thể được mở rộng để track speaking activity
+    //     // Hiện tại chỉ return empty array
+    //     return [];
+    // }
 
-    // Method to notify user about stream changes (from old code)
-    private notifyUserStreamChanges(roomId: string, userId: string): void {
-        // Logic này có thể được mở rộng để notify qua WebSocket
-    }
+    // // Method to notify user about stream changes (from old code)
+    // private notifyUserStreamChanges(roomId: string, userId: string): void {
+    //     // Logic này có thể được mở rộng để notify qua WebSocket
+    // }
 
     getStreamByProducerId(producerId: string): T.Stream | undefined {
         return this.producerToStream.get(producerId);
@@ -963,10 +983,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             const isInPriority = this.isStreamInPriority(data.roomId, streamId);
 
             // Notify about stream changes
-            this.notifyUserStreamChanges(
-                data.roomId,
-                data.participant.peerId || data.participant.peer_id,
-            );
+            // this.notifyUserStreamChanges(
+            //     data.roomId,
+            //     data.participant.peerId || data.participant.peer_id,
+            // );
 
             return {
                 producer,
@@ -1428,14 +1448,15 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
         const lastSpeakTime = roomSpeakers.get(peerId)!;
         const currentTime = new Date();
-        const speakThreshold = 2000; // 2 giây
 
-        return currentTime.getTime() - lastSpeakTime.getTime() < speakThreshold;
+        return (
+            currentTime.getTime() - lastSpeakTime.getTime() <
+            SPEAKING_THRESHOLD_MS
+        );
     }
 
     private cleanupInactiveSpeakers() {
         const currentTime = new Date();
-        const inactivityThreshold = 5000; // 5s
         let totalCleaned = 0;
         let roomsCleaned = 0;
 
@@ -1445,7 +1466,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             roomSpeakers.forEach((lastSpeakTime, peerId) => {
                 if (
                     currentTime.getTime() - lastSpeakTime.getTime() >
-                    inactivityThreshold
+                    SPEAKER_INACTIVITY_THRESHOLD_MS
                 ) {
                     inactiveSpeakers.push(peerId);
                 }
@@ -1629,6 +1650,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
      * ENHANCED: Sort streams by priority with optimized special stream detection
      * Tận dụng metadata có sẵn để tối ưu performance
      */
+    /**
+     * ENHANCED: Sort streams by priority with optimized special stream detection
+     * Tận dụng metadata có sẵn để tối ưu performance
+     */
     private sortStreamsByPriority(
         streams: T.Stream[],
         roomId: string,
@@ -1675,9 +1700,40 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 return bSpeakingPriority - aSpeakingPriority;
             }
 
-            // Priority 5: Age (newer streams have higher priority)
-            return b.streamId.localeCompare(a.streamId);
+            // ✅ FIX: Priority 5 - FIFO by timestamp (older streams first)
+            // Extract timestamp from streamId format: "user1_video_1759990931787_i3cnx"
+            const aTimestamp = this.extractTimestampFromStreamId(a.streamId);
+            const bTimestamp = this.extractTimestampFromStreamId(b.streamId);
+
+            if (aTimestamp !== bTimestamp) {
+                return aTimestamp - bTimestamp; // Older first (FIFO)
+            }
+
+            // Fallback: Alphabetical order if timestamps are equal
+            return a.streamId.localeCompare(b.streamId);
         });
+    }
+
+    /**
+     * Extract timestamp from streamId
+     * Format: "user1_video_1759990931787_i3cnx"
+     *         [0]    [1]   [2]        [3]
+     */
+    private extractTimestampFromStreamId(streamId: string): number {
+        try {
+            const parts = streamId.split('_');
+            if (parts.length >= 3) {
+                const timestamp = parseInt(parts[2], 10);
+                if (!isNaN(timestamp)) {
+                    return timestamp;
+                }
+            }
+        } catch (error) {
+            console.warn(
+                `[SFU] Failed to extract timestamp from streamId: ${streamId}`,
+            );
+        }
+        return 0; // Fallback to 0 if parsing fails
     }
 
     /**
@@ -1719,6 +1775,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
      * ENHANCED: Pause consumers for a specific stream
      * This allows dynamic stream management without closing connections
      */
+    /**
+     * ENHANCED: Pause consumers for a specific stream
+     * This allows dynamic stream management without closing connections
+     */
     private async pauseStreamConsumers(
         streamId: string,
         roomId: string,
@@ -1730,18 +1790,26 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         if (!consumers) return;
 
         for (const consumer of consumers) {
-            if (!consumer.closed) {
-                try {
-                    await consumer.pause();
-                    console.log(
-                        `[SFU] Paused consumer ${consumer.id} for stream ${streamId}`,
-                    );
-                } catch (error) {
-                    console.error(
-                        `[SFU] Error pausing consumer ${consumer.id}:`,
-                        error,
-                    );
-                }
+            // ✅ FIX: Check if already paused or closed before pausing
+            if (consumer.closed) {
+                continue; // Skip closed consumers
+            }
+
+            if (consumer.paused) {
+                // Already paused, skip to avoid duplicate logs
+                continue;
+            }
+
+            try {
+                await consumer.pause();
+                console.log(
+                    `[SFU] Paused consumer ${consumer.id} for stream ${streamId}`,
+                );
+            } catch (error) {
+                console.error(
+                    `[SFU] Error pausing consumer ${consumer.id}:`,
+                    error,
+                );
             }
         }
     }
