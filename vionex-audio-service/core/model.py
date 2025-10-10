@@ -146,73 +146,23 @@ print("[TRANSLATION] NLLB-Distilled loaded successfully (supports 200+ languages
 # print("[TTS] XTTS-v2 loaded (temporary, will be replaced by CosyVoice2)")
 
 # ============================================================================
-# FUTURE: CosyVoice2 implementation (when available)
+# CosyVoice TTS - API-based approach
 # ============================================================================
-print("[TTS] Loading CosyVoice (iic/CosyVoice2-0.5B)")
+print("[TTS] Loading CosyVoice API (iic/CosyVoice2-0.5B)")
 
-# Import CosyVoice correctly based on official package structure
-# Official CosyVoice package structure: cosyvoice.cli.cosyvoice.CosyVoice or CosyVoice2
-try:
-    # Method 1: Try CosyVoice2 class from cli.cosyvoice
-    from cosyvoice.cli.cosyvoice import CosyVoice2
-    CosyVoiceClass = CosyVoice2
-    print("[TTS] Using CosyVoice2 class")
-except (ImportError, AttributeError) as e1:
-    print(f"[TTS] CosyVoice2 not found, trying CosyVoice: {e1}")
-    try:
-        # Method 2: Try CosyVoice class from cli.cosyvoice
-        from cosyvoice.cli.cosyvoice import CosyVoice
-        CosyVoiceClass = CosyVoice
-        print("[TTS] Using CosyVoice class")
-    except (ImportError, AttributeError) as e2:
-        print(f"[TTS] CosyVoice not found in cli.cosyvoice: {e2}")
-        try:
-            # Method 3: Try direct import from cosyvoice module
-            from cosyvoice import CosyVoice
-            CosyVoiceClass = CosyVoice
-            print("[TTS] Using direct CosyVoice import")
-        except ImportError as e3:
-            print(f"[TTS] All CosyVoice imports failed!")
-            print(f"  - Method 1: {e1}")
-            print(f"  - Method 2: {e2}")
-            print(f"  - Method 3: {e3}")
-            raise ImportError("Cannot import CosyVoice. Please check installation: pip install cosyvoice")
+# CosyVoice package has api.py module instead of class-based interface
+import cosyvoice
+import cosyvoice.api as cosy_api
 
-# Initialize CosyVoice model
-print(f"[TTS] Initializing {CosyVoiceClass.__name__} with model: iic/CosyVoice2-0.5B")
+print(f"[TTS] CosyVoice package: {cosyvoice.__file__}")
 
-# CosyVoice initialization - check signature
-import inspect
-init_signature = inspect.signature(CosyVoiceClass.__init__)
-print(f"[TTS] {CosyVoiceClass.__name__}.__init__ parameters: {list(init_signature.parameters.keys())}")
+# Check available functions in API
+api_functions = [x for x in dir(cosy_api) if not x.startswith('_')]
+print(f"[TTS] API functions available: {api_functions}")
 
-# Initialize with appropriate arguments
-try:
-    # Try with model path only
-    cosy_tts_model = CosyVoiceClass("iic/CosyVoice2-0.5B")
-    print("[TTS] CosyVoice initialized with model path only")
-except TypeError as e:
-    print(f"[TTS] Failed with model path only: {e}")
-    try:
-        # Try with additional parameters
-        cosy_tts_model = CosyVoiceClass(
-            model_dir="iic/CosyVoice2-0.5B",
-            load_jit=False,
-            load_onnx=False
-        )
-        print("[TTS] CosyVoice initialized with model_dir + load flags")
-    except Exception as e2:
-        print(f"[TTS] Failed with load flags: {e2}")
-        # Last resort - try minimal init
-        cosy_tts_model = CosyVoiceClass()
-        print("[TTS] CosyVoice initialized with default parameters")
-
-tts_model = cosy_tts_model
-print(f"[TTS] CosyVoice loaded successfully - Type: {type(tts_model)}")
-
-# Check available methods
-tts_methods = [m for m in dir(tts_model) if not m.startswith('_')]
-print(f"[TTS] Available methods: {tts_methods[:10]}...")  # Show first 10 methods
+# Store API module as tts_model
+tts_model = cosy_api
+print("[TTS] CosyVoice API loaded successfully")
 
 # GPU-specific optimizations for RTX A4000 (Ampere Professional)
 if TYPE_ENGINE == "cuda":
