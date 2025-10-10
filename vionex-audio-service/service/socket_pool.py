@@ -87,12 +87,10 @@ class SharedSocketManager:
             self.rx_sock.bind(("0.0.0.0", audio_rx_port))
             self.rx_sock.settimeout(1.0)
 
-            # TX socket: Send all RTP packets to SFU
-            self.tx_sock = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_DGRAM)
-            self.tx_sock.setsockopt(socket_module.SOL_SOCKET, socket_module.SO_REUSEADDR, 1)
-
-            if tx_source_port > 0:  # Bind source port if SFU requires comedia:false
-                self.tx_sock.bind(("0.0.0.0", tx_source_port))
+            # TX socket: Use SAME socket as RX for NAT traversal (replies from same port)
+            # This ensures client NAT router allows incoming packets (same connection)
+            self.tx_sock = self.rx_sock  # Reuse RX socket for sending
+            logger.info(f"[SHARED-SOCKET] Using single socket for RX/TX (port {audio_rx_port}) for NAT compatibility")
 
             self.running = True
             self._start_rtp_router()
@@ -389,12 +387,8 @@ class SharedSocketManager:
                 pass
             self.rx_sock = None
             
-        if self.tx_sock:
-            try:
-                self.tx_sock.close()
-            except:
-                pass
-            self.tx_sock = None
+        # TX socket is same as RX socket, so just set to None
+        self.tx_sock = None
         
         # Clear routing tables
         with self._lock:
