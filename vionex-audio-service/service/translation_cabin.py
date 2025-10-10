@@ -211,13 +211,17 @@ class HybridChunkBuffer:
             end = start + self._window_bytes
             window = bytes(self._buffer[start:end])
 
-            # Slide buffer: tiến 0.7s
+            # Slide buffer: tiến step_bytes (default 1s)
             self._next_start_bytes += self._step_bytes
 
-            # Dọn buffer định kỳ để tránh phình
-            if self._next_start_bytes >= self._step_bytes * 4:
-                self._buffer = bytearray(self._buffer[self._next_start_bytes:])
-                self._next_start_bytes = 0
+            # Dọn buffer định kỳ: chỉ giữ lại (window_duration + một chút buffer)
+            # để đảm bảo overlap hoạt động đúng
+            keep_bytes = self._window_bytes + self._step_bytes  # window + 1 step buffer
+            if self._next_start_bytes > keep_bytes:
+                # Cắt bỏ phần đã xử lý hoàn toàn
+                trim_bytes = self._next_start_bytes - keep_bytes
+                self._buffer = bytearray(self._buffer[trim_bytes:])
+                self._next_start_bytes = keep_bytes
 
             return window
 
