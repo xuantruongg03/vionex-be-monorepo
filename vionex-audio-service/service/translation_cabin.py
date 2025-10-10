@@ -604,6 +604,10 @@ class TranslationCabinManager:
             # REALTIME PROCESSING: Add to sliding buffer and enqueue when ready
             complete_chunk = cabin.audio_buffer.add_audio_chunk(pcm_16k_mono)
             if complete_chunk:
+                # DEBUG: Log when chunk is created
+                stats = cabin.audio_buffer.get_processing_stats()
+                logger.info(f"[CHUNK-CREATED] Buffer stats: {stats}")
+                
                 # SAVE 2s CHUNK TO FILE for debugging (before processing)
                 if cabin.audio_recorder:
                     cabin.audio_recorder.write_audio(complete_chunk)
