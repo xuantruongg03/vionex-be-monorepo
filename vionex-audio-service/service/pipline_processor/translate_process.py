@@ -89,7 +89,7 @@ class TranslateProcess:
             with torch.no_grad():
                 translated = model.generate(
                     **inputs,
-                    forced_bos_token_id=tokenizer.lang_code_to_id[tgt_code],
+                    forced_bos_token_id=tokenizer.convert_tokens_to_ids(tgt_code),
                     max_new_tokens=128,      # Reduced from 256 for speed (sufficient for 20-30 words)
                     num_beams=2,             # Reduced from 4 for speed (2x faster, ~10% quality trade-off)
                     do_sample=False,

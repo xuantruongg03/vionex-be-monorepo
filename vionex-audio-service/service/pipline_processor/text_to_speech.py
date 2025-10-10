@@ -38,11 +38,11 @@ def tts(text: str, language: str = "en", user_id: str = None, room_id: str = Non
         speaker_embedding: np.ndarray = None, speaker_wav_path: str = None,
         return_format: str = "wav") -> bytes:
     """
-    Text-to-Speech with CosyVoice2 zero-shot voice cloning
+    Text-to-Speech with XTTS-v2 voice cloning
     
     Args:
         text: Text to synthesize
-        language: Target language (not used in CosyVoice2, auto-detected)
+        language: Target language for TTS
         user_id: User ID for voice cloning lookup
         room_id: Room ID for voice cloning lookup
         speaker_embedding: (Deprecated, kept for compatibility)
@@ -56,76 +56,59 @@ def tts(text: str, language: str = "en", user_id: str = None, room_id: str = Non
 
 def _tts_cosyvoice(text, language, user_id, room_id, speaker_embedding, speaker_wav_path, return_format):
     """
-    REPLACE MODEL: CosyVoice2 zero-shot voice cloning with streaming
-    Reference: https://huggingface.co/FunAudioLLM/CosyVoice2-0.5B
+    XTTS-v2 TTS with voice cloning
     """
     try:
         if not text or not text.strip():
             raise ValueError("Text input is empty")
         text = text.strip()
         
-        # ===== 1) Voice selection - Get prompt speech path =====
-        prompt_speech_path = None
-        prompt_text = ""  # Transcript of prompt audio
+        # ===== 1) Voice selection - Get speaker wav path =====
+        selected_speaker_wav = None
         
         if speaker_wav_path and os.path.exists(speaker_wav_path):
-            prompt_speech_path = speaker_wav_path
+            selected_speaker_wav = speaker_wav_path
         elif user_id and room_id and _check_voice_cloning_availability():
             try:
                 from ..voice_cloning.voice_clone_manager import get_voice_clone_manager
                 voice_manager = get_voice_clone_manager()
                 
-                # Get audio path (16kHz WAV)
+                # Get audio path
                 cloned_path = voice_manager.get_user_audio_path(user_id, room_id)
                 if cloned_path and os.path.exists(cloned_path):
-                    prompt_speech_path = cloned_path
-                    
-                    # Get transcript (if available)
-                    transcript = voice_manager.get_user_transcript(user_id, room_id)
-                    if transcript:
-                        prompt_text = transcript
-                        logger.info(f"[CosyVoice] Using cloned voice with transcript: '{prompt_text[:50]}...'")
-                    else:
-                        logger.info(f"[CosyVoice] Using cloned voice without transcript")
+                    selected_speaker_wav = cloned_path
+                    logger.info(f"[XTTS] Using cloned voice from: {cloned_path}")
                         
             except Exception as e:
-                logger.warning(f"[CosyVoice] Failed to get cloned voice: {e}")
+                logger.warning(f"[XTTS] Failed to get cloned voice: {e}")
         
-        if not prompt_speech_path:
-            prompt_speech_path = DEFAULT_SPEAKER_WAV
+        if not selected_speaker_wav:
+            selected_speaker_wav = DEFAULT_SPEAKER_WAV
             
-        if not os.path.exists(prompt_speech_path):
-            raise FileNotFoundError(f"Speaker audio file not found: {prompt_speech_path}")
+        if not os.path.exists(selected_speaker_wav):
+            raise FileNotFoundError(f"Speaker audio file not found: {selected_speaker_wav}")
         
-        # ===== 2) CosyVoice2 zero-shot inference =====
-        logger.info(f"[CosyVoice] Generating speech: '{text[:50]}...'")
-        logger.info(f"[CosyVoice] Prompt audio: {prompt_speech_path}")
-        logger.info(f"[CosyVoice] Prompt text: '{prompt_text[:30]}...' (length: {len(prompt_text)})")
+        # ===== 2) XTTS-v2 inference =====
+        logger.info(f"[XTTS] Generating speech: '{text[:50]}...'")
+        logger.info(f"[XTTS] Speaker audio: {selected_speaker_wav}")
+        logger.info(f"[XTTS] Language: {language}")
         
-        # Use inference_zero_shot for voice cloning (correct API)
-        # For realtime: stream=True processes in chunks
-        audio_chunks = []
-        for i, chunk_dict in enumerate(tts_model.inference_zero_shot(
-            tts_text=text,                       # Text to synthesize
-            prompt_text=prompt_text,             # Transcript of prompt audio (empty OK, better if available)
-            prompt_speech_16k=prompt_speech_path, # 16kHz prompt audio path
-            stream=True                          # Enable streaming for low latency
-        )):
-            # chunk_dict is {'tts_speech': tensor}
-            if isinstance(chunk_dict, dict) and 'tts_speech' in chunk_dict:
-                audio_tensor = chunk_dict['tts_speech']
-                
-                # Convert tensor to numpy
-                if hasattr(audio_tensor, 'cpu'):
-                    audio_tensor = audio_tensor.cpu()
-                audio_np = audio_tensor.numpy() if hasattr(audio_tensor, 'numpy') else np.array(audio_tensor)
-                audio_chunks.append(audio_np.squeeze())
+        # Use tts_to_file or tts method
+        wav = tts_model.tts(
+            text=text,
+            speaker_wav=selected_speaker_wav,
+            language=language
+        )
         
-        if not audio_chunks:
-            raise RuntimeError("CosyVoice2 returned no audio chunks")
-            
-        final_audio = np.concatenate(audio_chunks).astype(np.float32)
-        src_sr = 16000  # CosyVoice2 outputs at 16kHz
+        # Convert to numpy array if needed
+        if isinstance(wav, list):
+            final_audio = np.array(wav, dtype=np.float32)
+        elif hasattr(wav, 'cpu'):
+            final_audio = wav.cpu().numpy().astype(np.float32)
+        else:
+            final_audio = np.array(wav, dtype=np.float32)
+        
+        src_sr = 24000  # XTTS-v2 outputs at 24kHz
         
         # Amplification if needed
         peak = float(np.max(np.abs(final_audio))) if final_audio.size else 1.0
@@ -144,7 +127,7 @@ def _tts_cosyvoice(text, language, user_id, room_id, speaker_embedding, speaker_
         return buf.getvalue()
         
     except Exception as e:
-        logger.error(f"[CosyVoice] TTS Error: {type(e).__name__}: {str(e)}")
+        logger.error(f"[XTTS] TTS Error: {type(e).__name__}: {str(e)}")
         raise
 
 # ===== Voice Cloning Helpers =====
