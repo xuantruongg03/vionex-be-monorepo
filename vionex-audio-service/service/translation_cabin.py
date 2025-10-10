@@ -3,6 +3,7 @@ import logging
 import threading
 import time
 import queue
+import io
 from typing import Dict, Optional, Any, TYPE_CHECKING, List
 from dataclasses import dataclass, field
 from enum import Enum
@@ -16,6 +17,7 @@ import os
 from datetime import datetime
 from service.pipline_processor.VAD import VoiceActivityDetector
 from core.config import SFU_SERVICE_HOST
+from service.utils.audio_logger import AudioLogger, save_audio_chunk
 
 if TYPE_CHECKING:
     from service.pipline_processor.translation_pipeline import TranslationPipeline
@@ -25,6 +27,130 @@ from .socket_pool import get_shared_socket_manager
 from .codec_utils import opus_codec_manager, AudioProcessingUtils, RTPUtils
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# FIX: PLAYBACK QUEUE - Giải quyết gap giữa các audio chunks
+# ============================================================================
+@dataclass
+class AudioChunk:
+    """
+    Đại diện cho một chunk audio đã xử lý sẵn sàng để phát
+    """
+    data: bytes              # Audio data (WAV hoặc PCM)
+    duration: float          # Độ dài audio (giây)
+    timestamp: float         # Thời điểm tạo ra
+    chunk_id: int           # ID để tracking
+    
+@dataclass
+class PlaybackQueue:
+    """
+    Queue buffer để đảm bảo audio phát liên tục không gap
+    
+    Logic:
+    1. Các chunk xử lý xong được enqueue ngay
+    2. Đợi đủ BUFFER_DURATION (2s) mới bắt đầu phát
+    3. Phát với tốc độ ổn định (paced sending)
+    4. Nếu queue rỗng → phát silence để maintain stream
+    """
+    
+    BUFFER_DURATION: float = 2.0    # Buffer 2s trước khi bắt đầu phát
+    MIN_QUEUE_SIZE: int = 2         # Tối thiểu 2 chunks trong queue
+    
+    def __post_init__(self):
+        self._queue: queue.Queue = queue.Queue(maxsize=32)
+        self._buffering: bool = True
+        self._buffer_start_time: Optional[float] = None
+        self._total_enqueued: int = 0
+        self._total_dequeued: int = 0
+        self._playback_started: bool = False
+        
+    def enqueue(self, chunk: AudioChunk) -> bool:
+        """
+        Thêm chunk vào queue
+        Returns: True nếu thành công
+        """
+        try:
+            if self._buffer_start_time is None:
+                self._buffer_start_time = time.time()
+                logger.info(f"[PLAYBACK-QUEUE] 🎬 Buffering started, need {self.BUFFER_DURATION}s")
+            
+            self._queue.put_nowait(chunk)
+            self._total_enqueued += 1
+            
+            # Check nếu đã đủ buffer để bắt đầu phát
+            if self._buffering:
+                buffered_time = time.time() - self._buffer_start_time
+                queue_size = self._queue.qsize()
+                
+                if buffered_time >= self.BUFFER_DURATION or queue_size >= self.MIN_QUEUE_SIZE:
+                    self._buffering = False
+                    self._playback_started = True
+                    logger.info(f"[PLAYBACK-QUEUE] Buffer ready! Queue size: {queue_size}, buffered: {buffered_time:.2f}s")
+            
+            return True
+            
+        except queue.Full:
+            logger.warning(f"[PLAYBACK-QUEUE] Queue full, dropping oldest chunk")
+            try:
+                # Drop oldest
+                self._queue.get_nowait()
+                self._queue.put_nowait(chunk)
+                return True
+            except Exception as e:
+                logger.error(f"[PLAYBACK-QUEUE] Error handling full queue: {e}")
+                return False
+                
+    def dequeue(self, timeout: float = 0.1) -> Optional[AudioChunk]:
+        """
+        Lấy chunk từ queue để phát
+        Returns: AudioChunk nếu sẵn sàng, None nếu đang buffer hoặc queue rỗng
+        """
+        try:
+            # Nếu đang buffering → chưa phát
+            if self._buffering:
+                return None
+            
+            # Lấy chunk từ queue
+            chunk = self._queue.get(timeout=timeout)
+            self._total_dequeued += 1
+            
+            return chunk
+            
+        except queue.Empty:
+            # Queue rỗng → cần xử lý để tránh gap
+            if self._playback_started:
+                logger.warning(f"[PLAYBACK-QUEUE] Queue empty during playback! Enqueued: {self._total_enqueued}, Dequeued: {self._total_dequeued}")
+            return None
+            
+    def is_ready(self) -> bool:
+        """Check nếu queue sẵn sàng để bắt đầu phát"""
+        return not self._buffering and self._playback_started
+        
+    def get_stats(self) -> dict:
+        """Thống kê queue"""
+        return {
+            "queue_size": self._queue.qsize(),
+            "buffering": self._buffering,
+            "playback_started": self._playback_started,
+            "total_enqueued": self._total_enqueued,
+            "total_dequeued": self._total_dequeued,
+            "buffer_duration": self.BUFFER_DURATION,
+        }
+        
+    def reset(self):
+        """Reset queue về trạng thái ban đầu"""
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+        
+        self._buffering = True
+        self._buffer_start_time = None
+        self._total_enqueued = 0
+        self._total_dequeued = 0
+        self._playback_started = False
+        logger.info("[PLAYBACK-QUEUE] 🔄 Queue reset")
 
 class CabinStatus(Enum):
     """
@@ -117,56 +243,92 @@ class HybridChunkBuffer:
 class AudioRecorder:
     """
     Record incoming audio to WAV files for debugging
+    Uses centralized AudioLogger utility for consistent audio logging
+    Supports both input (before processing) and output (after processing) recording
     """
     def __init__(self, cabin_id: str, save_dir: str = "debug_audio"):
         self.cabin_id = cabin_id
         self.save_dir = save_dir
-        self.current_file = None
-        self.wav_writer = None
-        self.packet_count = 0
         
-        # Create save directory
-        os.makedirs(save_dir, exist_ok=True)
+        # Use AudioLogger for input and output recording
+        self.input_logger = AudioLogger(
+            base_dir=os.path.join(save_dir, f"{cabin_id}_input"),
+            sample_rate=16000,
+            channels=1
+        )
+        self.output_logger = AudioLogger(
+            base_dir=os.path.join(save_dir, f"{cabin_id}_output"),
+            sample_rate=16000,
+            channels=1
+        )
         
-        # Start new recording file
-        self._start_new_file()
-    
-    def _start_new_file(self):
-        """Start a new WAV file"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{self.cabin_id}_{timestamp}.wav"
-        filepath = os.path.join(self.save_dir, filename)
+        self.input_packet_count = 0
+        self.output_packet_count = 0
         
-        # Close previous file if exists
-        if self.wav_writer:
-            self.wav_writer.close()
-        
-        # Open new WAV file: 16kHz, mono, 16-bit PCM
-        self.current_file = filepath
-        self.wav_writer = wave.open(filepath, 'wb')
-        self.wav_writer.setnchannels(1)  # Mono
-        self.wav_writer.setsampwidth(2)  # 16-bit = 2 bytes
-        self.wav_writer.setframerate(16000)  # 16kHz
-        self.packet_count = 0
-        
-        logger.info(f"[AUDIO-RECORDER] 🎙️ Started recording: {filepath}")
+        logger.info(f"[AUDIO-RECORDER] 🎙️ Started recording for cabin {cabin_id}")
     
     def write_audio(self, pcm_16k_mono: bytes):
-        """Write PCM audio to WAV file"""
-        if self.wav_writer:
-            self.wav_writer.writeframes(pcm_16k_mono)
-            self.packet_count += 1
+        """Write input PCM audio to WAV file (BEFORE processing)"""
+        try:
+            self.input_packet_count += 1
+            metadata = {
+                "cabin_id": self.cabin_id,
+                "packet_count": self.input_packet_count,
+                "stage": "input",
+                "description": "Audio before translation processing"
+            }
+            self.input_logger.save_audio(pcm_16k_mono, prefix="input", metadata=metadata)
+        except Exception as e:
+            logger.error(f"[AUDIO-RECORDER] Error writing input audio: {e}")
+    
+    def write_output_audio(self, audio_data: bytes):
+        """Write output audio to WAV file (AFTER processing - translated audio)"""
+        try:
+            # Check if input is already WAV format
+            if audio_data.startswith(b"RIFF"):
+                # Extract PCM from WAV
+                with wave.open(io.BytesIO(audio_data), 'rb') as wav_file:
+                    pcm_data = wav_file.readframes(wav_file.getnframes())
+                    sample_rate = wav_file.getframerate()
+                    channels = wav_file.getnchannels()
+                    
+                    # Convert to mono 16kHz if needed
+                    if channels == 2:
+                        # Stereo to mono
+                        import numpy as np
+                        audio_array = np.frombuffer(pcm_data, dtype=np.int16)
+                        audio_array = audio_array.reshape(-1, 2)
+                        pcm_data = np.mean(audio_array, axis=1).astype(np.int16).tobytes()
+                    
+                    # Resample if needed (48kHz -> 16kHz or other)
+                    if sample_rate != 16000:
+                        import numpy as np
+                        from scipy.signal import resample_poly
+                        audio_array = np.frombuffer(pcm_data, dtype=np.int16)
+                        resampled = resample_poly(audio_array, 16000, sample_rate)
+                        pcm_data = resampled.astype(np.int16).tobytes()
+            else:
+                # Already PCM, assume 16kHz mono
+                pcm_data = audio_data
             
-            # Rotate file every 100 packets (~60 seconds)
-            if self.packet_count >= 100:
-                self._start_new_file()
+            # Save using AudioLogger
+            self.output_packet_count += 1
+            metadata = {
+                "cabin_id": self.cabin_id,
+                "packet_count": self.output_packet_count,
+                "stage": "output",
+                "description": "Translated audio output"
+            }
+            self.output_logger.save_audio(pcm_data, prefix="output", metadata=metadata)
+                
+        except Exception as e:
+            logger.error(f"[AUDIO-RECORDER] Error writing output audio: {e}")
     
     def close(self):
-        """Close WAV file"""
-        if self.wav_writer:
-            self.wav_writer.close()
-            self.wav_writer = None
-            logger.info(f"[AUDIO-RECORDER] ✅ Closed recording: {self.current_file}")
+        """Close all audio loggers"""
+        self.input_logger.close()
+        self.output_logger.close()
+        logger.info(f"[AUDIO-RECORDER] Closed recording for cabin {self.cabin_id}")
         self._started = False
 
 @dataclass        
@@ -211,6 +373,10 @@ class TranslationCabin:
     chunk_queue: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=64))
     processor_thread: Optional[threading.Thread] = None
     thread: Optional[threading.Thread] = None
+    
+    # FIX: Playback queue for smooth audio output
+    playback_queue: PlaybackQueue = field(default_factory=PlaybackQueue)
+    playback_thread: Optional[threading.Thread] = None
     
     # Audio recorder for debugging
     audio_recorder: Optional[AudioRecorder] = None
@@ -363,7 +529,7 @@ class TranslationCabinManager:
                 # Step 8: Register cabin in manager's tracking registry
                 self.cabins[cabin_id] = cabin
 
-                logger.info(f"[CABIN-MANAGER] ✅ Cabin created successfully!")
+                logger.info(f"[CABIN-MANAGER] Cabin created successfully!")
                 logger.info(f"[CABIN-MANAGER]    Cabin ID: {cabin_id}")
                 logger.info(f"[CABIN-MANAGER]    SSRC: {cabin_ssrc}")
                 logger.info(f"[CABIN-MANAGER]    RX Port: {receive_port}, TX Port: {send_port}")
@@ -371,6 +537,10 @@ class TranslationCabinManager:
 
                 # Start single processor thread for this cabin
                 self._start_processor_thread(cabin)
+                
+                # FIX: Start playback thread for smooth audio output
+                self._start_playback_thread(cabin)
+                logger.info(f"[CABIN-MANAGER] Playback thread started for {cabin_id}")
                 
                 # Step 9: Return cabin configuration for SFU integration
                 return {
@@ -490,32 +660,143 @@ class TranslationCabinManager:
         cabin.processor_thread = threading.Thread(target=worker, name=f"cabin-worker-{cabin.cabin_id}", daemon=True)
         cabin.processor_thread.start()
 
+    # ============================================================================
+    # FIX: PLAYBACK THREAD - Phát audio từ PlaybackQueue với tốc độ ổn định
+    # ============================================================================
+    def _start_playback_thread(self, cabin: TranslationCabin):
+        """
+        Start playback thread to send audio from PlaybackQueue to SFU
+        
+        Logic:
+        1. Đợi queue sẵn sàng (buffered 2s)
+        2. Dequeue audio chunks
+        3. Send to SFU với paced timing (20ms packets)
+        4. Nếu queue rỗng → send silence để maintain stream
+        """
+        def playback_worker():
+            logger.info(f"[PLAYBACK-THREAD] 🎬 Started for cabin {cabin.cabin_id}")
+            
+            try:
+                while cabin.running:
+                    try:
+                        # Check if queue is ready to start playback
+                        if not cabin.playback_queue.is_ready():
+                            time.sleep(0.1)
+                            continue
+                        
+                        # Dequeue audio chunk
+                        audio_chunk = cabin.playback_queue.dequeue(timeout=0.5)
+                        
+                        if audio_chunk is None:
+                            # Queue empty → send silence to maintain stream
+                            logger.warning(f"[PLAYBACK-THREAD] Queue empty, sending silence")
+                            silence = self._generate_silence_audio(duration=0.5)
+                            self._send_audio_sync(cabin, silence)
+                            continue
+                        
+                        # Send audio chunk to SFU
+                        logger.debug(
+                            f"[PLAYBACK-THREAD] Sending chunk {audio_chunk.chunk_id}, "
+                            f"duration: {audio_chunk.duration:.2f}s, "
+                            f"queue size: {cabin.playback_queue._queue.qsize()}"
+                        )
+                        
+                        self._send_audio_sync(cabin, audio_chunk.data)
+                        
+                        # Log queue stats periodically
+                        # if audio_chunk.chunk_id % 10 == 0:
+                        #     stats = cabin.playback_queue.get_stats()
+                        #     logger.info(f"[PLAYBACK-THREAD] Queue stats: {stats}")
+                        
+                    except Exception as e:
+                        logger.error(f"[PLAYBACK-THREAD] Error in playback loop: {e}")
+                        time.sleep(0.1)
+                        
+            finally:
+                logger.info(f"[PLAYBACK-THREAD] Stopped for cabin {cabin.cabin_id}")
+        
+        if cabin.playback_thread and cabin.playback_thread.is_alive():
+            logger.warning(f"[PLAYBACK-THREAD] Already running for cabin {cabin.cabin_id}")
+            return
+            
+        cabin.playback_thread = threading.Thread(
+            target=playback_worker, 
+            name=f"playback-{cabin.cabin_id}", 
+            daemon=True
+        )
+        cabin.playback_thread.start()
+        logger.info(f"[PLAYBACK-THREAD] Thread started for cabin {cabin.cabin_id}")
+
+    def _send_audio_sync(self, cabin: TranslationCabin, audio_data: bytes):
+        """
+        FIX: Synchronous version of send audio to SFU
+        Used by playback thread (không dùng async)
+        """
+        try:
+            success = self._send_rtp_chunks_to_sfu(cabin, audio_data)
+            if not success:
+                logger.error(f"[PLAYBACK-THREAD] Failed to send audio to SFU")
+        except Exception as e:
+            logger.error(f"[PLAYBACK-THREAD] Error sending audio: {e}")
+
+    def _generate_silence_audio(self, duration: float = 0.5) -> bytes:
+        """
+        FIX: Generate silence audio for gap filling
+        
+        Args:
+            duration: Duration in seconds (default 0.5s)
+            
+        Returns:
+            WAV format silence audio
+        """
+        import numpy as np
+        import io
+        from scipy.io.wavfile import write as write_wav
+        
+        try:
+            sample_rate = 16000  # 16kHz
+            samples = int(sample_rate * duration)
+            silence = np.zeros(samples, dtype=np.int16)
+            
+            # Convert to WAV
+            buf = io.BytesIO()
+            write_wav(buf, rate=sample_rate, data=silence)
+            return buf.getvalue()
+            
+        except Exception as e:
+            logger.error(f"[SILENCE] Error generating silence: {e}")
+            return b''
+
     async def _process_chunk_realtime(self, cabin: TranslationCabin, audio_chunk: bytes):
         """
-        Process audio chunk in realtime: STT → Translation → TTS → Send
+        FIX: New processing logic với Queue Buffer
+        
+        Process audio chunk: STT → Translation → TTS → Enqueue to PlaybackQueue
         
         Args:
             cabin: Translation cabin instance
-            audio_chunk: Complete 0.8s audio chunk ready for processing
+            audio_chunk: Complete 2s audio chunk ready for processing
             
         Flow:
-            1. VAD check - if no speech, send passthrough
+            1. VAD check - if no speech, skip (không gửi gì cả)
             2. STT → Translation → TTS pipeline
-            3. Send translated audio to SFU immediately
+            3. Enqueue translated audio to PlaybackQueue (không gửi ngay)
+            4. PlaybackQueue sẽ tự động phát với tốc độ ổn định
         """
         start_time = time.time()
+        chunk_id = cabin._total_enqueued if hasattr(cabin, '_total_enqueued') else 0
         
         try:
             # Step 1: VAD speech detection
             has_speech = cabin.vad.detect_speech(audio_chunk)
             
             if not has_speech:
-                # No speech: forward as Opus (encoded) to keep stream smooth
-                await self._send_audio_to_sfu(cabin, audio_chunk, "passthrough")
+                logger.debug(f"[PROCESS-CHUNK-{chunk_id}] No speech detected, skipping")
                 return
             
             # Step 2: Speech detected → process through translation pipeline
             cabin.status = CabinStatus.TRANSLATING
+            logger.info(f"[PROCESS-CHUNK-{chunk_id}] 🎙️ Speech detected, processing...")
             
             # Get cached pipeline to avoid recreation overhead
             pipeline = self.get_or_create_pipeline(cabin)
@@ -523,64 +804,154 @@ class TranslationCabinManager:
             # Step 3: Convert PCM to WAV and process
             wav_data = AudioProcessingUtils.pcm_to_wav_bytes(audio_chunk)
             
-            # Fire-and-forget: pipeline sẽ tự xử lý và gửi kết quả
-            asyncio.create_task(self._process_and_send(cabin, wav_data, start_time))
-            cabin.status = CabinStatus.LISTENING
+            # Process through pipeline
+            result = await pipeline.process_audio(wav_data)
+            processing_time = time.time() - start_time
             
-            # processing_time = (time.time() - start_time) * 1000
-            
-            # # Step 4: Send translated audio if successful
-            # if result['success'] and result.get('translated_audio'):
-            #     translated_audio = result['translated_audio']
-
-            #     # Stream out in small parts if possible to improve smoothness
-            #     streamed = await self._stream_tts_in_parts(cabin, result.get('translated_text', ''), translated_audio)
-            #     if not streamed:
-            #         success = await self._send_audio_to_sfu(cabin, translated_audio, "translated")
-            #         if success:
-            #             logger.debug(f"[REALTIME] Processed chunk in {processing_time:.2f}ms")
-            #         else:
-            #             logger.error(f"[REALTIME] Failed to send translated audio")
-            # else:
-            #     logger.warning(f"[REALTIME] Translation failed: {result}")
+            # Step 4: Enqueue translated audio to PlaybackQueue
+            if result['success'] and result.get('translated_audio'):
+                translated_audio = result['translated_audio']
+                
+                # Calculate audio duration
+                audio_duration = self._calculate_audio_duration(translated_audio)
+                
+                # Create AudioChunk object
+                audio_chunk_obj = AudioChunk(
+                    data=translated_audio,
+                    duration=audio_duration,
+                    timestamp=time.time(),
+                    chunk_id=chunk_id
+                )
+                
+                # Enqueue to playback queue (không gửi ngay!)
+                success = cabin.playback_queue.enqueue(audio_chunk_obj)
+                
+                if success:
+                    logger.info(
+                        f"[PROCESS-CHUNK-{chunk_id}] Processed in {processing_time:.2f}s, "
+                        f"audio duration: {audio_duration:.2f}s, queue size: {cabin.playback_queue._queue.qsize()}"
+                    )
+                else:
+                    logger.error(f"[PROCESS-CHUNK-{chunk_id}] Failed to enqueue to playback queue")
+            else:
+                logger.warning(f"[PROCESS-CHUNK-{chunk_id}] Translation failed: {result.get('message', 'unknown')}")
             
             cabin.status = CabinStatus.LISTENING
             
         except Exception as e:
-            processing_time = (time.time() - start_time) * 1000
+            processing_time = time.time() - start_time
             cabin.status = CabinStatus.ERROR
-            logger.error(f"[REALTIME] Error processing chunk in {processing_time:.2f}ms: {e}")
+            logger.error(f"[PROCESS-CHUNK-{chunk_id}] Error processing chunk in {processing_time:.2f}s: {e}")
             import traceback
-            logger.error(f"[REALTIME] Traceback: {traceback.format_exc()}")
+            logger.error(f"[PROCESS-CHUNK-{chunk_id}] Traceback: {traceback.format_exc()}")
             
             # Reset status for next chunk
             cabin.status = CabinStatus.LISTENING
 
-    async def _process_and_send(self, cabin: TranslationCabin, wav_data: bytes, start_time: float):
+    def _calculate_audio_duration(self, audio_data: bytes) -> float:
+        """
+        FIX: Calculate audio duration from WAV or PCM data
+        
+        Returns: Duration in seconds
+        """
         try:
-            pipeline = self.get_or_create_pipeline(cabin)
-            result = await pipeline.process_audio(wav_data)
-
-            processing_time = (time.time() - start_time) * 1000
-
-            if result['success'] and result.get('translated_audio'):
-                translated_audio = result['translated_audio']
-
-                # Stream out in small parts if possible to improve smoothness
-                streamed = await self._stream_tts_in_parts(
-                    cabin, result.get('translated_text', ''), translated_audio
-                )
-                if not streamed:
-                    success = await self._send_audio_to_sfu(cabin, translated_audio, "translated")
-                    if success:
-                        logger.debug(f"[REALTIME] Processed chunk in {processing_time:.2f}ms")
-                    else:
-                        logger.error(f"[REALTIME] Failed to send translated audio")
+            # Check if WAV format
+            if audio_data.startswith(b"RIFF"):
+                import wave
+                import io
+                
+                with wave.open(io.BytesIO(audio_data), 'rb') as wav_file:
+                    frames = wav_file.getnframes()
+                    rate = wav_file.getframerate()
+                    duration = frames / float(rate)
+                    return duration
             else:
-                logger.warning(f"[REALTIME] Translation failed: {result}")
-
+                # Assume PCM16 mono @ 16kHz
+                duration = len(audio_data) / (16000 * 2)
+                return duration
+                
         except Exception as e:
-            logger.error(f"[REALTIME] Error in _process_and_send: {e}")
+            logger.error(f"[AUDIO-DURATION] Error calculating duration: {e}")
+            # Fallback: estimate 2s
+            return 2.0
+
+    # ========================================================================
+    # OLD LOGIC - COMMENTED OUT
+    # ========================================================================
+    # async def _process_chunk_realtime(self, cabin: TranslationCabin, audio_chunk: bytes):
+    #     """
+    #     Process audio chunk in realtime: STT → Translation → TTS → Send
+    #     
+    #     Args:
+    #         cabin: Translation cabin instance
+    #         audio_chunk: Complete 0.8s audio chunk ready for processing
+    #         
+    #     Flow:
+    #         1. VAD check - if no speech, send passthrough
+    #         2. STT → Translation → TTS pipeline
+    #         3. Send translated audio to SFU immediately
+    #     """
+    #     start_time = time.time()
+    #     
+    #     try:
+    #         # Step 1: VAD speech detection
+    #         has_speech = cabin.vad.detect_speech(audio_chunk)
+    #         
+    #         if not has_speech:
+    #             # No speech: forward as Opus (encoded) to keep stream smooth
+    #             await self._send_audio_to_sfu(cabin, audio_chunk, "passthrough")
+    #             return
+    #         
+    #         # Step 2: Speech detected → process through translation pipeline
+    #         cabin.status = CabinStatus.TRANSLATING
+    #         
+    #         # Get cached pipeline to avoid recreation overhead
+    #         pipeline = self.get_or_create_pipeline(cabin)
+    #         
+    #         # Step 3: Convert PCM to WAV and process
+    #         wav_data = AudioProcessingUtils.pcm_to_wav_bytes(audio_chunk)
+    #         
+    #         # Fire-and-forget: pipeline sẽ tự xử lý và gửi kết quả
+    #         asyncio.create_task(self._process_and_send(cabin, wav_data, start_time))
+    #         cabin.status = CabinStatus.LISTENING
+    #         
+    #         cabin.status = CabinStatus.LISTENING
+    #         
+    #     except Exception as e:
+    #         processing_time = (time.time() - start_time) * 1000
+    #         cabin.status = CabinStatus.ERROR
+    #         logger.error(f"[REALTIME] Error processing chunk in {processing_time:.2f}ms: {e}")
+    #         import traceback
+    #         logger.error(f"[REALTIME] Traceback: {traceback.format_exc()}")
+    #         
+    #         # Reset status for next chunk
+    #         cabin.status = CabinStatus.LISTENING
+
+    # async def _process_and_send(self, cabin: TranslationCabin, wav_data: bytes, start_time: float):
+    #     try:
+    #         pipeline = self.get_or_create_pipeline(cabin)
+    #         result = await pipeline.process_audio(wav_data)
+    # 
+    #         processing_time = (time.time() - start_time) * 1000
+    # 
+    #         if result['success'] and result.get('translated_audio'):
+    #             translated_audio = result['translated_audio']
+    # 
+    #             # Stream out in small parts if possible to improve smoothness
+    #             streamed = await self._stream_tts_in_parts(
+    #                 cabin, result.get('translated_text', ''), translated_audio
+    #             )
+    #             if not streamed:
+    #                 success = await self._send_audio_to_sfu(cabin, translated_audio, "translated")
+    #                 if success:
+    #                     logger.debug(f"[REALTIME] Processed chunk in {processing_time:.2f}ms")
+    #                 else:
+    #                     logger.error(f"[REALTIME] Failed to send translated audio")
+    #         else:
+    #             logger.warning(f"[REALTIME] Translation failed: {result}")
+    # 
+    #     except Exception as e:
+    #         logger.error(f"[REALTIME] Error in _process_and_send: {e}")
 
     def _send_rtp_chunks_to_sfu(self, cabin: TranslationCabin, audio_data: bytes) -> bool:
         """
@@ -762,56 +1133,59 @@ class TranslationCabinManager:
             logger.error(f"[{audio_type.upper()}] Error sending {audio_type} audio: {e}")
             return False
 
-    async def _stream_tts_in_parts(self, cabin: TranslationCabin, text: str, fallback_audio: Optional[bytes]) -> bool:
-        """
-        Try to stream TTS in smaller parts to improve perceived latency.
-        If splitting is not beneficial, return False and caller will send fallback in one go.
-        """
-        try:
-            if not text:
-                return False
-
-            # Simple heuristic: if text is short, don't split
-            words = text.split()
-            if len(words) <= 8:
-                return False
-
-            parts: List[str] = []
-            current: List[str] = []
-            for w in words:
-                current.append(w)
-                if len(current) >= 6 or w.endswith(('.', '!', '?', ',')):
-                    parts.append(' '.join(current))
-                    current = []
-            if current:
-                parts.append(' '.join(current))
-
-            # If splitting produced only one part, skip streaming
-            if len(parts) <= 1:
-                return False
-
-            # Generate TTS per part sequentially (keeps order and pacing)
-            from service.pipline_processor.text_to_speech import tts as tts_func
-            loop = cabin._event_loop or asyncio.get_event_loop()
-            for idx, part in enumerate(parts):
-                try:
-                    audio_part = await loop.run_in_executor(
-                        None,
-                        tts_func,
-                        part,
-                        cabin.target_language,
-                        cabin.user_id,
-                        cabin.room_id,
-                    )
-                    if audio_part:
-                        _ = await self._send_audio_to_sfu(cabin, audio_part, "translated-part")
-                except Exception as e:
-                    logger.warning(f"[STREAM-TTS] Part {idx} failed: {e}")
-                    continue
-            return True
-        except Exception as e:
-            logger.debug(f"[STREAM-TTS] Fallback to single audio due to error: {e}")
-            return False
+    # ========================================================================
+    # OLD LOGIC - COMMENTED OUT
+    # ========================================================================
+    # async def _stream_tts_in_parts(self, cabin: TranslationCabin, text: str, fallback_audio: Optional[bytes]) -> bool:
+    #     """
+    #     Try to stream TTS in smaller parts to improve perceived latency.
+    #     If splitting is not beneficial, return False and caller will send fallback in one go.
+    #     """
+    #     try:
+    #         if not text:
+    #             return False
+    # 
+    #         # Simple heuristic: if text is short, don't split
+    #         words = text.split()
+    #         if len(words) <= 8:
+    #             return False
+    # 
+    #         parts: List[str] = []
+    #         current: List[str] = []
+    #         for w in words:
+    #             current.append(w)
+    #             if len(current) >= 6 or w.endswith(('.', '!', '?', ',')):
+    #                 parts.append(' '.join(current))
+    #                 current = []
+    #         if current:
+    #             parts.append(' '.join(current))
+    # 
+    #         # If splitting produced only one part, skip streaming
+    #         if len(parts) <= 1:
+    #             return False
+    # 
+    #         # Generate TTS per part sequentially (keeps order and pacing)
+    #         from service.pipline_processor.text_to_speech import tts as tts_func
+    #         loop = cabin._event_loop or asyncio.get_event_loop()
+    #         for idx, part in enumerate(parts):
+    #             try:
+    #                 audio_part = await loop.run_in_executor(
+    #                     None,
+    #                     tts_func,
+    #                     part,
+    #                     cabin.target_language,
+    #                     cabin.user_id,
+    #                     cabin.room_id,
+    #                 )
+    #                 if audio_part:
+    #                     _ = await self._send_audio_to_sfu(cabin, audio_part, "translated-part")
+    #             except Exception as e:
+    #                 logger.warning(f"[STREAM-TTS] Part {idx} failed: {e}")
+    #                 continue
+    #         return True
+    #     except Exception as e:
+    #         logger.debug(f"[STREAM-TTS] Fallback to single audio due to error: {e}")
+    #         return False
 
     def start_cabin(self, cabin_id: str) -> bool:
         """
@@ -1014,6 +1388,11 @@ class TranslationCabinManager:
                 cabin.running = False
                 if cabin.processor_thread and cabin.processor_thread.is_alive():
                     cabin.processor_thread.join(timeout=2.0)
+                
+                # FIX: Stop playback thread
+                if cabin.playback_thread and cabin.playback_thread.is_alive():
+                    logger.info(f"[CABIN-MANAGER] Stopping playback thread for {cabin_id}")
+                    cabin.playback_thread.join(timeout=2.0)
                 
                 # Step 3: Unregister from SharedSocketManager routing system
                 self.socket_manager.unregister_cabin(cabin_id)

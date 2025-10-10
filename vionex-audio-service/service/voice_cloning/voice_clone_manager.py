@@ -21,6 +21,7 @@ from scipy.io import wavfile
 
 from .audio_quality import assess_audio_quality, should_use_for_voice_clone, compare_audio_quality
 from ..pipline_processor.text_to_speech import clone_and_save_embedding
+from ..pipline_processor.speech_to_text import _transcribe_whisper
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,9 @@ class VoiceCloneManager:
         self.processing_locks = {}   # {user_room_key: lock} - Prevent concurrent processing
         self.cache_timestamps = {}   # {user_room_key: timestamp} - TTL tracking
         
+        # REPLACE MODEL: Add transcript cache for CosyVoice2
+        self.transcript_cache = {}   # {user_room_key: transcript_text} - For prompt_text
+        
         # Memory management settings
         self.MAX_CACHE_SIZE = 50     # Max 50 cached embeddings
         self.CACHE_TTL = 1800        # 30 minutes TTL
@@ -51,6 +55,7 @@ class VoiceCloneManager:
         
         # Storage paths
         self.embeddings_dir = "voice_clones/embeddings"
+        self.audio_samples_dir = "voice_clones/audio_samples"  # NEW: Store audio files
         self._ensure_directories()
         
         # Background task reference
@@ -61,6 +66,7 @@ class VoiceCloneManager:
         """Tạo directories nếu chưa có"""
         try:
             os.makedirs(self.embeddings_dir, exist_ok=True)
+            os.makedirs(self.audio_samples_dir, exist_ok=True)  # NEW: Audio samples directory
         except Exception as e:
             logger.error(f"Failed to create voice clone directories: {e}")
     
@@ -157,7 +163,7 @@ class VoiceCloneManager:
     
     async def _process_voice_clone(self, key: str) -> None:
         """
-        Xử lý voice cloning cho user
+        REPLACE MODEL: Xử lý voice cloning cho user với transcript extraction
         
         Args:
             key: user_room_key (userId_roomId)
@@ -175,28 +181,46 @@ class VoiceCloneManager:
             # Combine audio chunks
             audio_buffer = await self._combine_audio_chunks(key)
             if audio_buffer is None:
-                logger.warning(f"❌ [VOICE-CLONE] Failed to combine audio chunks for {key}")
+                logger.warning(f"[VOICE-CLONE] Failed to combine audio chunks for {key}")
                 return
                 
             logger.info(f"🎵 [VOICE-CLONE] Combined audio buffer: {len(audio_buffer)} samples for {key}")
                 
             # Quality check - skip if not good enough
             if not should_use_for_voice_clone(audio_buffer):
-                logger.warning(f"🔇 [VOICE-CLONE] Audio quality too low for voice cloning: {key}")
+                logger.warning(f"[VOICE-CLONE] Audio quality too low for voice cloning: {key}")
                 self._reset_buffer(key)
                 return
                 
             # Check if we should update (compare with existing)
             current_quality = assess_audio_quality(audio_buffer)
             if not self._should_update_embedding(key, current_quality):
-                logger.info(f"♻️ [VOICE-CLONE] Keeping existing voice clone for {key}")
+                logger.info(f"[VOICE-CLONE] Keeping existing voice clone for {key}")
                 self._reset_buffer(key)
                 return
+            
+            # ===== NEW: Save audio file for CosyVoice2 =====
+            audio_file_path = await self._save_audio_sample(key, audio_buffer)
+            if audio_file_path is None:
+                logger.warning(f"[VOICE-CLONE] Failed to save audio sample for {key}")
+                self._reset_buffer(key)
+                return
+            
+            # ===== NEW: Extract transcript using STT =====
+            transcript = await self._extract_transcript(audio_buffer, key)
+            if transcript:
+                self.transcript_cache[key] = transcript
+                # Save transcript to file
+                await self._save_transcript(key, transcript)
+                logger.info(f"[VOICE-CLONE] Extracted transcript for {key}: '{transcript[:50]}...'")
+            else:
+                logger.warning(f"[VOICE-CLONE] No transcript extracted for {key}")
+                self.transcript_cache[key] = ""
                 
-            # Extract embedding using existing function
+            # Extract embedding using existing function (for XTTS-v2 compatibility)
             embedding = await self._extract_embedding(audio_buffer, key)
             if embedding is None:
-                logger.warning(f"❌ [VOICE-CLONE] Failed to extract embedding for {key}")
+                logger.warning(f"[VOICE-CLONE] Failed to extract embedding for {key}")
                 self._reset_buffer(key)
                 return
                 
@@ -213,7 +237,7 @@ class VoiceCloneManager:
             # Force garbage collection after processing
             gc.collect()
             
-            logger.info(f"[VOICE-CLONE] Voice clone completed for {key}")
+            logger.info(f"✅ [VOICE-CLONE] Voice clone completed for {key}")
             
         except Exception as e:
             logger.error(f"Voice cloning processing error for {key}: {e}")
@@ -382,6 +406,7 @@ class VoiceCloneManager:
             self.embeddings_cache.pop(key, None)
             self.cache_timestamps.pop(key, None)
             self.quality_cache.pop(key, None)
+            self.transcript_cache.pop(key, None)  # NEW: Clean transcript cache
             logger.debug(f"Evicted cache entry: {key}")
         except Exception as e:
             logger.error(f"Error evicting cache entry {key}: {e}")
@@ -416,6 +441,99 @@ class VoiceCloneManager:
         except Exception as e:
             logger.error(f"[SAVE-EMBEDDING] Error saving embedding to file for {key}: {e}")
     
+    async def _save_audio_sample(self, key: str, audio_buffer: np.ndarray) -> Optional[str]:
+        """
+        REPLACE MODEL: Save audio sample as 16kHz WAV for CosyVoice2
+        
+        Args:
+            key: user_room_key
+            audio_buffer: Audio data as numpy array (PCM16)
+            
+        Returns:
+            Path to saved audio file or None if failed
+        """
+        try:
+            audio_file = os.path.join(self.audio_samples_dir, f"{key}.wav")
+            
+            logger.info(f"[SAVE-AUDIO] Saving audio sample for {key}")
+            
+            # Save as 16kHz WAV (required by CosyVoice2)
+            await asyncio.get_event_loop().run_in_executor(
+                None, wavfile.write, audio_file, 16000, audio_buffer
+            )
+            
+            if os.path.exists(audio_file):
+                file_size = os.path.getsize(audio_file)
+                duration = len(audio_buffer) / 16000
+                logger.info(f"[SAVE-AUDIO] Saved {key} - Size: {file_size} bytes, Duration: {duration:.2f}s")
+                return audio_file
+            else:
+                logger.error(f"[SAVE-AUDIO] File not found after save: {audio_file}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"[SAVE-AUDIO] Error saving audio sample for {key}: {e}")
+            return None
+    
+    async def _extract_transcript(self, audio_buffer: np.ndarray, key: str) -> Optional[str]:
+        """
+        REPLACE MODEL: Extract transcript from audio using STT (Distil-Whisper)
+        
+        Args:
+            audio_buffer: Audio data as numpy array (PCM16)
+            key: user_room_key for logging
+            
+        Returns:
+            Transcript text or None if failed
+        """
+        try:
+            logger.info(f"[EXTRACT-TRANSCRIPT] Starting STT for {key}")
+            
+            # Convert PCM16 to float32 for Whisper
+            audio_float32 = audio_buffer.astype(np.float32) / 32768.0
+            
+            # Extract language from key or use default
+            result = await asyncio.get_event_loop().run_in_executor(
+                None, _transcribe_whisper, audio_float32, "vi"  # Default Vietnamese
+            )
+            
+            if result and result.get('text'):
+                transcript = result['text'].strip()
+                logger.info(f"[EXTRACT-TRANSCRIPT] Success for {key}: '{transcript[:100]}...'")
+                return transcript
+            else:
+                logger.warning(f"[EXTRACT-TRANSCRIPT] No text extracted for {key}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"[EXTRACT-TRANSCRIPT] Error for {key}: {e}")
+            return None
+    
+    async def _save_transcript(self, key: str, transcript: str) -> None:
+        """
+        REPLACE MODEL: Save transcript to file for CosyVoice2 prompt_text
+        
+        Args:
+            key: user_room_key
+            transcript: Transcript text to save
+        """
+        try:
+            transcript_file = os.path.join(self.audio_samples_dir, f"{key}_transcript.txt")
+            
+            def write_transcript():
+                with open(transcript_file, 'w', encoding='utf-8') as f:
+                    f.write(transcript)
+            
+            await asyncio.get_event_loop().run_in_executor(None, write_transcript)
+            
+            if os.path.exists(transcript_file):
+                logger.info(f"[SAVE-TRANSCRIPT] Saved transcript for {key}")
+            else:
+                logger.error(f"[SAVE-TRANSCRIPT] File not found after save: {transcript_file}")
+                
+        except Exception as e:
+            logger.error(f"[SAVE-TRANSCRIPT] Error saving transcript for {key}: {e}")
+    
     def _reset_buffer(self, key: str) -> None:
         """
         Reset audio buffer sau khi xử lý
@@ -430,7 +548,7 @@ class VoiceCloneManager:
     
     def get_user_embedding(self, user_id: str, room_id: str) -> Optional[np.ndarray]:
         """
-        Lấy embedding cho user với TTL và LRU cache
+        Lấy embedding cho user với TTL và LRU cache (for XTTS-v2)
         
         Args:
             user_id: User identifier
@@ -503,6 +621,75 @@ class VoiceCloneManager:
             
         except Exception as e:
             logger.error(f"Error getting user embedding for {user_id}_{room_id}: {e}")
+            return None
+    
+    def get_user_audio_path(self, user_id: str, room_id: str) -> Optional[str]:
+        """
+        REPLACE MODEL: Get audio sample path for CosyVoice2 prompt_speech_16k
+        
+        Args:
+            user_id: User identifier
+            room_id: Room identifier
+            
+        Returns:
+            Path to 16kHz audio file or None if not available
+        """
+        try:
+            key = f"{user_id}_{room_id}"
+            audio_file = os.path.join(self.audio_samples_dir, f"{key}.wav")
+            
+            if os.path.exists(audio_file):
+                logger.debug(f"[GET-AUDIO-PATH] Found audio sample for {key}: {audio_file}")
+                return audio_file
+            else:
+                logger.debug(f"[GET-AUDIO-PATH] No audio sample for {key}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"[GET-AUDIO-PATH] Error for {user_id}_{room_id}: {e}")
+            return None
+    
+    def get_user_transcript(self, user_id: str, room_id: str) -> Optional[str]:
+        """
+        REPLACE MODEL: Get transcript for CosyVoice2 prompt_text
+        
+        Args:
+            user_id: User identifier
+            room_id: Room identifier
+            
+        Returns:
+            Transcript text or None if not available
+        """
+        try:
+            key = f"{user_id}_{room_id}"
+            
+            # Check cache first
+            if key in self.transcript_cache:
+                transcript = self.transcript_cache[key]
+                logger.debug(f"[GET-TRANSCRIPT] Cache hit for {key}: '{transcript[:50]}...'")
+                return transcript
+            
+            # Try loading from file
+            transcript_file = os.path.join(self.audio_samples_dir, f"{key}_transcript.txt")
+            if os.path.exists(transcript_file):
+                try:
+                    with open(transcript_file, 'r', encoding='utf-8') as f:
+                        transcript = f.read().strip()
+                    
+                    # Cache for future use
+                    self.transcript_cache[key] = transcript
+                    logger.debug(f"[GET-TRANSCRIPT] Loaded from file for {key}: '{transcript[:50]}...'")
+                    return transcript
+                    
+                except Exception as e:
+                    logger.error(f"[GET-TRANSCRIPT] Failed to read file for {key}: {e}")
+                    return None
+            else:
+                logger.debug(f"[GET-TRANSCRIPT] No transcript for {key}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"[GET-TRANSCRIPT] Error for {user_id}_{room_id}: {e}")
             return None
     
     def _add_to_cache(self, key: str, embedding: np.ndarray, timestamp: float) -> None:
@@ -655,6 +842,7 @@ class VoiceCloneManager:
             self.quality_cache.clear()
             self.processing_locks.clear()
             self.cache_timestamps.clear()
+            self.transcript_cache.clear()  # NEW: Clean transcript cache
             
             # Force garbage collection
             gc.collect()

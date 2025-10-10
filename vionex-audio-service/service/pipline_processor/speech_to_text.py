@@ -8,7 +8,8 @@ import os
 import datetime
 from typing import Any, Dict, Optional
 
-from core.model import whisper_model
+from core.model import distil_whisper_model, whisper_model
+from service.utils.audio_logger import save_audio_chunk
 
 logger = logging.getLogger(__name__)
 
@@ -102,19 +103,30 @@ class STTPipeline:
         return audio_logger
 
     def _save_audio_wav(self, audio_data: bytes, filename: str) -> str:
-        """Save PCM audio data as WAV file"""
+        """Save PCM audio data as WAV file using centralized audio_logger"""
         try:
             filepath = os.path.join(self.audio_log_dir, filename)
             
-            # Convert PCM bytes to numpy array
+            # Calculate audio duration for metadata
             audio_array = np.frombuffer(audio_data, dtype=np.int16)
+            duration = len(audio_array) / 16000  # 16kHz sample rate
             
-            # Save as WAV file
-            with wave.open(filepath, 'wb') as wav_file:
-                wav_file.setnchannels(1)  # Mono
-                wav_file.setsampwidth(2)  # 16-bit
-                wav_file.setframerate(16000)  # 16kHz sample rate
-                wav_file.writeframes(audio_data)
+            # Use save_audio_chunk utility
+            metadata = {
+                "module": "STT",
+                "duration_seconds": f"{duration:.2f}",
+                "sample_rate": 16000,
+                "channels": 1,
+                "description": "Audio chunk for speech-to-text processing"
+            }
+            
+            save_audio_chunk(
+                audio_data=audio_data,
+                filename=filepath,
+                sample_rate=16000,
+                channels=1,
+                metadata=metadata
+            )
             
             return filepath
             
@@ -329,21 +341,52 @@ def decode_audio_to_array(audio_bytes: bytes) -> np.ndarray:
 
 
 def _transcribe(audio_array: np.ndarray, language: str = "vi") -> Dict[str, Any]:
-    """Whisper transcription optimized for Vietnamese accuracy"""
+    """
+    REPLACE MODEL: Distil-Whisper
+    """
     try:
+        # REPLACE MODEL: Distil-Whisper via transformers pipeline
+        logger.debug(f"[STT] Using Distil-Whisper for language: {language}")
+        
+        result = distil_whisper_model(
+            audio_array,
+            generate_kwargs={
+                "language": language,
+                "task": "transcribe",
+                "max_new_tokens": 128,
+                "num_beams": 1,  # Greedy decoding for speed
+                "do_sample": False,
+            },
+            return_timestamps=False,  # Don't need timestamps for realtime
+        )
+        
+        return {
+            'text': result['text'].strip(),
+            'language': language,
+            'segments': result.get('chunks', [])
+        }
+
+    except Exception as e:
+        logger.error(f"[STT] Error in _transcribe: {e}")
+        return {'text': '', 'language': language, 'segments': []}
+
+def _transcribe_whisper(audio_array: np.ndarray, language: str = "vi") -> Dict[str, Any]:
+    try:
+        logger.debug(f"[STT] Using faster-whisper for language: {language}")
+            
         segments, info = whisper_model.transcribe(
             audio_array,
             language=language,
             task="transcribe",
-            beam_size=3,                      # Balanced accuracy vs speed
-            best_of=3,                        # Try multiple attempts
-            temperature=0.0,                  # Deterministic results
+            beam_size=3,
+            best_of=3,
+            temperature=0.0,
             word_timestamps=True,
-            condition_on_previous_text=False, # Prevent context pollution
-            vad_filter=True,                  # Enable VAD filtering
-            no_speech_threshold=0.5,          # More conservative speech detection
-            compression_ratio_threshold=2.4,  # Detect repetitive text
-            logprob_threshold=-1.0            # Quality threshold
+            condition_on_previous_text=False,
+            vad_filter=True,
+            no_speech_threshold=0.5,
+            compression_ratio_threshold=2.4,
+            logprob_threshold=-1.0
         )
 
         segments_list = list(segments)
@@ -356,10 +399,10 @@ def _transcribe(audio_array: np.ndarray, language: str = "vi") -> Dict[str, Any]
                     'text': segment.text,
                     'start': segment.start,
                     'end': segment.end,
-                    'words': getattr(segment, 'words', [])  # Include word-level timestamps
+                    'words': getattr(segment, 'words', [])
                 } for segment in segments_list
             ]
         }
-
     except Exception as e:
+        logger.error(f"[STT] Error in _transcribe: {e}")
         return {'text': '', 'language': language, 'segments': []}
