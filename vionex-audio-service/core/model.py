@@ -148,17 +148,33 @@ print("[TRANSLATION] NLLB-Distilled loaded successfully (supports 200+ languages
 # ============================================================================
 # FUTURE: CosyVoice2 implementation (when available)
 # ============================================================================
-print("[TTS] Loading CosyVoice2 Streaming (iic/CosyVoice2-0.5B)")
-from cosyvoice import CosyVoice
-# 
-cosy_tts_model = CosyVoice.from_pretrained(
-    "iic/CosyVoice2-0.5B",
-    device=TYPE_ENGINE if TYPE_ENGINE == "cuda" else "cpu",
-    streaming=True  # Enable streaming mode
-)
-# 
-tts_model = cosy_tts_model
-print("[TTS] CosyVoice2 Streaming loaded successfully (sub-second latency)")
+print("[TTS] Loading CosyVoice Streaming (iic/CosyVoice2-0.5B)")
+try:
+    # Try different import methods
+    try:
+        from cosyvoice.cli.cosyvoice import CosyVoice2
+        model_class = CosyVoice2
+    except ImportError:
+        try:
+            from cosyvoice.cli.cosyvoice import CosyVoice
+            model_class = CosyVoice
+        except ImportError:
+            from cosyvoice.cosyvoice import CosyVoice
+            model_class = CosyVoice
+    
+    cosy_tts_model = model_class(
+        "iic/CosyVoice2-0.5B",
+        load_jit=False,
+        load_onnx=False
+    )
+    
+    tts_model = cosy_tts_model
+    print("[TTS] CosyVoice loaded successfully (streaming mode)")
+    
+except Exception as e:
+    print(f"[TTS] Failed to load CosyVoice: {e}")
+    print("[TTS] Falling back to basic TTS...")
+    tts_model = None
 
 # GPU-specific optimizations for RTX A4000 (Ampere Professional)
 if TYPE_ENGINE == "cuda":
