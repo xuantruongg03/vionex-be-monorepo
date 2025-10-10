@@ -129,36 +129,36 @@ print("[TRANSLATION] NLLB-Distilled loaded successfully (supports 200+ languages
 # print("[TTS] Loading XTTS-v2 (tts_models/multilingual/multi-dataset/xtts_v2)")
 # print("[TTS] Note: CosyVoice2 will replace this when available")
 
-# from TTS.api import TTS
-# import os
+from TTS.api import TTS
+import os
 
 # Set environment variable to automatically accept license for non-interactive environments
-# os.environ["COQUI_TOS_AGREED"] = "1"
+os.environ["COQUI_TOS_AGREED"] = "1"
 
-# # Initialize TTS model with automatic license acceptance
-# tts_model = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2").to(TYPE_ENGINE)
+# Initialize TTS model with automatic license acceptance
+tts_model = TTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2").to(TYPE_ENGINE)
 
-# # Apply optimization parameters from config
-# tts_model.temperature = TTS_TEMPERATURE
-# tts_model.length_penalty = TTS_LENGTH_PENALTY  
-# tts_model.repetition_penalty = TTS_REPETITION_PENALTY
+# Apply optimization parameters from config
+tts_model.temperature = TTS_TEMPERATURE
+tts_model.length_penalty = TTS_LENGTH_PENALTY  
+tts_model.repetition_penalty = TTS_REPETITION_PENALTY
 
-# print("[TTS] XTTS-v2 loaded (temporary, will be replaced by CosyVoice2)")
+print("[TTS] XTTS-v2 loaded (temporary, will be replaced by CosyVoice2)")
 
 # ============================================================================
 # FUTURE: CosyVoice2 implementation (when available)
 # ============================================================================
-print("[TTS] Loading CosyVoice2 Streaming (iic/CosyVoice2-0.5B)")
-from cosyvoice import CosyVoice2
-# 
-cosy_tts_model = CosyVoice2.from_pretrained(
-    "iic/CosyVoice2-0.5B",
-    device=TYPE_ENGINE if TYPE_ENGINE == "cuda" else "cpu",
-    streaming=True  # Enable streaming mode
-)
-# 
-tts_model = cosy_tts_model
-print("[TTS] CosyVoice2 Streaming loaded successfully (sub-second latency)")
+# print("[TTS] Loading CosyVoice2 Streaming (iic/CosyVoice2-0.5B)")
+# from cosyvoice import CosyVoice2
+# # 
+# cosy_tts_model = CosyVoice2.from_pretrained(
+#     "iic/CosyVoice2-0.5B",
+#     device=TYPE_ENGINE if TYPE_ENGINE == "cuda" else "cpu",
+#     streaming=True  # Enable streaming mode
+# )
+# # 
+# tts_model = cosy_tts_model
+# print("[TTS] CosyVoice2 Streaming loaded successfully (sub-second latency)")
 
 # GPU-specific optimizations for RTX A4000 (Ampere Professional)
 if TYPE_ENGINE == "cuda":
