@@ -321,9 +321,18 @@ class SharedSocketManager:
             using_learned = False  # DEV: Track if using learned address
             send_mode = "unknown"
             
+            # DEBUG: Log test mode status and cabin_id
+            if not hasattr(self, '_debug_test_mode_logged'):
+                logger.info(f"[NAT-DEBUG] 🔧 test_mode={self.test_mode}, cabin_to_client_address keys={list(self.cabin_to_client_address.keys())}")
+                self._debug_test_mode_logged = True
+            
             if self.test_mode and cabin_id:  # DEV: Check test mode and cabin_id
                 with self._lock:
                     target_addr = self.cabin_to_client_address.get(cabin_id)  # DEV: Get learned address
+                # DEBUG: Log lookup result
+                if cabin_id and not hasattr(self, f'_debug_lookup_{cabin_id}'):
+                    logger.info(f"[NAT-DEBUG] 🔍 Lookup cabin_id='{cabin_id}', found address: {target_addr}")
+                    setattr(self, f'_debug_lookup_{cabin_id}', True)
                 if target_addr:
                     using_learned = True  # DEV: Mark as using learned address
                     send_mode = "learned"
