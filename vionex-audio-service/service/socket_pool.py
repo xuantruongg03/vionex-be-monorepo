@@ -140,6 +140,14 @@ class SharedSocketManager:
             self.cabin_callbacks[cabin_id] = callback
             self.cabin_to_ports[cabin_id] = (allocated_rx_port, allocated_tx_port)
             
+            # DEV: Log NAT mode status
+            if self.test_mode:
+                logger.info(f"[NAT-MODE] 🔧 Test mode ENABLED for cabin '{cabin_id}'")
+                logger.info(f"[NAT-MODE] 📝 Will learn client address from first RTP packet")
+                logger.info(f"[NAT-MODE] 💡 This enables NAT traversal without port forwarding")
+            else:
+                logger.info(f"[NAT-MODE] 🏭 Production mode - using configured SFU address")
+            
             logger.info(f"[SHARED-SOCKET] Registered cabin {cabin_id}: SSRC={ssrc}, allocated_ports=({allocated_rx_port}, {allocated_tx_port})")
             return (allocated_rx_port, allocated_tx_port)
     
@@ -171,7 +179,9 @@ class SharedSocketManager:
             
             # DEV: Cleanup learned client address in test mode
             if cabin_id in self.cabin_to_client_address:  # DEV: Remove learned address
+                learned_addr = self.cabin_to_client_address[cabin_id]
                 del self.cabin_to_client_address[cabin_id]
+                logger.info(f"[NAT-CLEANUP] 🧹 Removed learned address for '{cabin_id}': {learned_addr[0]}:{learned_addr[1]}")
             
             if ssrc is None:
                 logger.warning(f"[SHARED-SOCKET] Cabin {cabin_id} was not registered")
@@ -231,9 +241,19 @@ class SharedSocketManager:
                     if cabin_id and cabin_id in self.cabin_callbacks:
                         # DEV: Learn client address in test mode for NAT traversal
                         # DEV: This allows sending RTP back to test clients behind NAT
-                        if self.test_mode and cabin_id not in self.cabin_to_client_address:
-                            self.cabin_to_client_address[cabin_id] = addr  # DEV: Store (ip, port)
-                            logger.info(f"[TEST-MODE] Learned client: {addr[0]}:{addr[1]}")
+                        if self.test_mode:
+                            if cabin_id not in self.cabin_to_client_address:
+                                self.cabin_to_client_address[cabin_id] = addr  # DEV: Store (ip, port)
+                                logger.info(f"[NAT-LEARN] 🎯 Learned client address for cabin '{cabin_id}': {addr[0]}:{addr[1]}")
+                                logger.info(f"[NAT-LEARN] 📡 RTP replies will be sent to this address (NAT traversal)")
+                            else:
+                                # Check if address changed (NAT remapping)
+                                old_addr = self.cabin_to_client_address[cabin_id]
+                                if old_addr != addr:
+                                    logger.warning(f"[NAT-CHANGE] ⚠️ Client address changed for '{cabin_id}':")
+                                    logger.warning(f"[NAT-CHANGE]   Old: {old_addr[0]}:{old_addr[1]}")
+                                    logger.warning(f"[NAT-CHANGE]   New: {addr[0]}:{addr[1]}")
+                                    self.cabin_to_client_address[cabin_id] = addr  # Update
                         
                         callback = self.cabin_callbacks[cabin_id]
                         try:
@@ -299,31 +319,44 @@ class SharedSocketManager:
             # DEV: Test mode - try learned client address first
             target_addr = None
             using_learned = False  # DEV: Track if using learned address
+            send_mode = "unknown"
             
             if self.test_mode and cabin_id:  # DEV: Check test mode and cabin_id
                 with self._lock:
                     target_addr = self.cabin_to_client_address.get(cabin_id)  # DEV: Get learned address
                 if target_addr:
                     using_learned = True  # DEV: Mark as using learned address
-                    logger.debug(f"[RTP-TX] Using learned address for {cabin_id}: {target_addr[0]}:{target_addr[1]}")
+                    send_mode = "learned"
+                    if not hasattr(self, '_first_learned_send_logged'):
+                        self._first_learned_send_logged = {}
+                    if cabin_id not in self._first_learned_send_logged:
+                        logger.info(f"[NAT-SEND] 📤 First RTP send via learned address for '{cabin_id}': {target_addr[0]}:{target_addr[1]}")
+                        self._first_learned_send_logged[cabin_id] = True
             
             # DEV: Fallback to configured SFU (production mode or no learned address)
             if not target_addr:
                 target_addr = (sfu_host, sfu_port)  # DEV: Use config for production
+                send_mode = "configured"
                 if self.test_mode and cabin_id:
-                    logger.warning(f"[RTP-TX] No learned address for {cabin_id}, using config: {sfu_host}:{sfu_port}")
-                else:
-                    logger.debug(f"[RTP-TX] Sending to configured SFU: {sfu_host}:{sfu_port}")
+                    logger.warning(f"[NAT-FALLBACK] ⚠️ No learned address for {cabin_id}, using config: {sfu_host}:{sfu_port}")
+                    logger.warning(f"[NAT-FALLBACK] 💡 Client may not receive RTP if behind NAT without port forwarding")
             
             bytes_sent = self.tx_sock.sendto(rtp_packet, target_addr)
             
             # DEV: Log successful send (every 100 packets)
             if not hasattr(self, '_tx_packet_count'):
                 self._tx_packet_count = 0
+            if not hasattr(self, '_tx_mode_count'):
+                self._tx_mode_count = {"learned": 0, "configured": 0}
+            
             self._tx_packet_count += 1
+            self._tx_mode_count[send_mode] = self._tx_mode_count.get(send_mode, 0) + 1
+            
             if self._tx_packet_count % 100 == 0:
-                mode = "learned" if using_learned else "configured"
-                logger.info(f"[RTP-TX] Sent packet #{self._tx_packet_count} to {target_addr[0]}:{target_addr[1]} ({mode})")
+                mode_emoji = "🎯" if send_mode == "learned" else "⚙️"
+                logger.info(f"[RTP-TX] {mode_emoji} Sent packet #{self._tx_packet_count} to {target_addr[0]}:{target_addr[1]} (mode: {send_mode})")
+                if self.test_mode:
+                    logger.info(f"[RTP-TX] 📊 Stats: learned={self._tx_mode_count.get('learned', 0)}, configured={self._tx_mode_count.get('configured', 0)}")
             
             return bytes_sent > 0
             
