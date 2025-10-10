@@ -42,31 +42,38 @@ class OpusCodecManager:
         """Decode Opus payload to PCM"""
         try:
             if len(opus_payload) == 0:
-                logger.debug("[DECODE] Empty Opus payload, skipping")
+                logger.warning("[DECODE] ⚠️ Empty Opus payload")
                 return b''
             
             if len(opus_payload) < 3 or len(opus_payload) > 1276:
-                logger.debug(f"[DECODE] Invalid Opus payload size: {len(opus_payload)} bytes")
+                logger.warning(f"[DECODE] ⚠️ Invalid payload size: {len(opus_payload)} bytes")
                 return b''
             
             decoder = self.get_decoder(cabin_id)
             
             # Try decode with 20ms frame size (960 samples per channel at 48kHz)
             try:
-                return decoder.decode(opus_payload, 960)
+                pcm_data = decoder.decode(opus_payload, 960)
+                # Only log failures and first success
+                if not hasattr(self, '_first_decode_logged'):
+                    logger.info(f"[DECODE] ✅ First decode: {len(opus_payload)} bytes → {len(pcm_data)} PCM bytes")
+                    self._first_decode_logged = True
+                return pcm_data
             except opuslib.OpusError as e:
                 # Try other common frame sizes
                 for frame_size in [480, 1920, 2880]:
                     try:
-                        return decoder.decode(opus_payload, frame_size)
+                        pcm_data = decoder.decode(opus_payload, frame_size)
+                        logger.info(f"[DECODE] ✅ Success with frame_size={frame_size}: {len(pcm_data)} PCM bytes")
+                        return pcm_data
                     except opuslib.OpusError:
                         continue
                 
-                logger.debug(f"[DECODE] All frame sizes failed for {cabin_id}: {e}")
+                logger.error(f"[DECODE] ❌ All frame sizes failed: {len(opus_payload)} bytes, error: {e}")
                 return b''
                 
         except Exception as e:
-            logger.error(f"[DECODE] Unexpected error for {cabin_id}: {e}")
+            logger.error(f"[DECODE] ❌ Unexpected error: {e}")
             return b''
     
     def encode_pcm_to_opus(self, cabin_id: str, pcm_data: bytes, sample_rate: int = 48000) -> bytes:

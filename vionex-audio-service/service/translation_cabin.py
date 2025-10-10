@@ -586,11 +586,17 @@ class TranslationCabinManager:
             # Decode Opus → PCM 48kHz stereo using codec utils
             pcm_48k_stereo = opus_codec_manager.decode_opus(cabin.cabin_id, opus_payload)
             if not pcm_48k_stereo:
+                if not hasattr(cabin, '_decode_fail_count'):
+                    cabin._decode_fail_count = 0
+                cabin._decode_fail_count += 1
+                if cabin._decode_fail_count == 1 or cabin._decode_fail_count % 100 == 0:
+                    logger.error(f"[AUDIO-CALLBACK] ❌ Opus decode failed (count: {cabin._decode_fail_count})")
                 return
 
             # Downsample từ 48kHz stereo → 16kHz mono for translation processing
             pcm_16k_mono = AudioProcessingUtils.downsample_48k_to_16k(pcm_48k_stereo)
             if not pcm_16k_mono:
+                logger.error(f"[AUDIO-CALLBACK] ❌ Downsample failed")
                 return
 
             # 🎙️ SAVE AUDIO TO FILE for debugging
