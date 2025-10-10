@@ -149,9 +149,9 @@ print("[TRANSLATION] NLLB-Distilled loaded successfully (supports 200+ languages
 # FUTURE: CosyVoice2 implementation (when available)
 # ============================================================================
 print("[TTS] Loading CosyVoice2 Streaming (iic/CosyVoice2-0.5B)")
-from cosyvoice import CosyVoice2
+from cosyvoice import CosyVoice
 # 
-cosy_tts_model = CosyVoice2.from_pretrained(
+cosy_tts_model = CosyVoice.from_pretrained(
     "iic/CosyVoice2-0.5B",
     device=TYPE_ENGINE if TYPE_ENGINE == "cuda" else "cpu",
     streaming=True  # Enable streaming mode
