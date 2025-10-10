@@ -146,61 +146,19 @@ print("[TRANSLATION] NLLB-Distilled loaded successfully (supports 200+ languages
 # print("[TTS] XTTS-v2 loaded (temporary, will be replaced by CosyVoice2)")
 
 # ============================================================================
-# CosyVoice TTS - Use official CosyVoice from FunAudioLLM
+# FUTURE: CosyVoice2 implementation (when available)
 # ============================================================================
-print("[TTS] Loading CosyVoice from FunAudioLLM (iic/CosyVoice2-0.5B)")
-
-# Official CosyVoice should be imported from FunAudioLLM repo
-# Installation: git clone https://github.com/FunAudioLLM/CosyVoice.git && cd CosyVoice && pip install -r requirements.txt
-try:
-    # Try importing from installed package
-    import sys
-    import os
-    
-    # Check if CosyVoice repo is in the path
-    cosyvoice_paths = [
-        "/root/CosyVoice",  # Common install location
-        "/root/vionex-be-monorepo/CosyVoice",
-        os.path.expanduser("~/CosyVoice"),
-        os.path.join(os.getcwd(), "CosyVoice")
-    ]
-    
-    cosyvoice_found = None
-    for path in cosyvoice_paths:
-        if os.path.exists(path):
-            cosyvoice_found = path
-            sys.path.insert(0, path)
-            print(f"[TTS] Found CosyVoice at: {path}")
-            break
-    
-    if not cosyvoice_found:
-        print("[TTS] CosyVoice not found in common locations:")
-        for p in cosyvoice_paths:
-            print(f"  - {p}")
-        print("[TTS] Please clone: git clone https://github.com/FunAudioLLM/CosyVoice.git")
-        raise ImportError("CosyVoice not found")
-    
-    # Now try importing
-    from cosyvoice.cli.cosyvoice import CosyVoice2
-    
-    # Initialize model
-    tts_model = CosyVoice2(
-        model_dir="iic/CosyVoice2-0.5B",
-        load_jit=False,
-        load_onnx=False
-    )
-    
-    print("[TTS] CosyVoice2 loaded successfully from FunAudioLLM")
-    
-except Exception as e:
-    print(f"[TTS] Failed to load CosyVoice: {e}")
-    print("[TTS] Installation instructions:")
-    print("  1. cd /root (or your workspace)")
-    print("  2. git clone https://github.com/FunAudioLLM/CosyVoice.git")
-    print("  3. cd CosyVoice")
-    print("  4. pip install -r requirements.txt")
-    print("[TTS] Using fallback: basic TTS")
-    tts_model = None
+print("[TTS] Loading CosyVoice2 Streaming (iic/CosyVoice2-0.5B)")
+from cosyvoice import CosyVoice2
+# 
+cosy_tts_model = CosyVoice2.from_pretrained(
+    "iic/CosyVoice2-0.5B",
+    device=TYPE_ENGINE if TYPE_ENGINE == "cuda" else "cpu",
+    streaming=True  # Enable streaming mode
+)
+# 
+tts_model = cosy_tts_model
+print("[TTS] CosyVoice2 Streaming loaded successfully (sub-second latency)")
 
 # GPU-specific optimizations for RTX A4000 (Ampere Professional)
 if TYPE_ENGINE == "cuda":
