@@ -14,7 +14,7 @@ from service.utils.audio_logger import save_audio_chunk
 logger = logging.getLogger(__name__)
 
 class STTPipeline:
-    def __init__(self, source_language: str = "vi", enable_audio_logging: bool = True):
+    def __init__(self, source_language: str = "vi", enable_audio_logging: bool = False):
         self.prev_text = ""
         self.source_language = source_language
         self.enable_audio_logging = enable_audio_logging

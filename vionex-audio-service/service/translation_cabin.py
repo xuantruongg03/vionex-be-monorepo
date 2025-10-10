@@ -72,7 +72,7 @@ class PlaybackQueue:
         try:
             if self._buffer_start_time is None:
                 self._buffer_start_time = time.time()
-                logger.info(f"[PLAYBACK-QUEUE] 🎬 Buffering started, need {self.BUFFER_DURATION}s")
+                logger.info(f"[PLAYBACK-QUEUE] Buffering started, need {self.BUFFER_DURATION}s")
             
             self._queue.put_nowait(chunk)
             self._total_enqueued += 1
@@ -265,7 +265,7 @@ class AudioRecorder:
         self.input_packet_count = 0
         self.output_packet_count = 0
         
-        logger.info(f"[AUDIO-RECORDER] 🎙️ Started recording for cabin {cabin_id}")
+        logger.info(f"[AUDIO-RECORDER] Started recording for cabin {cabin_id}")
     
     def write_audio(self, pcm_16k_mono: bytes):
         """Write input PCM audio to WAV file (BEFORE processing)"""
@@ -590,25 +590,24 @@ class TranslationCabinManager:
                     cabin._decode_fail_count = 0
                 cabin._decode_fail_count += 1
                 if cabin._decode_fail_count == 1 or cabin._decode_fail_count % 100 == 0:
-                    logger.error(f"[AUDIO-CALLBACK] ❌ Opus decode failed (count: {cabin._decode_fail_count})")
+                    logger.error(f"[AUDIO-CALLBACK] Opus decode failed (count: {cabin._decode_fail_count})")
                 return
 
             # Downsample từ 48kHz stereo → 16kHz mono for translation processing
             pcm_16k_mono = AudioProcessingUtils.downsample_48k_to_16k(pcm_48k_stereo)
             if not pcm_16k_mono:
-                logger.error(f"[AUDIO-CALLBACK] ❌ Downsample failed")
+                logger.error(f"[AUDIO-CALLBACK] Downsample failed")
                 return
-
-            # 🎙️ SAVE AUDIO TO FILE for debugging
-            if cabin.audio_recorder:
-                cabin.audio_recorder.write_audio(pcm_16k_mono)
-
             # Cleanup intermediate data immediately
             del pcm_48k_stereo
 
             # REALTIME PROCESSING: Add to sliding buffer and enqueue when ready
             complete_chunk = cabin.audio_buffer.add_audio_chunk(pcm_16k_mono)
             if complete_chunk:
+                # SAVE 2s CHUNK TO FILE for debugging (before processing)
+                if cabin.audio_recorder:
+                    cabin.audio_recorder.write_audio(complete_chunk)
+                
                 try:
                     cabin.chunk_queue.put_nowait(complete_chunk)
                 except queue.Full:
@@ -680,7 +679,7 @@ class TranslationCabinManager:
         4. Nếu queue rỗng → send silence để maintain stream
         """
         def playback_worker():
-            logger.info(f"[PLAYBACK-THREAD] 🎬 Started for cabin {cabin.cabin_id}")
+            logger.info(f"[PLAYBACK-THREAD] Started for cabin {cabin.cabin_id}")
             
             try:
                 while cabin.running:
@@ -707,13 +706,12 @@ class TranslationCabinManager:
                             f"queue size: {cabin.playback_queue._queue.qsize()}"
                         )
                         
+                        # SAVE OUTPUT AUDIO before sending to SFU
+                        if cabin.audio_recorder:
+                            cabin.audio_recorder.write_output_audio(audio_chunk.data)
+                        
                         self._send_audio_sync(cabin, audio_chunk.data)
-                        
-                        # Log queue stats periodically
-                        # if audio_chunk.chunk_id % 10 == 0:
-                        #     stats = cabin.playback_queue.get_stats()
-                        #     logger.info(f"[PLAYBACK-THREAD] Queue stats: {stats}")
-                        
+
                     except Exception as e:
                         logger.error(f"[PLAYBACK-THREAD] Error in playback loop: {e}")
                         time.sleep(0.1)
@@ -802,7 +800,7 @@ class TranslationCabinManager:
             
             # Step 2: Speech detected → process through translation pipeline
             cabin.status = CabinStatus.TRANSLATING
-            logger.info(f"[PROCESS-CHUNK-{chunk_id}] 🎙️ Speech detected, processing...")
+            logger.info(f"[PROCESS-CHUNK-{chunk_id}] Speech detected, processing...")
             
             # Get cached pipeline to avoid recreation overhead
             pipeline = self.get_or_create_pipeline(cabin)
@@ -971,8 +969,6 @@ class TranslationCabinManager:
             sfu_host = SFU_SERVICE_HOST  # Load from config instead of hardcoded
             sfu_port = cabin.send_port  # Use real SFU port if available
             
-            logger.warning(f"[RTP-CHUNKS] Sending audio to SFU: {sfu_host}:{sfu_port} (real_port: {cabin.sfu_send_port}, allocated: {cabin.send_port})")
-
             # --- 0) Chuẩn hoá input: WAV -> PCM16 mono + sample_rate ---
             # Nếu là WAV (bắt đầu "RIFF"), bóc PCM và lấy sample_rate
             src_sr = 16000
@@ -1086,6 +1082,10 @@ class TranslationCabinManager:
 
             start_time = time.time()
             
+            # Log once before sending all chunks
+            if len(encoded_chunks) > 0:
+                logger.info(f"[RTP-CHUNKS] 📤 Sending {len(encoded_chunks)} RTP packets to {sfu_host}:{sfu_port}")
+            
             for idx, opus_payload in enumerate(encoded_chunks):
                 if opus_payload is None:
                     continue
@@ -1105,6 +1105,10 @@ class TranslationCabinManager:
                 
                 # Precise timing thay vì sleep cố định
                 current_time = time.time()
+                # Log progress every 50 packets
+                if (idx + 1) % 50 == 0:
+                    logger.debug(f"[RTP-CHUNKS] Sent {idx + 1}/{len(encoded_chunks)} packets")
+                
                 if current_time < expected_time:
                     sleep_time = expected_time - current_time
                     if sleep_time > 0.001:  
