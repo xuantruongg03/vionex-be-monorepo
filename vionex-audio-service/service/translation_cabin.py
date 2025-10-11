@@ -608,10 +608,6 @@ class TranslationCabinManager:
             # REALTIME PROCESSING: Add to sliding buffer and enqueue when ready
             complete_chunk = cabin.audio_buffer.add_audio_chunk(pcm_16k_mono)
             if complete_chunk:
-                # DEBUG: Log when chunk is created
-                stats = cabin.audio_buffer.get_processing_stats()
-                logger.info(f"[CHUNK-CREATED] Buffer stats: {stats}")
-                
                 # SAVE 2s CHUNK TO FILE for debugging (before processing)
                 if cabin.audio_recorder:
                     cabin.audio_recorder.write_audio(complete_chunk)
@@ -887,84 +883,6 @@ class TranslationCabinManager:
             # Fallback: estimate 2s
             return 2.0
 
-    # ========================================================================
-    # OLD LOGIC - COMMENTED OUT
-    # ========================================================================
-    # async def _process_chunk_realtime(self, cabin: TranslationCabin, audio_chunk: bytes):
-    #     """
-    #     Process audio chunk in realtime: STT → Translation → TTS → Send
-    #     
-    #     Args:
-    #         cabin: Translation cabin instance
-    #         audio_chunk: Complete 0.8s audio chunk ready for processing
-    #         
-    #     Flow:
-    #         1. VAD check - if no speech, send passthrough
-    #         2. STT → Translation → TTS pipeline
-    #         3. Send translated audio to SFU immediately
-    #     """
-    #     start_time = time.time()
-    #     
-    #     try:
-    #         # Step 1: VAD speech detection
-    #         has_speech = cabin.vad.detect_speech(audio_chunk)
-    #         
-    #         if not has_speech:
-    #             # No speech: forward as Opus (encoded) to keep stream smooth
-    #             await self._send_audio_to_sfu(cabin, audio_chunk, "passthrough")
-    #             return
-    #         
-    #         # Step 2: Speech detected → process through translation pipeline
-    #         cabin.status = CabinStatus.TRANSLATING
-    #         
-    #         # Get cached pipeline to avoid recreation overhead
-    #         pipeline = self.get_or_create_pipeline(cabin)
-    #         
-    #         # Step 3: Convert PCM to WAV and process
-    #         wav_data = AudioProcessingUtils.pcm_to_wav_bytes(audio_chunk)
-    #         
-    #         # Fire-and-forget: pipeline sẽ tự xử lý và gửi kết quả
-    #         asyncio.create_task(self._process_and_send(cabin, wav_data, start_time))
-    #         cabin.status = CabinStatus.LISTENING
-    #         
-    #         cabin.status = CabinStatus.LISTENING
-    #         
-    #     except Exception as e:
-    #         processing_time = (time.time() - start_time) * 1000
-    #         cabin.status = CabinStatus.ERROR
-    #         logger.error(f"[REALTIME] Error processing chunk in {processing_time:.2f}ms: {e}")
-    #         import traceback
-    #         logger.error(f"[REALTIME] Traceback: {traceback.format_exc()}")
-    #         
-    #         # Reset status for next chunk
-    #         cabin.status = CabinStatus.LISTENING
-
-    # async def _process_and_send(self, cabin: TranslationCabin, wav_data: bytes, start_time: float):
-    #     try:
-    #         pipeline = self.get_or_create_pipeline(cabin)
-    #         result = await pipeline.process_audio(wav_data)
-    # 
-    #         processing_time = (time.time() - start_time) * 1000
-    # 
-    #         if result['success'] and result.get('translated_audio'):
-    #             translated_audio = result['translated_audio']
-    # 
-    #             # Stream out in small parts if possible to improve smoothness
-    #             streamed = await self._stream_tts_in_parts(
-    #                 cabin, result.get('translated_text', ''), translated_audio
-    #             )
-    #             if not streamed:
-    #                 success = await self._send_audio_to_sfu(cabin, translated_audio, "translated")
-    #                 if success:
-    #                     logger.debug(f"[REALTIME] Processed chunk in {processing_time:.2f}ms")
-    #                 else:
-    #                     logger.error(f"[REALTIME] Failed to send translated audio")
-    #         else:
-    #             logger.warning(f"[REALTIME] Translation failed: {result}")
-    # 
-    #     except Exception as e:
-    #         logger.error(f"[REALTIME] Error in _process_and_send: {e}")
-
     def _send_rtp_chunks_to_sfu(self, cabin: TranslationCabin, audio_data: bytes) -> bool:
         """
         Send RTP packets in 20ms chunks for proper streaming.
@@ -1090,10 +1008,7 @@ class TranslationCabinManager:
 
             start_time = time.time()
             
-            # Log once before sending all chunks
-            if len(encoded_chunks) > 0:
-                logger.info(f"[RTP-CHUNKS] 📤 Sending {len(encoded_chunks)} RTP packets to {sfu_host}:{sfu_port}")
-            
+            # Send RTP packets
             for idx, opus_payload in enumerate(encoded_chunks):
                 if opus_payload is None:
                     continue
@@ -1150,60 +1065,6 @@ class TranslationCabinManager:
         except Exception as e:
             logger.error(f"[{audio_type.upper()}] Error sending {audio_type} audio: {e}")
             return False
-
-    # ========================================================================
-    # OLD LOGIC - COMMENTED OUT
-    # ========================================================================
-    # async def _stream_tts_in_parts(self, cabin: TranslationCabin, text: str, fallback_audio: Optional[bytes]) -> bool:
-    #     """
-    #     Try to stream TTS in smaller parts to improve perceived latency.
-    #     If splitting is not beneficial, return False and caller will send fallback in one go.
-    #     """
-    #     try:
-    #         if not text:
-    #             return False
-    # 
-    #         # Simple heuristic: if text is short, don't split
-    #         words = text.split()
-    #         if len(words) <= 8:
-    #             return False
-    # 
-    #         parts: List[str] = []
-    #         current: List[str] = []
-    #         for w in words:
-    #             current.append(w)
-    #             if len(current) >= 6 or w.endswith(('.', '!', '?', ',')):
-    #                 parts.append(' '.join(current))
-    #                 current = []
-    #         if current:
-    #             parts.append(' '.join(current))
-    # 
-    #         # If splitting produced only one part, skip streaming
-    #         if len(parts) <= 1:
-    #             return False
-    # 
-    #         # Generate TTS per part sequentially (keeps order and pacing)
-    #         from service.pipline_processor.text_to_speech import tts as tts_func
-    #         loop = cabin._event_loop or asyncio.get_event_loop()
-    #         for idx, part in enumerate(parts):
-    #             try:
-    #                 audio_part = await loop.run_in_executor(
-    #                     None,
-    #                     tts_func,
-    #                     part,
-    #                     cabin.target_language,
-    #                     cabin.user_id,
-    #                     cabin.room_id,
-    #                 )
-    #                 if audio_part:
-    #                     _ = await self._send_audio_to_sfu(cabin, audio_part, "translated-part")
-    #             except Exception as e:
-    #                 logger.warning(f"[STREAM-TTS] Part {idx} failed: {e}")
-    #                 continue
-    #         return True
-    #     except Exception as e:
-    #         logger.debug(f"[STREAM-TTS] Fallback to single audio due to error: {e}")
-    #         return False
 
     def start_cabin(self, cabin_id: str) -> bool:
         """
