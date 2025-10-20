@@ -70,10 +70,16 @@ class TranslationPipeline:
 
     async def process_audio_with_context(self, audio_data: bytes, previous_text: str = "") -> Dict[str, Any]:
         """
-        CONTEXT WINDOW APPROACH (Option 2)
+        CONTEXT WINDOW APPROACH (Option 2) - NO TTS
         
         Process audio with context from previous chunks to improve STT accuracy.
         This method receives concatenated audio (2-3 chunks) and extracts only NEW text.
+        
+        CRITICAL: Does NOT perform TTS here to avoid audio overlap issues.
+        Caller is responsible for:
+        1. Comparing translated_text with last_translated_text
+        2. Extracting NEW portion of translated text
+        3. TTS'ing only the NEW portion
         
         Args:
             audio_data: Concatenated audio data (e.g., 3-4.5s worth of audio)
@@ -84,10 +90,9 @@ class TranslationPipeline:
                 'success': bool,
                 'message': str,
                 'full_stt_text': str,      # Complete STT result (including overlaps)
-                'new_text': str,           # Only NEW portion (for translation)
+                'new_text': str,           # Only NEW portion of STT (for translation)
                 'original_text': str,      # Same as new_text (for compatibility)
-                'translated_text': str,
-                'translated_audio': bytes
+                'translated_text': str,    # FULL translated text (caller extracts new portion)
             }
         """
         try:
@@ -104,8 +109,7 @@ class TranslationPipeline:
                     'full_stt_text': '',
                     'new_text': '',
                     'original_text': '',
-                    'translated_text': '',
-                    'translated_audio': b''
+                    'translated_text': ''
                 }
             
             full_stt_text = stt_result['text'].strip()
@@ -126,8 +130,7 @@ class TranslationPipeline:
                     'full_stt_text': full_stt_text,
                     'new_text': '',
                     'original_text': '',
-                    'translated_text': '',
-                    'translated_audio': b''
+                    'translated_text': ''
                 }
             
             logger.info(f"[CONTEXT] New text extracted: {new_text}")
@@ -153,47 +156,27 @@ class TranslationPipeline:
                     'full_stt_text': full_stt_text,
                     'new_text': new_text,
                     'original_text': new_text,
-                    'translated_text': '',
-                    'translated_audio': b''
+                    'translated_text': ''
                 }
             
             logger.info(f"[CONTEXT] Translation result: {translated_text}")
             
-            # Limit translated text to prevent TTS issues
+            # Limit translated text to prevent TTS issues (caller will handle)
             translated_words = translated_text.split()
             if len(translated_words) > 25:
                 translated_text = ' '.join(translated_words[:25])
                 logger.warning(f"Translation truncated from {len(translated_words)} to 25 words")
             
-            # Step 4: Text-to-Speech (only on NEW translated text)
-            start_tts = asyncio.get_event_loop().time()
-            audio_output = await self._text_to_speech(translated_text)
-            end_tts = asyncio.get_event_loop().time()
-            logger.info(f"[CONTEXT] TTS processing time: {end_tts - start_tts:.3f} s")
-
-            if not audio_output:
-                return {
-                    'success': False,
-                    'message': 'TTS failed',
-                    'full_stt_text': full_stt_text,
-                    'new_text': new_text,
-                    'original_text': new_text,
-                    'translated_text': translated_text,
-                    'translated_audio': b''
-                }
-            
-            logger.info(f"[CONTEXT] TTS completed: {len(audio_output)} bytes")
             end_all = asyncio.get_event_loop().time()
-            logger.info(f"[CONTEXT] Total processing time: {end_all - start_all:.3f} s")
+            logger.info(f"[CONTEXT] Total processing time (STT+Translation): {end_all - start_all:.3f} s")
 
             return {
                 'success': True,
                 'message': 'Context-aware translation completed',
-                'full_stt_text': full_stt_text,    # For next iteration
+                'full_stt_text': full_stt_text,    # For next iteration's overlap detection
                 'new_text': new_text,               # What we actually processed
                 'original_text': new_text,          # For compatibility
-                'translated_text': translated_text,
-                'translated_audio': audio_output
+                'translated_text': translated_text  # FULL translated text (caller extracts new)
             }
             
         except Exception as e:
@@ -206,19 +189,21 @@ class TranslationPipeline:
                 'full_stt_text': '',
                 'new_text': '',
                 'original_text': '',
-                'translated_text': '',
-                'translated_audio': b''
+                'translated_text': ''
             }
+
 
     def _extract_new_text(self, current_text: str, previous_text: str) -> str:
         """
         Smart text extraction: Extract only NEW portion from current_text.
         
+        FIXED: Proper overlap detection without cutting words
+        
         Strategy:
         1. If no previous text → return all current text
-        2. If current starts with previous → return remainder
-        3. Use fuzzy matching to find overlap
-        4. Extract only the non-overlapping portion
+        2. Character-level exact prefix match (most accurate)
+        3. Find previous text as substring and extract remainder
+        4. Fuzzy matching as fallback
         
         Args:
             current_text: Full STT result from concatenated audio
@@ -239,17 +224,37 @@ class TranslationPipeline:
         current = current_text.strip()
         previous = previous_text.strip()
         
-        # Strategy 1: Exact prefix match
-        if current.startswith(previous):
+        # Check for exact duplicate
+        if current.lower() == previous.lower():
+            logger.info("[TEXT-EXTRACT] Exact duplicate detected, no new text")
+            return ""
+        
+        # Strategy 1: CHARACTER-LEVEL exact prefix match (most accurate)
+        if current.lower().startswith(previous.lower()):
             new_text = current[len(previous):].strip()
             logger.info(f"[TEXT-EXTRACT] Exact prefix match, extracted: '{new_text}'")
             return new_text
         
-        # Strategy 2: Word-level matching
+        # Strategy 2: Find previous text as SUBSTRING in current
+        # This handles cases where Whisper slightly modifies the beginning
+        prev_lower = previous.lower()
+        curr_lower = current.lower()
+        
+        # Try to find where previous text ends in current text
+        if prev_lower in curr_lower:
+            # Find the position where previous text ends
+            prev_end_pos = curr_lower.find(prev_lower) + len(prev_lower)
+            new_text = current[prev_end_pos:].strip()
+            logger.info(f"[TEXT-EXTRACT] Substring match, extracted: '{new_text}'")
+            return new_text
+        
+        # Strategy 3: Fuzzy word-level matching (for Whisper variations)
+        # Example: Previous "người dân..." → Current "người dân phát hiện..."
+        # Find longest matching word sequence from START
         current_words = current.split()
         previous_words = previous.split()
         
-        # Find longest common prefix at word level
+        # Match from beginning to find overlap
         common_prefix_length = 0
         for i in range(min(len(current_words), len(previous_words))):
             if current_words[i].lower() == previous_words[i].lower():
@@ -257,45 +262,60 @@ class TranslationPipeline:
             else:
                 break
         
-        if common_prefix_length > 0:
+        # Only use word-level if we have significant overlap (at least 50% of previous)
+        min_overlap_words = max(2, len(previous_words) // 2)
+        
+        if common_prefix_length >= min_overlap_words:
+            # Extract from AFTER the common prefix
             new_words = current_words[common_prefix_length:]
             new_text = ' '.join(new_words)
-            logger.info(
-                f"[TEXT-EXTRACT] Word-level prefix match: "
-                f"{common_prefix_length} words, extracted: '{new_text}'"
-            )
-            return new_text
+            
+            if new_text.strip():
+                logger.info(
+                    f"[TEXT-EXTRACT] Word-level prefix match: "
+                    f"{common_prefix_length}/{len(previous_words)} words matched, "
+                    f"extracted: '{new_text}'"
+                )
+                return new_text
+            else:
+                # All words matched, no new text
+                logger.info("[TEXT-EXTRACT] Complete word match, no new text")
+                return ""
         
-        # Strategy 3: Fuzzy substring matching
-        # Find where previous text ends in current text
-        matcher = difflib.SequenceMatcher(None, previous.lower(), current.lower())
-        match = matcher.find_longest_match(0, len(previous), 0, len(current))
+        # Strategy 4: Fuzzy character-level matching (most permissive)
+        matcher = difflib.SequenceMatcher(None, prev_lower, curr_lower)
+        match = matcher.find_longest_match(0, len(prev_lower), 0, len(curr_lower))
         
-        if match.size > len(previous) * 0.7:  # At least 70% overlap
+        # At least 70% of previous text should match
+        if match.size > len(prev_lower) * 0.7:
             # Find end position in current text
             overlap_end = match.b + match.size
             new_text = current[overlap_end:].strip()
-            logger.info(
-                f"[TEXT-EXTRACT] Fuzzy match: {match.size} chars overlap, "
-                f"extracted: '{new_text}'"
+            
+            if new_text:
+                logger.info(
+                    f"[TEXT-EXTRACT] Fuzzy match: {match.size}/{len(prev_lower)} chars overlap, "
+                    f"extracted: '{new_text}'"
+                )
+                return new_text
+        
+        # Strategy 5: No clear overlap - check similarity
+        similarity = difflib.SequenceMatcher(None, prev_lower, curr_lower).ratio()
+        
+        if similarity > 0.8:
+            # Very similar but no clear overlap → likely Whisper variation
+            # Return all current text but warn
+            logger.warning(
+                f"[TEXT-EXTRACT] High similarity ({similarity:.2f}) but no clear overlap, "
+                f"returning full current text"
             )
-            return new_text
+        else:
+            # Low similarity → completely different audio
+            logger.info(
+                f"[TEXT-EXTRACT] Low similarity ({similarity:.2f}), "
+                f"returning full current text (likely new audio)"
+            )
         
-        # Strategy 4: Check if previous is contained anywhere in current
-        if previous.lower() in current.lower():
-            # Find position and take everything after
-            pos = current.lower().find(previous.lower())
-            new_text = current[pos + len(previous):].strip()
-            logger.info(f"[TEXT-EXTRACT] Substring found, extracted: '{new_text}'")
-            return new_text
-        
-        # No significant overlap found → return all current text
-        # But warn about this case
-        similarity = difflib.SequenceMatcher(None, previous.lower(), current.lower()).ratio()
-        logger.warning(
-            f"[TEXT-EXTRACT] No clear overlap found (similarity: {similarity:.2f}), "
-            f"returning full current text"
-        )
         return current
 
     async def _translate_text(self, text: str) -> Optional[str]:
@@ -387,6 +407,29 @@ class TranslationPipeline:
                 logger.info(f"Cleaned up voice data for {self.user_id}_{self.room_id}")
             except Exception as e:
                 logger.error(f"Error cleaning up voice data: {e}")
+    
+    async def text_to_speech_only(self, text: str) -> Optional[bytes]:
+        """
+        TTS-only method for incremental translation.
+        
+        Used when we already have the translated text and just need to synthesize audio.
+        This avoids re-doing STT and translation for overlapping portions.
+        
+        Args:
+            text: Translated text to synthesize
+            
+        Returns:
+            Audio bytes (WAV format) or None if failed
+        """
+        if not text or not text.strip():
+            return None
+            
+        try:
+            audio = await self._text_to_speech(text)
+            return audio
+        except Exception as e:
+            logger.error(f"TTS-only failed: {e}")
+            return None
     
     def cleanup(self) -> None:
         """Cleanup pipeline resources"""

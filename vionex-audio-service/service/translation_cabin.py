@@ -400,6 +400,7 @@ class TranslationCabin:
     context_buffer: deque = field(default_factory=lambda: deque(maxlen=3))  # Keep last 3 chunks
     context_chunk_counter: int = 0  # Counter for chunk IDs
     last_stt_result: str = ""  # Last STT result for duplicate detection
+    last_translated_text: str = ""  # Last translated text to track what was already TTS'd
 
 
 class TranslationCabinManager:
@@ -892,23 +893,50 @@ class TranslationCabinManager:
             processing_time = time.time() - start_time
             
             # Step 6: Extract new text and enqueue translated audio
-            if result['success'] and result.get('translated_audio'):
+            if result['success']:
                 # Update last STT result for next iteration
                 if result.get('full_stt_text'):
                     cabin.last_stt_result = result['full_stt_text']
                 
-                # Get only the NEW portion of text
-                new_text = result.get('new_text', result.get('translated_text', ''))
+                # Get the full translated text
+                full_translated_text = result.get('translated_text', '')
                 
-                if not new_text or not new_text.strip():
+                if not full_translated_text or not full_translated_text.strip():
                     logger.info(
-                        f"[CONTEXT-WINDOW-{latest_chunk_id}] No new text detected "
-                        f"(overlap with previous), skipping translation"
+                        f"[CONTEXT-WINDOW-{latest_chunk_id}] No translation result, skipping"
                     )
                     cabin.status = CabinStatus.LISTENING
                     return
                 
-                translated_audio = result['translated_audio']
+                # CRITICAL FIX: Extract ONLY the portion NOT YET TTS'd
+                # Compare with last_translated_text to find new portion
+                text_to_tts = self._extract_new_translated_text(
+                    full_translated_text, 
+                    cabin.last_translated_text
+                )
+                
+                if not text_to_tts or not text_to_tts.strip():
+                    logger.info(
+                        f"[CONTEXT-WINDOW-{latest_chunk_id}] No new translated text "
+                        f"(already TTS'd), skipping audio generation"
+                    )
+                    cabin.status = CabinStatus.LISTENING
+                    return
+                
+                # TTS ONLY the new portion
+                logger.info(
+                    f"[CONTEXT-WINDOW-{latest_chunk_id}] TTS'ing new portion: '{text_to_tts[:50]}...'"
+                )
+                
+                translated_audio = await pipeline.text_to_speech_only(text_to_tts)
+                
+                if not translated_audio:
+                    logger.warning(f"[CONTEXT-WINDOW-{latest_chunk_id}] TTS failed for new text")
+                    cabin.status = CabinStatus.LISTENING
+                    return
+                
+                # Update last translated text
+                cabin.last_translated_text = full_translated_text
                 
                 # Calculate audio duration
                 audio_duration = self._calculate_audio_duration(translated_audio)
@@ -927,7 +955,7 @@ class TranslationCabinManager:
                 if success:
                     logger.info(
                         f"[CONTEXT-WINDOW-{latest_chunk_id}] Processed in {processing_time:.2f}s, "
-                        f"new text: '{new_text[:50]}...', "
+                        f"new TTS text: '{text_to_tts[:50]}...', "
                         f"audio duration: {audio_duration:.2f}s, "
                         f"queue size: {cabin.playback_queue._queue.qsize()}"
                     )
@@ -975,6 +1003,102 @@ class TranslationCabinManager:
             logger.error(f"[AUDIO-DURATION] Error calculating duration: {e}")
             # Fallback: estimate 2s
             return 2.0
+
+    def _extract_new_translated_text(self, current_text: str, previous_text: str) -> str:
+        """
+        Extract ONLY the new portion from current_text that hasn't been TTS'd yet.
+        
+        Uses same multi-strategy approach as STT overlap detection.
+        
+        Args:
+            current_text: Full translated text from current context window
+            previous_text: Previously TTS'd translated text
+            
+        Returns:
+            New portion of text to TTS, or empty string if no new text
+        """
+        if not current_text:
+            return ""
+        
+        if not previous_text:
+            # First translation, return all
+            return current_text
+        
+        # Normalize text for comparison
+        curr_norm = current_text.strip()
+        prev_norm = previous_text.strip()
+        
+        if curr_norm == prev_norm:
+            # Exact duplicate
+            return ""
+        
+        # Strategy 1: Character-level exact prefix matching (most accurate)
+        if curr_norm.startswith(prev_norm):
+            new_text = curr_norm[len(prev_norm):].strip()
+            if new_text:
+                logger.debug(f"[TTS-OVERLAP] Character-level prefix match, new: '{new_text[:30]}...'")
+                return new_text
+        
+        # Strategy 2: Find previous as substring (handles minor variations)
+        prev_idx = curr_norm.find(prev_norm)
+        if prev_idx != -1:
+            new_text = curr_norm[prev_idx + len(prev_norm):].strip()
+            if new_text:
+                logger.debug(f"[TTS-OVERLAP] Substring match at {prev_idx}, new: '{new_text[:30]}...'")
+                return new_text
+        
+        # Strategy 3: Word-level matching with threshold
+        curr_words = curr_norm.split()
+        prev_words = prev_norm.split()
+        
+        # Find longest common prefix in words
+        common_prefix_len = 0
+        for i, (cw, pw) in enumerate(zip(curr_words, prev_words)):
+            if cw.lower() == pw.lower():
+                common_prefix_len = i + 1
+            else:
+                break
+        
+        # If >50% words match as prefix, extract remaining
+        if common_prefix_len > 0 and common_prefix_len >= len(prev_words) * 0.5:
+            new_words = curr_words[common_prefix_len:]
+            new_text = ' '.join(new_words).strip()
+            if new_text:
+                logger.debug(
+                    f"[TTS-OVERLAP] Word-level match ({common_prefix_len}/{len(prev_words)} words), "
+                    f"new: '{new_text[:30]}...'"
+                )
+                return new_text
+        
+        # Strategy 4: Fuzzy matching (last resort)
+        try:
+            from difflib import SequenceMatcher
+            ratio = SequenceMatcher(None, prev_norm, curr_norm).ratio()
+            
+            if ratio > 0.7:
+                # High similarity but no clean match → likely minor variation
+                # Find common suffix and extract remainder
+                matcher = SequenceMatcher(None, prev_norm, curr_norm)
+                match = matcher.find_longest_match(0, len(prev_norm), 0, len(curr_norm))
+                
+                if match.size > 0:
+                    # Extract text after longest match
+                    new_text = curr_norm[match.b + match.size:].strip()
+                    if new_text:
+                        logger.debug(
+                            f"[TTS-OVERLAP] Fuzzy match (ratio={ratio:.2f}), new: '{new_text[:30]}...'"
+                        )
+                        return new_text
+        except Exception as e:
+            logger.warning(f"[TTS-OVERLAP] Fuzzy matching failed: {e}")
+        
+        # No overlap detected → treat as completely new text
+        logger.warning(
+            f"[TTS-OVERLAP] No overlap detected between previous and current, "
+            f"treating as new text. Prev: '{prev_norm[:30]}...', Curr: '{curr_norm[:30]}...'"
+        )
+        return current_text
+
 
     def _send_rtp_chunks_to_sfu(self, cabin: TranslationCabin, audio_data: bytes) -> bool:
         """
