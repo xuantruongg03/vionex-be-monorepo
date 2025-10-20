@@ -67,7 +67,7 @@ class TranslationPipeline:
         
         logger.info(f"Translation pipeline: {source_language} → {target_language}")
 
-    async def process_audio_block(self, audio_data: bytes) -> Optional[bytes]:
+    async def process_audio_block(self, audio_data: bytes) -> Dict[str, Any]:
         """
         NEW: Hybrid Window Processing
         
@@ -79,7 +79,9 @@ class TranslationPipeline:
             audio_data: The audio data for the block.
             
         Returns:
-            Synthesized audio bytes (WAV) or None if any step fails.
+            A dictionary containing the result of the processing.
+            - On success: {'success': True, 'translated_audio': bytes, 'translated_text': str}
+            - On failure: {'success': False, 'message': str}
         """
         try:
             start_time = asyncio.get_event_loop().time()
@@ -89,7 +91,7 @@ class TranslationPipeline:
             stt_result = await self.stt.speech_to_text(audio_data)
             if not stt_result or not stt_result.get('text'):
                 logger.info("[HYBRID-PIPELINE] STT returned no text.")
-                return None
+                return {'success': False, 'message': 'STT returned no text'}
             
             stt_text = stt_result['text'].strip()
             logger.info(f"[HYBRID-PIPELINE] STT Result: '{stt_text}'")
@@ -106,7 +108,7 @@ class TranslationPipeline:
             translated_text = await self._translate_text(stt_text)
             if not translated_text:
                 logger.warning(f"[HYBRID-PIPELINE] Translation failed for text: '{stt_text}'")
-                return None
+                return {'success': False, 'message': 'Translation failed'}
             
             logger.info(f"[HYBRID-PIPELINE] Translation Result: '{translated_text}'")
 
@@ -114,7 +116,7 @@ class TranslationPipeline:
             tts_audio = await self._text_to_speech(translated_text)
             if not tts_audio:
                 logger.error(f"[HYBRID-PIPELINE] TTS failed for text: '{translated_text}'")
-                return None
+                return {'success': False, 'message': 'TTS failed'}
 
             end_time = asyncio.get_event_loop().time()
             logger.info(
@@ -122,13 +124,17 @@ class TranslationPipeline:
                 f"Returning {len(tts_audio)} bytes of audio."
             )
             
-            return tts_audio
+            return {
+                'success': True,
+                'translated_audio': tts_audio,
+                'translated_text': translated_text
+            }
 
         except Exception as e:
             logger.error(f"[HYBRID-PIPELINE] Error in processing block: {e}")
             import traceback
             logger.error(f"[HYBRID-PIPELINE] Traceback: {traceback.format_exc()}")
-            return None
+            return {'success': False, 'message': f'Error in processing block: {e}'}
 
     # async def process_audio_with_context(self, audio_data: bytes, previous_text: str = "") -> Dict[str, Any]:
     #     """
