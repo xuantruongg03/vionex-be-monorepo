@@ -397,10 +397,15 @@ class TranslationCabin:
     _event_loop: Optional[asyncio.AbstractEventLoop] = None
     
     # CONTEXT WINDOW (Option 2): Store recent chunks for concatenation
-    context_buffer: deque = field(default_factory=lambda: deque(maxlen=3))  # Keep last 3 chunks
+    # DEPRECATED by Hybrid Window
+    # context_buffer: deque = field(default_factory=lambda: deque(maxlen=3)))
     context_chunk_counter: int = 0  # Counter for chunk IDs
-    last_stt_result: str = ""  # Last STT result for duplicate detection
-    last_translated_text: str = ""  # Last translated text to track what was already TTS'd
+    # last_stt_result: str = ""  # Last STT result for duplicate detection
+    # last_translated_text: str = ""  # Last translated text to track what was already TTS'd
+    
+    # HYBRID WINDOW: New state for smart windowing
+    _is_new_speech_segment: bool = True
+    _processing_buffer: List[ContextChunk] = field(default_factory=list)
 
 
 class TranslationCabinManager:
@@ -620,11 +625,11 @@ class TranslationCabinManager:
             # Cleanup intermediate data immediately
             del pcm_48k_stereo
 
-            # CONTEXT WINDOW: Add to sliding buffer and create ContextChunk when ready
+            # HYBRID WINDOW: New logic for smart, non-overlapping windowing
             complete_chunk = cabin.audio_buffer.add_audio_chunk(pcm_16k_mono)
             if complete_chunk:
                 # Calculate chunk duration
-                chunk_duration = len(complete_chunk) / (16000 * 2)  # 16kHz, 2 bytes per sample
+                chunk_duration = len(complete_chunk) / (16000 * 2)
                 
                 # Create ContextChunk object
                 cabin.context_chunk_counter += 1
@@ -635,43 +640,50 @@ class TranslationCabinManager:
                     duration=chunk_duration
                 )
                 
-                # Add to context buffer (auto-limits to last 3 chunks)
-                cabin.context_buffer.append(context_chunk)
-                
-                logger.info(
-                    f"[CONTEXT-BUFFER] Added chunk {context_chunk.chunk_id}, "
-                    f"buffer size: {len(cabin.context_buffer)}, "
-                    f"total duration: {sum(c.duration for c in cabin.context_buffer):.2f}s"
-                )
-                
-                # SAVE INDIVIDUAL CHUNK for debugging (before concatenation)
+                # SAVE INDIVIDUAL CHUNK for debugging
                 if cabin.audio_recorder:
                     cabin.audio_recorder.write_audio(complete_chunk)
                 
-                # Enqueue for processing only if we have enough context (at least 2 chunks)
-                if len(cabin.context_buffer) >= 2:
+                # --- HYBRID WINDOW LOGIC ---
+                # 1. If it's a new speech segment, process the first chunk immediately
+                if cabin._is_new_speech_segment:
+                    logger.info(f"[HYBRID-WINDOW] Fast-tracking first chunk {context_chunk.chunk_id} for low latency.")
+                    processing_task = {
+                        'context_chunks': [context_chunk],
+                        'latest_chunk_id': context_chunk.chunk_id
+                    }
                     try:
-                        # Create processing task with current context buffer state
-                        processing_task = {
-                            'context_chunks': list(cabin.context_buffer),  # Copy current buffer
-                            'latest_chunk_id': context_chunk.chunk_id
-                        }
                         cabin.chunk_queue.put_nowait(processing_task)
                     except queue.Full:
-                        # Drop oldest by getting once and pushing again
-                        try:
-                            _ = cabin.chunk_queue.get_nowait()
-                        except Exception:
-                            pass
+                        logger.warning("[HYBRID-WINDOW] Chunk queue full, dropping fast-track chunk.")
+                    
+                    cabin._is_new_speech_segment = False # Subsequent chunks will be buffered
+                    cabin._processing_buffer = [] # Clear buffer for next block
+                    
+                # 2. Otherwise, buffer subsequent chunks
+                else:
+                    cabin._processing_buffer.append(context_chunk)
+                    logger.debug(
+                        f"[HYBRID-WINDOW] Buffering chunk {context_chunk.chunk_id}. "
+                        f"Buffer size: {len(cabin._processing_buffer)}/2"
+                    )
+                    
+                    # 3. If buffer is full (2 chunks), process the block
+                    if len(cabin._processing_buffer) >= 2:
+                        logger.info(
+                            f"[HYBRID-WINDOW] Processing buffered block of {len(cabin._processing_buffer)} chunks."
+                        )
+                        processing_task = {
+                            'context_chunks': list(cabin._processing_buffer),
+                            'latest_chunk_id': context_chunk.chunk_id
+                        }
                         try:
                             cabin.chunk_queue.put_nowait(processing_task)
-                        except Exception:
-                            pass
-                else:
-                    logger.debug(
-                        f"[CONTEXT-BUFFER] Waiting for more chunks "
-                        f"(have {len(cabin.context_buffer)}, need 2)"
-                    )
+                        except queue.Full:
+                            logger.warning("[HYBRID-WINDOW] Chunk queue full, dropping buffered block.")
+                        
+                        # Reset buffer for the next block
+                        cabin._processing_buffer = []
             
         except Exception as e:
             logger.error(f"[AUDIO-CALLBACK] Error processing RTP packet for {cabin.cabin_id}: {e}")
@@ -854,28 +866,30 @@ class TranslationCabinManager:
             latest_chunk_id = processing_task.get('latest_chunk_id', 0)
             
             if not context_chunks:
-                logger.warning(f"[CONTEXT-WINDOW] No context chunks provided")
+                logger.warning(f"[HYBRID-WINDOW] No chunks provided to process.")
                 return
             
-            # Step 1: Concatenate audio chunks to provide context
+            # Step 1: Concatenate audio chunks from the block
             concatenated_audio = b''.join([chunk.audio_data for chunk in context_chunks])
             total_duration = sum(chunk.duration for chunk in context_chunks)
             
             logger.info(
-                f"[CONTEXT-WINDOW-{latest_chunk_id}] Processing with context: "
+                f"[HYBRID-WINDOW-{latest_chunk_id}] Processing block: "
                 f"{len(context_chunks)} chunks, total {total_duration:.2f}s"
             )
             
-            # Step 2: VAD speech detection on concatenated audio
+            # Step 2: VAD speech detection on the block
             has_speech = cabin.vad.detect_speech(concatenated_audio)
             
             if not has_speech:
-                logger.debug(f"[CONTEXT-WINDOW-{latest_chunk_id}] No speech detected in context, skipping")
+                # If no speech in a block, reset to fast-track the next speech segment
+                logger.debug(f"[HYBRID-WINDOW-{latest_chunk_id}] No speech detected, resetting to fast-track mode.")
+                cabin._is_new_speech_segment = True
                 return
             
             # Step 3: Speech detected → process through translation pipeline
             cabin.status = CabinStatus.TRANSLATING
-            logger.info(f"[CONTEXT-WINDOW-{latest_chunk_id}] Speech detected, processing with context...")
+            logger.info(f"[HYBRID-WINDOW-{latest_chunk_id}] Speech detected, processing block...")
             
             # Get cached pipeline to avoid recreation overhead
             pipeline = self.get_or_create_pipeline(cabin)
@@ -883,81 +897,20 @@ class TranslationCabinManager:
             # Step 4: Convert concatenated PCM to WAV
             wav_data = AudioProcessingUtils.pcm_to_wav_bytes(concatenated_audio)
             
-            # Step 5: Process through pipeline WITH context
-            # Pipeline will handle overlap detection internally via STT
-            result = await pipeline.process_audio_with_context(
-                wav_data,
-                previous_text=cabin.last_stt_result  # Pass previous STT result for overlap detection
-            )
+            # Step 5: Process through pipeline (NO overlap detection needed anymore)
+            result = await pipeline.process_audio_block(wav_data)
             
             processing_time = time.time() - start_time
             
-            # Step 6: Extract new text and enqueue translated audio
-            if result['success']:
-                # Update last STT result for next iteration
-                if result.get('full_stt_text'):
-                    cabin.last_stt_result = result['full_stt_text']
-                
-                # Get the full translated text
-                full_translated_text = result.get('translated_text', '')
-                
-                if not full_translated_text or not full_translated_text.strip():
-                    logger.info(
-                        f"[CONTEXT-WINDOW-{latest_chunk_id}] No translation result, skipping"
-                    )
-                    cabin.status = CabinStatus.LISTENING
-                    return
-                
-                logger.info(
-                    f"[CONTEXT-WINDOW-{latest_chunk_id}] Full translated text: '{full_translated_text}'"
-                )
-                logger.info(
-                    f"[CONTEXT-WINDOW-{latest_chunk_id}] Last translated text: '{cabin.last_translated_text}'"
-                )
-                
-                # CRITICAL FIX: Extract ONLY the portion NOT YET TTS'd
-                # Compare with last_translated_text to find new portion
-                text_to_tts = self._extract_new_translated_text(
-                    full_translated_text, 
-                    cabin.last_translated_text
-                )
-                
-                if not text_to_tts or not text_to_tts.strip():
-                    logger.info(
-                        f"[CONTEXT-WINDOW-{latest_chunk_id}] No new translated text "
-                        f"(already TTS'd), skipping audio generation"
-                    )
-                    cabin.status = CabinStatus.LISTENING
-                    return
-                
-                # Limit NEW text to prevent TTS issues (max 25 words per chunk)
-                text_words = text_to_tts.split()
-                if len(text_words) > 25:
-                    text_to_tts = ' '.join(text_words[:25])
-                    logger.warning(
-                        f"[CONTEXT-WINDOW-{latest_chunk_id}] TTS text truncated from "
-                        f"{len(text_words)} to 25 words"
-                    )
-                
-                # TTS ONLY the new portion
-                logger.info(
-                    f"[CONTEXT-WINDOW-{latest_chunk_id}] TTS'ing new portion: '{text_to_tts[:50]}...'"
-                )
-                
-                translated_audio = await pipeline.text_to_speech_only(text_to_tts)
-                
-                if not translated_audio:
-                    logger.warning(f"[CONTEXT-WINDOW-{latest_chunk_id}] TTS failed for new text")
-                    cabin.status = CabinStatus.LISTENING
-                    return
-                
-                # Update last translated text
-                cabin.last_translated_text = full_translated_text
+            # Step 6: Enqueue the resulting translated audio
+            if result['success'] and result.get('translated_audio'):
+                translated_audio = result['translated_audio']
+                translated_text = result.get('translated_text', '')
                 
                 # Calculate audio duration
                 audio_duration = self._calculate_audio_duration(translated_audio)
                 
-                # Create AudioChunk object
+                # Create AudioChunk object for playback
                 audio_chunk_obj = AudioChunk(
                     data=translated_audio,
                     duration=audio_duration,
@@ -970,25 +923,25 @@ class TranslationCabinManager:
                 
                 if success:
                     logger.info(
-                        f"[CONTEXT-WINDOW-{latest_chunk_id}] Processed in {processing_time:.2f}s, "
-                        f"new TTS text: '{text_to_tts[:50]}...', "
+                        f"[HYBRID-WINDOW-{latest_chunk_id}] Processed in {processing_time:.2f}s, "
+                        f"text: '{translated_text[:50]}...', "
                         f"audio duration: {audio_duration:.2f}s, "
                         f"queue size: {cabin.playback_queue._queue.qsize()}"
                     )
                 else:
-                    logger.error(f"[CONTEXT-WINDOW-{latest_chunk_id}] Failed to enqueue to playback queue")
+                    logger.error(f"[HYBRID-WINDOW-{latest_chunk_id}] Failed to enqueue to playback queue")
             else:
                 error_msg = result.get('message', 'unknown')
-                logger.warning(f"[CONTEXT-WINDOW-{latest_chunk_id}] Translation failed: {error_msg}")
+                logger.warning(f"[HYBRID-WINDOW-{latest_chunk_id}] Translation failed: {error_msg}")
             
             cabin.status = CabinStatus.LISTENING
             
         except Exception as e:
             processing_time = time.time() - start_time
             cabin.status = CabinStatus.ERROR
-            logger.error(f"[CONTEXT-WINDOW-{latest_chunk_id}] Error processing in {processing_time:.2f}s: {e}")
+            logger.error(f"[HYBRID-WINDOW-{latest_chunk_id}] Error processing in {processing_time:.2f}s: {e}")
             import traceback
-            logger.error(f"[CONTEXT-WINDOW-{latest_chunk_id}] Traceback: {traceback.format_exc()}")
+            logger.error(f"[HYBRID-WINDOW-{latest_chunk_id}] Traceback: {traceback.format_exc()}")
             
             # Reset status for next chunk
             cabin.status = CabinStatus.LISTENING
