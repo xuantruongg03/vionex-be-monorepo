@@ -1091,27 +1091,60 @@ class TranslationCabinManager:
             from difflib import SequenceMatcher
             ratio = SequenceMatcher(None, prev_norm, curr_norm).ratio()
             
-            if ratio > 0.7:
-                # High similarity but no clean match → likely minor variation
-                # Find common suffix and extract remainder
-                matcher = SequenceMatcher(None, prev_norm, curr_norm)
-                match = matcher.find_longest_match(0, len(prev_norm), 0, len(curr_norm))
-                
-                if match.size > 0:
-                    # Extract text after longest match
-                    new_text = curr_norm[match.b + match.size:].strip()
-                    if new_text:
-                        logger.debug(
-                            f"[TTS-OVERLAP] Fuzzy match (ratio={ratio:.2f}), new: '{new_text[:30]}...'"
+            logger.debug(f"[TTS-OVERLAP] Similarity ratio: {ratio:.2f}")
+            
+            # CRITICAL: Check for duplicate content (same meaning, different wording)
+            if ratio > 0.6:  # 60% similarity → likely same content
+                if ratio >= 0.8:
+                    # Very high similarity → probably duplicate → SKIP
+                    logger.warning(
+                        f"[TTS-OVERLAP] HIGH similarity ({ratio:.2f}) detected - "
+                        f"likely duplicate content, SKIPPING TTS. "
+                        f"Prev: '{prev_norm[:50]}...', Curr: '{curr_norm[:50]}...'"
+                    )
+                    return ""  # Skip TTS for duplicate content
+                elif ratio >= 0.7:
+                    # High similarity → extract new portion if possible
+                    matcher = SequenceMatcher(None, prev_norm, curr_norm)
+                    match = matcher.find_longest_match(0, len(prev_norm), 0, len(curr_norm))
+                    
+                    if match.size > 0:
+                        # Extract text after longest match
+                        new_text = curr_norm[match.b + match.size:].strip()
+                        if new_text:
+                            logger.debug(
+                                f"[TTS-OVERLAP] Fuzzy match (ratio={ratio:.2f}), new: '{new_text[:30]}...'"
+                            )
+                            return new_text
+                    
+                    # No clear new portion but high similarity → skip
+                    logger.warning(
+                        f"[TTS-OVERLAP] HIGH similarity ({ratio:.2f}) but no clear new text, "
+                        f"SKIPPING to avoid duplicate. Prev: '{prev_norm[:50]}...', Curr: '{curr_norm[:50]}...'"
+                    )
+                    return ""
+                else:
+                    # Medium similarity (0.6-0.7) → might be variation of same content
+                    # Check word overlap
+                    prev_words_set = set(prev_norm.lower().split())
+                    curr_words_set = set(curr_norm.lower().split())
+                    common_words = prev_words_set & curr_words_set
+                    word_overlap_ratio = len(common_words) / max(len(prev_words_set), len(curr_words_set))
+                    
+                    if word_overlap_ratio > 0.6:
+                        logger.warning(
+                            f"[TTS-OVERLAP] MEDIUM similarity ({ratio:.2f}) with high word overlap "
+                            f"({word_overlap_ratio:.2f}) - likely same content rephrased, SKIPPING. "
+                            f"Prev: '{prev_norm[:50]}...', Curr: '{curr_norm[:50]}...'"
                         )
-                        return new_text
+                        return ""  # Skip duplicate content
         except Exception as e:
             logger.warning(f"[TTS-OVERLAP] Fuzzy matching failed: {e}")
         
-        # No overlap detected → treat as completely new text
-        logger.warning(
-            f"[TTS-OVERLAP] No overlap detected between previous and current, "
-            f"treating as new text. Prev: '{prev_norm[:30]}...', Curr: '{curr_norm[:30]}...'"
+        # Low similarity → treat as completely new text
+        logger.info(
+            f"[TTS-OVERLAP] LOW similarity detected, treating as new text. "
+            f"Prev: '{prev_norm[:50]}...', Curr: '{curr_norm[:50]}...'"
         )
         return current_text
 
