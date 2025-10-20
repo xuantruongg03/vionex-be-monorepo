@@ -143,9 +143,10 @@ class TranslationPipeline:
                 except Exception as e:
                     logger.warning(f"Voice collection failed: {e}")
             
-            # Step 3: Translation (only on NEW text)
+            # Step 3: Translation - CRITICAL: Translate FULL text to preserve context!
+            # We extract NEW portion later at TTS level
             start_translation = asyncio.get_event_loop().time()
-            translated_text = await self._translate_text(new_text)
+            translated_text = await self._translate_text(full_stt_text)  # ✅ Translate FULL text
             end_translation = asyncio.get_event_loop().time()
             logger.info(f"[CONTEXT] Translation processing time: {end_translation - start_translation:.3f} s")
             
@@ -161,11 +162,8 @@ class TranslationPipeline:
             
             logger.info(f"[CONTEXT] Translation result: {translated_text}")
             
-            # Limit translated text to prevent TTS issues (caller will handle)
-            translated_words = translated_text.split()
-            if len(translated_words) > 25:
-                translated_text = ' '.join(translated_words[:25])
-                logger.warning(f"Translation truncated from {len(translated_words)} to 25 words")
+            # NOTE: Do NOT truncate here! We need full text for overlap detection
+            # Truncation (if needed) should happen at TTS level after extracting new portion
             
             end_all = asyncio.get_event_loop().time()
             logger.info(f"[CONTEXT] Total processing time (STT+Translation): {end_all - start_all:.3f} s")

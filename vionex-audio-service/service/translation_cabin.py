@@ -908,6 +908,13 @@ class TranslationCabinManager:
                     cabin.status = CabinStatus.LISTENING
                     return
                 
+                logger.info(
+                    f"[CONTEXT-WINDOW-{latest_chunk_id}] Full translated text: '{full_translated_text}'"
+                )
+                logger.info(
+                    f"[CONTEXT-WINDOW-{latest_chunk_id}] Last translated text: '{cabin.last_translated_text}'"
+                )
+                
                 # CRITICAL FIX: Extract ONLY the portion NOT YET TTS'd
                 # Compare with last_translated_text to find new portion
                 text_to_tts = self._extract_new_translated_text(
@@ -922,6 +929,15 @@ class TranslationCabinManager:
                     )
                     cabin.status = CabinStatus.LISTENING
                     return
+                
+                # Limit NEW text to prevent TTS issues (max 25 words per chunk)
+                text_words = text_to_tts.split()
+                if len(text_words) > 25:
+                    text_to_tts = ' '.join(text_words[:25])
+                    logger.warning(
+                        f"[CONTEXT-WINDOW-{latest_chunk_id}] TTS text truncated from "
+                        f"{len(text_words)} to 25 words"
+                    )
                 
                 # TTS ONLY the new portion
                 logger.info(
