@@ -1,21 +1,19 @@
 import asyncio
-import difflib
+import io
 import logging
-import numpy as np
-import subprocess
-import wave
 import os
-import datetime
+import wave
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
+import numpy as np
+
 from core.model import distil_whisper_model, whisper_model
-from service.utils.audio_logger import save_audio_chunk
 
 logger = logging.getLogger(__name__)
 
 class STTPipeline:
     def __init__(self, source_language: str = "vi", enable_audio_logging: bool = False):
-        self.prev_text = ""
         self.source_language = source_language
         self.enable_audio_logging = enable_audio_logging
         
@@ -37,53 +35,6 @@ class STTPipeline:
             
             logger.info(f"Audio logging enabled: {self.audio_log_dir}")
 
-    def remove_overlap(self, curr: str, prev: str, min_words=2) -> str:
-        """Improved overlap removal for Vietnamese speech"""
-        
-        if not curr or not prev:
-            return curr
-            
-        curr_words = curr.strip().split()
-        prev_words = prev.strip().split()
-
-        if not curr_words or not prev_words:
-            return curr
-
-        # Check for exact duplicate (same chunk processed twice)
-        if curr.strip() == prev.strip():
-            logger.warning("Duplicate chunk detected, skipping")
-            return ""  # Return empty for exact duplicates
-        
-        # Check similarity to detect near-duplicates
-        similarity = difflib.SequenceMatcher(None, curr.lower(), prev.lower()).ratio()
-        if similarity > 0.8:  # 80% similar
-            logger.warning(f"High similarity ({similarity:.2f}) detected, likely duplicate")
-            return ""  # Skip near-duplicates
-        
-        # Check for word-level overlap at boundaries
-        max_check = min(len(prev_words), len(curr_words), 6)  # Check up to 6 words
-        best_overlap = 0
-        
-        # Check if end of prev matches start of curr
-        for i in range(1, max_check + 1):
-            if prev_words[-i:] == curr_words[:i]:
-                best_overlap = i
-        
-        if best_overlap >= min_words:
-            logger.debug(f"Removing {best_overlap} overlapping words")
-            return ' '.join(curr_words[best_overlap:])
-        
-        return curr
-
-    def limit_words(self, text: str, max_words: int = 20) -> str:
-        """Limit text to maximum number of words"""
-        words = text.strip().split()
-        if len(words) > max_words:
-            limited_text = ' '.join(words[:max_words])
-            logger.warning(f"Text truncated from {len(words)} to {max_words} words")
-            return limited_text
-        return text
-
     def _setup_audio_logger(self, log_file: str):
         """Setup dedicated logger for audio processing results"""
         audio_logger = logging.getLogger(f"audio_stt_{id(self)}")
@@ -101,67 +52,6 @@ class STTPipeline:
             audio_logger.propagate = False
         
         return audio_logger
-
-    def _save_audio_wav(self, audio_data: bytes, filename: str) -> str:
-        """Save PCM audio data as WAV file using centralized audio_logger"""
-        try:
-            filepath = os.path.join(self.audio_log_dir, filename)
-            
-            # Calculate audio duration for metadata
-            audio_array = np.frombuffer(audio_data, dtype=np.int16)
-            duration = len(audio_array) / 16000  # 16kHz sample rate
-            
-            # Use save_audio_chunk utility
-            metadata = {
-                "module": "STT",
-                "duration_seconds": f"{duration:.2f}",
-                "sample_rate": 16000,
-                "channels": 1,
-                "description": "Audio chunk for speech-to-text processing"
-            }
-            
-            save_audio_chunk(
-                audio_data=audio_data,
-                filename=filepath,
-                sample_rate=16000,
-                channels=1,
-                metadata=metadata
-            )
-            
-            return filepath
-            
-        except Exception as e:
-            logger.error(f"Failed to save audio WAV: {e}")
-            return None
-
-    def _log_stt_result(self, audio_file: str, stt_text: str, processing_time: float, 
-                       audio_duration: float, confidence: float = None):
-        """Log STT processing result"""
-        if not self.enable_audio_logging:
-            return
-            
-        try:
-            log_entry = (
-                f"FILE: {os.path.basename(audio_file)} | "
-                f"DURATION: {audio_duration:.2f}s | "
-                f"PROCESSING: {processing_time:.3f}s | "
-                f"CONFIDENCE: {confidence or 'N/A'} | "
-                f"STT_RESULT: {stt_text}"
-            )
-            
-            self.audio_logger.info(log_entry)
-            
-        except Exception as e:
-            logger.warning(f"Failed to log STT result: {e}")
-
-    def reset_context(self):
-        """Reset context to prevent pollution"""
-        self.prev_text = ""
-        logger.debug("STT context reset")
-        
-        # Log context reset
-        if self.enable_audio_logging:
-            self.audio_logger.info("CONTEXT_RESET | STT context cleared")
     
     def get_audio_log_stats(self) -> Dict[str, Any]:
         """Get statistics about audio logging"""
@@ -196,14 +86,14 @@ class STTPipeline:
             return {"cleaned_files": 0, "error": "Audio logging not enabled"}
             
         try:
-            cutoff_time = datetime.datetime.now() - datetime.timedelta(days=days_to_keep)
+            cutoff_time = datetime.now() - timedelta(days=days_to_keep)
             cleaned_count = 0
             
             for filename in os.listdir(self.audio_log_dir):
                 filepath = os.path.join(self.audio_log_dir, filename)
                 
                 if os.path.isfile(filepath):
-                    file_time = datetime.datetime.fromtimestamp(os.path.getctime(filepath))
+                    file_time = datetime.fromtimestamp(os.path.getctime(filepath))
                     
                     if file_time < cutoff_time:
                         os.remove(filepath)
@@ -220,68 +110,59 @@ class STTPipeline:
             return {"cleaned_files": 0, "error": str(e)}
 
     async def speech_to_text(self, audio_data: bytes) -> Optional[Dict[str, Any]]:
-        start_time = datetime.datetime.now()
-        audio_file_path = None
+        start_time = datetime.now()
         
         try:
             if not whisper_model:
                 logger.warning("Whisper model not available")
                 return None
 
-            # Calculate audio duration
-            audio_duration = len(audio_data) / (16000 * 2)  # 16kHz, 16-bit
-            
-            # Save audio file for logging if enabled
-            if self.enable_audio_logging:
-                timestamp = start_time.strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Include milliseconds
-                audio_filename = f"stt_{timestamp}_{audio_duration:.2f}s.wav"
-                audio_file_path = self._save_audio_wav(audio_data, audio_filename)
+            # Extract PCM from WAV if needed, then convert to float32
+            if audio_data.startswith(b'RIFF'):
+                # Input is WAV format - extract PCM data
+                import wave
+                import io
+                with wave.open(io.BytesIO(audio_data), 'rb') as wav_file:
+                    sample_rate = wav_file.getframerate()
+                    channels = wav_file.getnchannels()
+                    pcm_data = wav_file.readframes(wav_file.getnframes())
+                    
+                    # Validate format
+                    if sample_rate != 16000 or channels != 1:
+                        logger.warning(f"Unexpected WAV format: {sample_rate}Hz, {channels}ch (expected 16kHz mono)")
+                    
+                    # Calculate audio duration from PCM
+                    audio_duration = len(pcm_data) / (sample_rate * channels * 2)
+            else:
+                # Input is raw PCM16
+                pcm_data = audio_data
+                sample_rate = 16000
+                audio_duration = len(pcm_data) / (sample_rate * 2)
 
-            # audio_array = decode_audio_to_array(audio_data)
-            audio_array = pcm16_to_float32(audio_data)
+            # Convert PCM16 to Float32 for model (no file I/O - cabin already saved audio)
+            audio_array = pcm16_to_float32(pcm_data)
 
             # Use dynamic language or auto-detection
-            whisper_lang = self.whisper_lang_map.get(self.source_language, "vi")
+            whisper_lang = self.whisper_lang_map.get("vi")
+            # whisper_lang = self.whisper_lang_map.get(self.source_language, "vi")
             
             # Process with Whisper
-            process_start = datetime.datetime.now()
+            process_start = datetime.now()
+            # Use faster-whisper (full model) for better Vietnamese support
             result = await asyncio.get_event_loop().run_in_executor(
-                None, _transcribe, audio_array, whisper_lang
+                None, _transcribe_whisper, audio_array, whisper_lang
             )
-            processing_time = (datetime.datetime.now() - process_start).total_seconds()
+            processing_time = (datetime.now() - process_start).total_seconds()
 
-            original_text = ""
+            # Extract text from result
             final_text = ""
             confidence = None
 
             if result and result["text"]:
-                original_text = result["text"].strip()
+                final_text = result["text"].strip()
                 
-                # Remove overlap first
-                cleaned_text = self.remove_overlap(original_text, self.prev_text, min_words=3)
-                
-                # Limit to max 20 words
-                limited_text = self.limit_words(cleaned_text, max_words=20)
-                
-                # Check for excessive repetition (same word repeated > 5 times)
-                words = limited_text.split()
-                if len(words) > 5:
-                    # Count consecutive repetitions
-                    consecutive_count = 1
-                    for i in range(1, len(words)):
-                        if words[i] == words[i-1]:
-                            consecutive_count += 1
-                            if consecutive_count > 3:  # More than 3 consecutive same words
-                                logger.warning(f"Detected excessive repetition, truncating text")
-                                limited_text = ' '.join(words[:i-2])  # Keep only up to first repetition
-                                break
-                        else:
-                            consecutive_count = 1
-                
-                # Use sliding window context (keep only recent text)
-                self.prev_text = limited_text  # Replace instead of accumulate
-                result["text"] = limited_text  # Send cleaned text
-                final_text = limited_text
+                # Store raw text in result
+                result["raw_text"] = final_text
                 
                 # Extract confidence if available
                 if result.get('segments'):
@@ -293,52 +174,54 @@ class STTPipeline:
                     if confidences:
                         confidence = sum(confidences) / len(confidences)
 
-            # Log the result
-            if self.enable_audio_logging and audio_file_path:
+            # Log result to text log only (no file I/O - audio already saved by cabin)
+            if self.enable_audio_logging:
                 log_text = final_text if final_text else "[NO_SPEECH_DETECTED]"
-                if original_text != final_text and original_text:
-                    log_text += f" (original: {original_text})"
-                    
-                self._log_stt_result(
-                    audio_file_path, 
-                    log_text, 
-                    processing_time, 
-                    audio_duration, 
-                    confidence
-                )
+                
+                # Log to text file only with timestamp and metrics
+                try:
+                    log_entry = (
+                        f"DURATION: {audio_duration:.2f}s | "
+                        f"PROCESSING: {processing_time:.3f}s | "
+                        f"CONFIDENCE: {confidence or 'N/A'} | "
+                        f"STT_RESULT: {log_text}"
+                    )
+                    self.audio_logger.info(log_entry)
+                except Exception as e:
+                    logger.warning(f"Failed to log STT result: {e}")
 
             return result
 
         except Exception as e:
             logger.error(f"Error in STT: {e}")
             
-            # Log error if audio logging is enabled
-            if self.enable_audio_logging and audio_file_path:
-                self._log_stt_result(
-                    audio_file_path, 
-                    f"[ERROR: {str(e)}]", 
-                    (datetime.datetime.now() - start_time).total_seconds(), 
-                    len(audio_data) / (16000 * 2) if audio_data else 0
-                )
+            # Log error to text file if logging enabled
+            if self.enable_audio_logging:
+                try:
+                    processing_time = (datetime.now() - start_time).total_seconds()
+                    error_duration = len(audio_data) / (16000 * 2) if audio_data else 0
+                    log_entry = (
+                        f"DURATION: {error_duration:.2f}s | "
+                        f"PROCESSING: {processing_time:.3f}s | "
+                        f"STT_RESULT: [ERROR: {str(e)}]"
+                    )
+                    self.audio_logger.info(log_entry)
+                except Exception as log_err:
+                    logger.warning(f"Failed to log error: {log_err}")
             
             return None
 
-def pcm16_to_float32(audio_bytes: bytes) -> np.ndarray:
-    return np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-
-def decode_audio_to_array(audio_bytes: bytes) -> np.ndarray:
-    """Decode audio bytes to 16kHz mono float32 numpy array using ffmpeg"""
-    process = subprocess.Popen(
-        ['ffmpeg', '-f', 'wav', '-i', 'pipe:0', '-ar', '16000', '-ac', '1',
-         '-f', 'f32le', 'pipe:1'],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL
-    )
-    out, _ = process.communicate(audio_bytes)
-    audio_array = np.frombuffer(out, np.float32)
-    return audio_array
-
+def pcm16_to_float32(pcm_bytes: bytes) -> np.ndarray:
+    """
+    Convert raw PCM16 bytes to Float32 array normalized to [-1.0, 1.0]
+    
+    Args:
+        pcm_bytes: Raw PCM16 data (NOT WAV format - must be extracted first)
+        
+    Returns:
+        np.ndarray: Float32 array normalized to [-1.0, 1.0]
+    """
+    return np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
 
 def _transcribe(audio_array: np.ndarray, language: str = "vi") -> Dict[str, Any]:
     """
@@ -346,7 +229,8 @@ def _transcribe(audio_array: np.ndarray, language: str = "vi") -> Dict[str, Any]
     """
     try:
         # REPLACE MODEL: Distil-Whisper via transformers pipeline
-        logger.debug(f"[STT] Using Distil-Whisper for language: {language}")
+        logger.info(f"[STT] Using Distil-Whisper for language: {language}")
+        logger.info(f"[STT] Audio array shape: {audio_array.shape}, duration: {len(audio_array)/16000:.2f}s")
         
         result = distil_whisper_model(
             audio_array,
@@ -360,6 +244,8 @@ def _transcribe(audio_array: np.ndarray, language: str = "vi") -> Dict[str, Any]
             return_timestamps=False,  # Don't need timestamps for realtime
         )
         
+        logger.info(f"[STT] Transcription result: '{result['text']}'")
+        
         return {
             'text': result['text'].strip(),
             'language': language,
@@ -372,25 +258,23 @@ def _transcribe(audio_array: np.ndarray, language: str = "vi") -> Dict[str, Any]
 
 def _transcribe_whisper(audio_array: np.ndarray, language: str = "vi") -> Dict[str, Any]:
     try:
-        logger.debug(f"[STT] Using faster-whisper for language: {language}")
+        logger.info(f"[STT] Using faster-whisper for language: {language}")
             
         segments, info = whisper_model.transcribe(
             audio_array,
             language=language,
             task="transcribe",
             beam_size=3,
-            best_of=3,
             temperature=0.0,
-            word_timestamps=True,
-            condition_on_previous_text=False,
             vad_filter=True,
-            no_speech_threshold=0.5,
-            compression_ratio_threshold=2.4,
-            logprob_threshold=-1.0
+            condition_on_previous_text=False
         )
 
         segments_list = list(segments)
         full_text = ' '.join([segment.text for segment in segments_list])
+        
+        logger.info(f"[STT] Transcription result: '{full_text}'")
+        
         return {
             'text': full_text.strip(),
             'language': info.language if hasattr(info, 'language') else language,
@@ -405,4 +289,5 @@ def _transcribe_whisper(audio_array: np.ndarray, language: str = "vi") -> Dict[s
         }
     except Exception as e:
         logger.error(f"[STT] Error in _transcribe: {e}")
+        return {'text': '', 'language': language, 'segments': []}
         return {'text': '', 'language': language, 'segments': []}

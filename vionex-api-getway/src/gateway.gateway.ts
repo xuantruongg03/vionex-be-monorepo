@@ -872,10 +872,6 @@ export class GatewayGateway
                     metadata: safeMetadata,
                     rtpParameters: data.rtpParameters,
                 });
-            } else {
-                console.log(
-                    `[Gateway] Skipping stream-added broadcast for dummy ${data.kind} producer: ${streamId}`,
-                );
             }
 
             // If this is a screen share, emit special screen share event
@@ -1176,8 +1172,6 @@ export class GatewayGateway
         @MessageBody()
         data: { roomId: string; peerId: string; bufferedAudio?: any },
     ) {
-        console.log(`[Gateway] handleMySpeaking called with data:`, data);
-
         const roomId = data.roomId;
         const peerId = data.peerId;
 
@@ -1213,8 +1207,6 @@ export class GatewayGateway
                     peerId,
                     0, // port not used for priority logic
                 );
-                console.log(`[Gateway] SFU speaking result:`, speakingResult);
-
                 // ENHANCED: Check if speaking user needs to be prioritized for consumption
                 // This triggers dynamic stream consumption based on voice activity
                 if (
@@ -1225,15 +1217,10 @@ export class GatewayGateway
                 }
             } catch (sfuError) {
                 console.error(`[Gateway] SFU speaking error:`, sfuError);
-                // Continue with basic emit if SFU fails
             }
 
             // Step 5: Emit to all clients in the room (excluding sender) - KEPT ORIGINAL LOGIC
             client.to(roomId).emit('sfu:user-speaking', { peerId });
-
-            console.log(
-                `[Gateway] User ${peerId} speaking handled with priority check`,
-            );
         } catch (error) {
             console.error('[Gateway] Error handling speaking event:', error);
 
@@ -1298,15 +1285,8 @@ export class GatewayGateway
         }
 
         try {
-            // Notify SFU service that user stopped speaking
-            // await this.sfuClient.handleStopSpeaking(roomId, peerId);
-
             // Notify all clients in the room (excluding sender) that user stopped speaking
             client.to(roomId).emit('sfu:user-stopped-speaking', { peerId });
-
-            console.log(
-                `[Gateway] User ${peerId} stopped speaking in room ${roomId}`,
-            );
         } catch (error) {
             console.error(
                 '[Gateway] Error handling stop speaking event:',
@@ -2133,26 +2113,16 @@ export class GatewayGateway
                     message: 'User not authenticated',
                 };
             }
-
-            console.log(
-                `[Gateway] Unpin user request from ${peerId} to unpin ${data.unpinnedPeerId}`,
-            );
-
             const result = (await this.sfuClient.unpinUser(
                 data.roomId,
-                peerId, // unpinnerPeerId
-                data.unpinnedPeerId, // unpinnedPeerId
+                peerId, 
+                data.unpinnedPeerId,
             )) as any;
 
             const parsedResult =
                 typeof result.unpin_data === 'string'
                     ? JSON.parse(result.unpin_data)
                     : result.unpin_data;
-
-            console.log(
-                `[Gateway] Unpin user successful: ${peerId} unpinned ${data.unpinnedPeerId}`,
-                parsedResult,
-            );
 
             // Broadcast unpin event to room (for UI updates)
             client.to(data.roomId).emit('sfu:user-unpinned', {

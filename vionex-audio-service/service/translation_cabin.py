@@ -1,23 +1,19 @@
 import asyncio
+import io
 import logging
+import os
+import queue
 import threading
 import time
-import queue
-import io
-from typing import Dict, Optional, Any, TYPE_CHECKING, List
+import wave
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-import time
-import logging
-import asyncio
-import threading
-import queue
-import wave
-import os
-from datetime import datetime
+from typing import Dict, Optional, Any, TYPE_CHECKING, List
+
 from service.pipline_processor.VAD import VoiceActivityDetector
 from core.config import SFU_SERVICE_HOST
-from service.utils.audio_logger import AudioLogger, save_audio_chunk
+from service.utils.audio_logger import AudioLogger
 
 if TYPE_CHECKING:
     from service.pipline_processor.translation_pipeline import TranslationPipeline
@@ -29,32 +25,46 @@ from .codec_utils import opus_codec_manager, AudioProcessingUtils, RTPUtils
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# FIX: PLAYBACK QUEUE - Giải quyết gap giữa các audio chunks
+# FIX: PLAYBACK QUEUE - Solving gaps between audio chunks
 # ============================================================================
 @dataclass
 class AudioChunk:
     """
-    Đại diện cho một chunk audio đã xử lý sẵn sàng để phát
+    Represents a processed audio chunk ready for playback
     """
-    data: bytes              # Audio data (WAV hoặc PCM)
-    duration: float          # Độ dài audio (giây)
-    timestamp: float         # Thời điểm tạo ra
-    chunk_id: int           # ID để tracking
+    data: bytes              # Audio data (WAV or PCM)
+    duration: float          # Audio duration (seconds)
+    timestamp: float         # Creation timestamp
+    chunk_id: int           # ID for tracking
+
+@dataclass
+class ContextChunk:
+    """
+    Represents an audio chunk with context for overlap detection.
+    Used in Context Window approach (Option 2).
+    """
+    audio_data: bytes        # PCM16 mono 16kHz audio data
+    timestamp: float         # Creation timestamp
+    chunk_id: int           # Sequential chunk ID
+    duration: float         # Duration in seconds
+    
+    def __repr__(self):
+        return f"ContextChunk(id={self.chunk_id}, duration={self.duration:.2f}s, size={len(self.audio_data)} bytes)"
     
 @dataclass
 class PlaybackQueue:
     """
-    Queue buffer để đảm bảo audio phát liên tục không gap
+    Queue buffer to ensure continuous audio playback without gaps
     
     Logic:
-    1. Các chunk xử lý xong được enqueue ngay
-    2. Đợi đủ BUFFER_DURATION (2s) mới bắt đầu phát
-    3. Phát với tốc độ ổn định (paced sending)
-    4. Nếu queue rỗng → phát silence để maintain stream
+    1. Processed chunks are enqueued immediately
+    2. Wait for BUFFER_DURATION (2s) before starting playback
+    3. Play with stable pacing (paced sending)
+    4. If queue is empty → play silence to maintain stream
     """
     
-    BUFFER_DURATION: float = 2.0    # Buffer 2s trước khi bắt đầu phát
-    MIN_QUEUE_SIZE: int = 2         # Tối thiểu 2 chunks trong queue
+    BUFFER_DURATION: float = 2.0    # Buffer 2s before starting playback
+    MIN_QUEUE_SIZE: int = 2         # Minimum 2 chunks in queue
     
     def __post_init__(self):
         self._queue: queue.Queue = queue.Queue(maxsize=32)
@@ -66,8 +76,8 @@ class PlaybackQueue:
         
     def enqueue(self, chunk: AudioChunk) -> bool:
         """
-        Thêm chunk vào queue
-        Returns: True nếu thành công
+        Add chunk to queue
+        Returns: True if successful
         """
         try:
             if self._buffer_start_time is None:
@@ -77,7 +87,7 @@ class PlaybackQueue:
             self._queue.put_nowait(chunk)
             self._total_enqueued += 1
             
-            # Check nếu đã đủ buffer để bắt đầu phát
+            # Check if buffer is ready to start playback
             if self._buffering:
                 buffered_time = time.time() - self._buffer_start_time
                 queue_size = self._queue.qsize()
@@ -92,7 +102,7 @@ class PlaybackQueue:
         except queue.Full:
             logger.warning(f"[PLAYBACK-QUEUE] Queue full, dropping oldest chunk")
             try:
-                # Drop oldest
+                # Drop oldest chunk
                 self._queue.get_nowait()
                 self._queue.put_nowait(chunk)
                 return True
@@ -102,32 +112,32 @@ class PlaybackQueue:
                 
     def dequeue(self, timeout: float = 0.1) -> Optional[AudioChunk]:
         """
-        Lấy chunk từ queue để phát
-        Returns: AudioChunk nếu sẵn sàng, None nếu đang buffer hoặc queue rỗng
+        Get chunk from queue for playback
+        Returns: AudioChunk if ready, None if buffering or queue is empty
         """
         try:
-            # Nếu đang buffering → chưa phát
+            # If buffering, not ready to play
             if self._buffering:
                 return None
             
-            # Lấy chunk từ queue
+            # Get chunk from queue
             chunk = self._queue.get(timeout=timeout)
             self._total_dequeued += 1
             
             return chunk
             
         except queue.Empty:
-            # Queue rỗng → cần xử lý để tránh gap
+            # Queue is empty - need to handle to avoid gaps
             if self._playback_started:
                 logger.warning(f"[PLAYBACK-QUEUE] Queue empty during playback! Enqueued: {self._total_enqueued}, Dequeued: {self._total_dequeued}")
             return None
             
     def is_ready(self) -> bool:
-        """Check nếu queue sẵn sàng để bắt đầu phát"""
+        """Check if queue is ready to start playback"""
         return not self._buffering and self._playback_started
         
     def get_stats(self) -> dict:
-        """Thống kê queue"""
+        """Get queue statistics"""
         return {
             "queue_size": self._queue.qsize(),
             "buffering": self._buffering,
@@ -138,7 +148,7 @@ class PlaybackQueue:
         }
         
     def reset(self):
-        """Reset queue về trạng thái ban đầu"""
+        """Reset queue to initial state"""
         while not self._queue.empty():
             try:
                 self._queue.get_nowait()
@@ -171,14 +181,16 @@ class CabinStatus(Enum):
 class HybridChunkBuffer:
     """
     Hybrid chunk buffer:
-    - Giai đoạn khởi động: cần ít nhất 2s audio mới xuất chunk đầu tiên
-    - Sau đó: cửa sổ 1.0s, bước 0.7s (overlap 0.3s)
-    - Mọi tính toán dựa trên độ dài buffer, không dùng clock
+    - Startup phase: needs at least 0.5s audio before outputting first chunk
+    - After that: 2.0s window, 1.0s step (0.3s overlap)
+    - All calculations based on buffer length, not clock time
     """
 
-    init_buffer: float = 0.5       # 0.5s đầu tiên để lấy ngữ cảnh
-    window_duration: float = 2.0   # mỗi chunk dài 0.8s
-    step_duration: float = 1.0     # overlap 0.4s
+    init_buffer: float = 0.5       # First 0.5s to get context
+    window_duration: float = 1.5   # Each chunk is 1.5s long
+    # window_duration: float = 2.0   # Each chunk is 2.0s long
+    step_duration: float = 0.75     # 0.75s overlap
+    # step_duration: float = 1.0     # 1.0s overlap
     sample_rate: int = 16000       # 16kHz mono PCM16
 
     def __post_init__(self):
@@ -192,33 +204,33 @@ class HybridChunkBuffer:
         self._init_bytes = int(self.init_buffer * self.sample_rate * self._bytes_per_sample)
 
     def add_audio_chunk(self, audio_data: bytes) -> Optional[bytes]:
-        """Thêm PCM vào buffer, trả về một cửa sổ khi sẵn sàng."""
+        """Add PCM to buffer, return a window when ready."""
         if not audio_data:
             return None
 
         self._buffer.extend(audio_data)
 
-        # Chưa đủ 2s → chưa phát
+        # Not enough data yet, don't output
         if not self._started:
             if len(self._buffer) >= self._init_bytes:
                 self._started = True
             else:
                 return None
 
-        # Sau khi start: kiểm tra có đủ dữ liệu cho 1 window
+        # After start: check if enough data for 1 window
         if (len(self._buffer) - self._next_start_bytes) >= self._window_bytes:
             start = self._next_start_bytes
             end = start + self._window_bytes
             window = bytes(self._buffer[start:end])
 
-            # Slide buffer: tiến step_bytes (default 1s)
+            # Slide buffer: advance step_bytes (default 1s)
             self._next_start_bytes += self._step_bytes
 
-            # Dọn buffer định kỳ: chỉ giữ lại (window_duration + một chút buffer)
-            # để đảm bảo overlap hoạt động đúng
+            # Periodic buffer cleanup: only keep (window_duration + some buffer)
+            # to ensure overlap works correctly
             keep_bytes = self._window_bytes + self._step_bytes  # window + 1 step buffer
             if self._next_start_bytes > keep_bytes:
-                # Cắt bỏ phần đã xử lý hoàn toàn
+                # Trim fully processed portion
                 trim_bytes = self._next_start_bytes - keep_bytes
                 self._buffer = bytearray(self._buffer[trim_bytes:])
                 self._next_start_bytes = keep_bytes
@@ -333,7 +345,6 @@ class AudioRecorder:
         self.input_logger.close()
         self.output_logger.close()
         logger.info(f"[AUDIO-RECORDER] Closed recording for cabin {self.cabin_id}")
-        self._started = False
 
 @dataclass        
 class TranslationCabin:
@@ -376,7 +387,6 @@ class TranslationCabin:
     # Processing infra
     chunk_queue: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=64))
     processor_thread: Optional[threading.Thread] = None
-    thread: Optional[threading.Thread] = None
     
     # FIX: Playback queue for smooth audio output
     playback_queue: PlaybackQueue = field(default_factory=PlaybackQueue)
@@ -385,6 +395,11 @@ class TranslationCabin:
     # Audio recorder for debugging
     audio_recorder: Optional[AudioRecorder] = None
     _event_loop: Optional[asyncio.AbstractEventLoop] = None
+    
+    # CONTEXT WINDOW (Option 2): Store recent chunks for concatenation
+    context_buffer: deque = field(default_factory=lambda: deque(maxlen=3))  # Keep last 3 chunks
+    context_chunk_counter: int = 0  # Counter for chunk IDs
+    last_stt_result: str = ""  # Last STT result for duplicate detection
 
 
 class TranslationCabinManager:
@@ -406,7 +421,6 @@ class TranslationCabinManager:
         self.cabins: Dict[str, TranslationCabin] = {}
         self._lock = threading.Lock()
         self.socket_manager = get_shared_socket_manager()
-        self.enable_memory_monitoring = True
         logger.info("[CABIN-MANAGER] Initialized")
 
     def get_or_create_pipeline(self, cabin: TranslationCabin) -> 'TranslationPipeline':
@@ -565,8 +579,8 @@ class TranslationCabinManager:
 
     def _process_rtp_packet(self, cabin: TranslationCabin, rtp_data: bytes):
         """
-        Process RTP packet with realtime chunk processing
-        Flow: RTP → decode → downsample → chunk buffer → process immediately
+        Process RTP packet with CONTEXT WINDOW approach (Option 2)
+        Flow: RTP → decode → downsample → store in context buffer → enqueue for processing
         """
         try:
             if not cabin.running:
@@ -597,7 +611,7 @@ class TranslationCabinManager:
                     logger.error(f"[AUDIO-CALLBACK] Opus decode failed (count: {cabin._decode_fail_count})")
                 return
 
-            # Downsample từ 48kHz stereo → 16kHz mono for translation processing
+            # Downsample from 48kHz stereo → 16kHz mono for translation processing
             pcm_16k_mono = AudioProcessingUtils.downsample_48k_to_16k(pcm_48k_stereo)
             if not pcm_16k_mono:
                 logger.error(f"[AUDIO-CALLBACK] Downsample failed")
@@ -605,25 +619,58 @@ class TranslationCabinManager:
             # Cleanup intermediate data immediately
             del pcm_48k_stereo
 
-            # REALTIME PROCESSING: Add to sliding buffer and enqueue when ready
+            # CONTEXT WINDOW: Add to sliding buffer and create ContextChunk when ready
             complete_chunk = cabin.audio_buffer.add_audio_chunk(pcm_16k_mono)
             if complete_chunk:
-                # SAVE 2s CHUNK TO FILE for debugging (before processing)
+                # Calculate chunk duration
+                chunk_duration = len(complete_chunk) / (16000 * 2)  # 16kHz, 2 bytes per sample
+                
+                # Create ContextChunk object
+                cabin.context_chunk_counter += 1
+                context_chunk = ContextChunk(
+                    audio_data=complete_chunk,
+                    timestamp=time.time(),
+                    chunk_id=cabin.context_chunk_counter,
+                    duration=chunk_duration
+                )
+                
+                # Add to context buffer (auto-limits to last 3 chunks)
+                cabin.context_buffer.append(context_chunk)
+                
+                logger.info(
+                    f"[CONTEXT-BUFFER] Added chunk {context_chunk.chunk_id}, "
+                    f"buffer size: {len(cabin.context_buffer)}, "
+                    f"total duration: {sum(c.duration for c in cabin.context_buffer):.2f}s"
+                )
+                
+                # SAVE INDIVIDUAL CHUNK for debugging (before concatenation)
                 if cabin.audio_recorder:
                     cabin.audio_recorder.write_audio(complete_chunk)
                 
-                try:
-                    cabin.chunk_queue.put_nowait(complete_chunk)
-                except queue.Full:
-                    # Drop oldest by getting once and pushing again
+                # Enqueue for processing only if we have enough context (at least 2 chunks)
+                if len(cabin.context_buffer) >= 2:
                     try:
-                        _ = cabin.chunk_queue.get_nowait()
-                    except Exception:
-                        pass
-                    try:
-                        cabin.chunk_queue.put_nowait(complete_chunk)
-                    except Exception:
-                        pass
+                        # Create processing task with current context buffer state
+                        processing_task = {
+                            'context_chunks': list(cabin.context_buffer),  # Copy current buffer
+                            'latest_chunk_id': context_chunk.chunk_id
+                        }
+                        cabin.chunk_queue.put_nowait(processing_task)
+                    except queue.Full:
+                        # Drop oldest by getting once and pushing again
+                        try:
+                            _ = cabin.chunk_queue.get_nowait()
+                        except Exception:
+                            pass
+                        try:
+                            cabin.chunk_queue.put_nowait(processing_task)
+                        except Exception:
+                            pass
+                else:
+                    logger.debug(
+                        f"[CONTEXT-BUFFER] Waiting for more chunks "
+                        f"(have {len(cabin.context_buffer)}, need 2)"
+                    )
             
         except Exception as e:
             logger.error(f"[AUDIO-CALLBACK] Error processing RTP packet for {cabin.cabin_id}: {e}")
@@ -670,17 +717,17 @@ class TranslationCabinManager:
         cabin.processor_thread.start()
 
     # ============================================================================
-    # FIX: PLAYBACK THREAD - Phát audio từ PlaybackQueue với tốc độ ổn định
+    # FIX: PLAYBACK THREAD - Play audio from PlaybackQueue with stable timing
     # ============================================================================
     def _start_playback_thread(self, cabin: TranslationCabin):
         """
         Start playback thread to send audio from PlaybackQueue to SFU
         
         Logic:
-        1. Đợi queue sẵn sàng (buffered 2s)
+        1. Wait for queue to be ready (buffered 2s)
         2. Dequeue audio chunks
-        3. Send to SFU với paced timing (20ms packets)
-        4. Nếu queue rỗng → send silence để maintain stream
+        3. Send to SFU with paced timing (20ms packets)
+        4. If queue is empty → send silence to maintain stream
         """
         def playback_worker():
             logger.info(f"[PLAYBACK-THREAD] Started for cabin {cabin.cabin_id}")
@@ -738,7 +785,7 @@ class TranslationCabinManager:
     def _send_audio_sync(self, cabin: TranslationCabin, audio_data: bytes):
         """
         FIX: Synchronous version of send audio to SFU
-        Used by playback thread (không dùng async)
+        Used by playback thread (not async)
         """
         try:
             success = self._send_rtp_chunks_to_sfu(cabin, audio_data)
@@ -775,49 +822,92 @@ class TranslationCabinManager:
             logger.error(f"[SILENCE] Error generating silence: {e}")
             return b''
 
-    async def _process_chunk_realtime(self, cabin: TranslationCabin, audio_chunk: bytes):
+    async def _process_chunk_realtime(self, cabin: TranslationCabin, processing_task: Dict[str, Any]):
         """
-        FIX: New processing logic với Queue Buffer
+        CONTEXT WINDOW APPROACH (Option 2)
         
-        Process audio chunk: STT → Translation → TTS → Enqueue to PlaybackQueue
+        Process audio with context from previous chunks:
+        1. Concatenate 2-3 recent chunks to provide context
+        2. Send concatenated audio to Whisper STT
+        3. Extract only NEW text (not overlapping with previous result)
+        4. Translate and synthesize only the new portion
         
         Args:
             cabin: Translation cabin instance
-            audio_chunk: Complete 2s audio chunk ready for processing
-            
+            processing_task: Dict containing:
+                - context_chunks: List[ContextChunk] - recent audio chunks
+                - latest_chunk_id: int - ID of the most recent chunk
+                
         Flow:
-            1. VAD check - if no speech, skip (không gửi gì cả)
-            2. STT → Translation → TTS pipeline
-            3. Enqueue translated audio to PlaybackQueue (không gửi ngay)
-            4. PlaybackQueue sẽ tự động phát với tốc độ ổn định
+            1. Concatenate context chunks (2-3 chunks = 3-4.5s audio)
+            2. VAD check on concatenated audio
+            3. STT on full context → get complete transcription
+            4. Smart text extraction → only keep NEW words
+            5. Translate NEW text only
+            6. TTS → Enqueue to PlaybackQueue
         """
         start_time = time.time()
-        chunk_id = cabin._total_enqueued if hasattr(cabin, '_total_enqueued') else 0
         
         try:
-            # Step 1: VAD speech detection
-            has_speech = cabin.vad.detect_speech(audio_chunk)
+            context_chunks: List[ContextChunk] = processing_task.get('context_chunks', [])
+            latest_chunk_id = processing_task.get('latest_chunk_id', 0)
             
-            if not has_speech:
-                logger.debug(f"[PROCESS-CHUNK-{chunk_id}] No speech detected, skipping")
+            if not context_chunks:
+                logger.warning(f"[CONTEXT-WINDOW] No context chunks provided")
                 return
             
-            # Step 2: Speech detected → process through translation pipeline
+            # Step 1: Concatenate audio chunks to provide context
+            concatenated_audio = b''.join([chunk.audio_data for chunk in context_chunks])
+            total_duration = sum(chunk.duration for chunk in context_chunks)
+            
+            logger.info(
+                f"[CONTEXT-WINDOW-{latest_chunk_id}] Processing with context: "
+                f"{len(context_chunks)} chunks, total {total_duration:.2f}s"
+            )
+            
+            # Step 2: VAD speech detection on concatenated audio
+            has_speech = cabin.vad.detect_speech(concatenated_audio)
+            
+            if not has_speech:
+                logger.debug(f"[CONTEXT-WINDOW-{latest_chunk_id}] No speech detected in context, skipping")
+                return
+            
+            # Step 3: Speech detected → process through translation pipeline
             cabin.status = CabinStatus.TRANSLATING
-            logger.info(f"[PROCESS-CHUNK-{chunk_id}] Speech detected, processing...")
+            logger.info(f"[CONTEXT-WINDOW-{latest_chunk_id}] Speech detected, processing with context...")
             
             # Get cached pipeline to avoid recreation overhead
             pipeline = self.get_or_create_pipeline(cabin)
             
-            # Step 3: Convert PCM to WAV and process
-            wav_data = AudioProcessingUtils.pcm_to_wav_bytes(audio_chunk)
+            # Step 4: Convert concatenated PCM to WAV
+            wav_data = AudioProcessingUtils.pcm_to_wav_bytes(concatenated_audio)
             
-            # Process through pipeline
-            result = await pipeline.process_audio(wav_data)
+            # Step 5: Process through pipeline WITH context
+            # Pipeline will handle overlap detection internally via STT
+            result = await pipeline.process_audio_with_context(
+                wav_data,
+                previous_text=cabin.last_stt_result  # Pass previous STT result for overlap detection
+            )
+            
             processing_time = time.time() - start_time
             
-            # Step 4: Enqueue translated audio to PlaybackQueue
+            # Step 6: Extract new text and enqueue translated audio
             if result['success'] and result.get('translated_audio'):
+                # Update last STT result for next iteration
+                if result.get('full_stt_text'):
+                    cabin.last_stt_result = result['full_stt_text']
+                
+                # Get only the NEW portion of text
+                new_text = result.get('new_text', result.get('translated_text', ''))
+                
+                if not new_text or not new_text.strip():
+                    logger.info(
+                        f"[CONTEXT-WINDOW-{latest_chunk_id}] No new text detected "
+                        f"(overlap with previous), skipping translation"
+                    )
+                    cabin.status = CabinStatus.LISTENING
+                    return
+                
                 translated_audio = result['translated_audio']
                 
                 # Calculate audio duration
@@ -828,30 +918,33 @@ class TranslationCabinManager:
                     data=translated_audio,
                     duration=audio_duration,
                     timestamp=time.time(),
-                    chunk_id=chunk_id
+                    chunk_id=latest_chunk_id
                 )
                 
-                # Enqueue to playback queue (không gửi ngay!)
+                # Enqueue to playback queue
                 success = cabin.playback_queue.enqueue(audio_chunk_obj)
                 
                 if success:
                     logger.info(
-                        f"[PROCESS-CHUNK-{chunk_id}] Processed in {processing_time:.2f}s, "
-                        f"audio duration: {audio_duration:.2f}s, queue size: {cabin.playback_queue._queue.qsize()}"
+                        f"[CONTEXT-WINDOW-{latest_chunk_id}] Processed in {processing_time:.2f}s, "
+                        f"new text: '{new_text[:50]}...', "
+                        f"audio duration: {audio_duration:.2f}s, "
+                        f"queue size: {cabin.playback_queue._queue.qsize()}"
                     )
                 else:
-                    logger.error(f"[PROCESS-CHUNK-{chunk_id}] Failed to enqueue to playback queue")
+                    logger.error(f"[CONTEXT-WINDOW-{latest_chunk_id}] Failed to enqueue to playback queue")
             else:
-                logger.warning(f"[PROCESS-CHUNK-{chunk_id}] Translation failed: {result.get('message', 'unknown')}")
+                error_msg = result.get('message', 'unknown')
+                logger.warning(f"[CONTEXT-WINDOW-{latest_chunk_id}] Translation failed: {error_msg}")
             
             cabin.status = CabinStatus.LISTENING
             
         except Exception as e:
             processing_time = time.time() - start_time
             cabin.status = CabinStatus.ERROR
-            logger.error(f"[PROCESS-CHUNK-{chunk_id}] Error processing chunk in {processing_time:.2f}s: {e}")
+            logger.error(f"[CONTEXT-WINDOW-{latest_chunk_id}] Error processing in {processing_time:.2f}s: {e}")
             import traceback
-            logger.error(f"[PROCESS-CHUNK-{chunk_id}] Traceback: {traceback.format_exc()}")
+            logger.error(f"[CONTEXT-WINDOW-{latest_chunk_id}] Traceback: {traceback.format_exc()}")
             
             # Reset status for next chunk
             cabin.status = CabinStatus.LISTENING
@@ -895,19 +988,17 @@ class TranslationCabinManager:
             sfu_host = SFU_SERVICE_HOST  # Load from config instead of hardcoded
             sfu_port = cabin.send_port  # Use real SFU port if available
             
-            # --- 0) Chuẩn hoá input: WAV -> PCM16 mono + sample_rate ---
-            # Nếu là WAV (bắt đầu "RIFF"), bóc PCM và lấy sample_rate
+            # --- 0) Normalize input: WAV -> PCM16 mono + sample_rate ---
+            # If WAV (starts with "RIFF"), extract PCM and get sample_rate
             src_sr = 16000
             if audio_data.startswith(b"RIFF"):
-                # Dùng util sẵn có để extract
+                # Use existing util to extract
                 pcm_arr, sr = AudioProcessingUtils.extract_pcm_from_wav(audio_data)
                 if sr == 0 or len(pcm_arr) == 0:
                     logger.error("[RTP-CHUNKS] Invalid WAV data")
                     return False
                 src_sr = sr
                 pcm16 = pcm_arr.astype(np.int16)
-
-                max_val = np.max(pcm16)
             else:
                 # RAW PCM Assumes 16-Bit Mono
                 pcm16 = np.frombuffer(audio_data, dtype=np.int16)
@@ -942,7 +1033,7 @@ class TranslationCabinManager:
 
             # ---2) Just noise gate to remove Silent Samples ---
             # Instead of Multiple Filters can create Artifacts
-            noise_threshold = 500  # Threshold để coi là noise
+            noise_threshold = 500  # Threshold for noise
             mask = np.abs(pcm16) > noise_threshold
             
             from scipy.ndimage import binary_dilation
@@ -954,7 +1045,7 @@ class TranslationCabinManager:
             
             pcm16 = pcm16_clean
 
-            # --- 3) Chia 20ms @48kHz mono (960 samples) ---
+            # --- 3) Split into 20ms @48kHz mono (960 samples) ---
             samples_per_chunk = 960  # 20ms at 48kHz mono
             bytes_per_chunk = samples_per_chunk * 2
             raw = pcm16.tobytes()
@@ -963,7 +1054,7 @@ class TranslationCabinManager:
             for i in range(0, len(raw), bytes_per_chunk):
                 chunk = raw[i:i + bytes_per_chunk]
                 if len(chunk) < bytes_per_chunk:
-                    # Pad với last sample thay vì zeros để tránh click
+                    # Pad with last sample instead of zeros to avoid clicks
                     if len(chunk) >= 2:
                         last_sample = chunk[-2:]  # Last 16-bit sample
                         padding_needed = bytes_per_chunk - len(chunk)
@@ -1026,7 +1117,7 @@ class TranslationCabinManager:
                 if ok:
                     success_count += 1
                 
-                # Precise timing thay vì sleep cố định
+                # Precise timing instead of fixed sleep
                 current_time = time.time()
                 # Log progress every 50 packets
                 if (idx + 1) % 50 == 0:
@@ -1045,25 +1136,6 @@ class TranslationCabinManager:
             logger.error(f"[RTP-CHUNKS] Error: {e}")
             import traceback
             logger.error(f"[RTP-CHUNKS] Traceback: {traceback.format_exc()}")
-            return False
-
-    async def _send_audio_to_sfu(
-        self, 
-        cabin: TranslationCabin, 
-        audio_data: bytes,
-        audio_type: str = "translated"
-    ) -> bool:
-        """
-        Send audio back to SFU via RTP packets (Opus @48kHz stereo, 20ms frames).
-        Accepts PCM16 mono @16kHz or WAV; handles resampling/encoding internally.
-        """
-        try:
-            # Always send as encoded RTP chunks for consistency
-            success = self._send_rtp_chunks_to_sfu(cabin, audio_data)
-            return success
-            
-        except Exception as e:
-            logger.error(f"[{audio_type.upper()}] Error sending {audio_type} audio: {e}")
             return False
 
     def start_cabin(self, cabin_id: str) -> bool:
@@ -1154,83 +1226,6 @@ class TranslationCabinManager:
             logger.error(f"[CABIN-MANAGER] Error updating cabin languages: {e}")
             return False
         
-    async def _cleanup_cabin_resources(self, cabin_id: str):
-        """
-        Enhanced cleanup for translation cabin resources.
-        
-        Performs comprehensive resource cleanup including:
-        - Thread termination (processor and audio threads)
-        - Port deallocation (RTP receive and send ports)
-        - Memory cleanup (audio buffers and queues)
-        - Resource release to prevent memory leaks
-        
-        Args:
-            cabin_id: Cabin identifier for resource cleanup
-            
-        Process:
-            1. Stop cabin processing gracefully
-            2. Join threads with timeout to prevent hanging
-            3. Release allocated network ports
-            4. Clear audio buffers and queues
-            5. Cleanup any remaining queue items
-        """
-        try:
-            cabin = self.cabins.get(cabin_id)
-            if not cabin:
-                return
-            
-            # Step 1: Stop cabin processing gracefully
-            cabin.running = False
-            
-            # Step 2: Wait for processing threads to finish with timeout
-            if getattr(cabin, 'thread', None) and cabin.thread.is_alive():
-                cabin.thread.join(timeout=2.0)
-            
-            if getattr(cabin, 'processor_thread', None) and cabin.processor_thread.is_alive():
-                cabin.processor_thread.join(timeout=2.0)
-            
-            # Step 3: Release allocated network ports back to port manager
-            if getattr(cabin, 'receive_port', None):
-                port_manager.release_port(cabin.receive_port)
-            
-            if cabin.send_port:
-                port_manager.release_port(cabin.send_port)
-            
-            # Step 4: Clear audio processing buffers
-            cabin.audio_buffer.clear()
-            
-            # Step 5: No audio queue in realtime mode - nothing to clear
-            
-            # Step 6: Close optimized network resources
-            if hasattr(cabin, '_send_socket') and cabin._send_socket:
-                try:
-                    cabin._send_socket.close()
-                    cabin._send_socket = None
-                except Exception as e:
-                    logger.error(f"[CLEANUP] Error closing send socket: {e}")
-            
-            # Step 7: Cleanup OPUS encoder resources
-            if hasattr(cabin, '_opus_encoder') and cabin._opus_encoder:
-                try:
-                    cabin._opus_encoder = None
-                except Exception as e:
-                    logger.error(f"[CLEANUP] Error cleaning up Opus encoder: {e}")
-            
-            # Note: SharedSocketManager handles socket lifecycle, no manual cleanup needed
-            # Step 8: Remove cabin from tracking registry
-            del self.cabins[cabin_id]
-            
-            # Step 9: Force garbage collection after cleanup
-            try:
-                import gc
-                collected = gc.collect()
-                logger.debug(f"[CLEANUP] Garbage collected {collected} objects after cabin cleanup")
-            except Exception as gc_error:
-                logger.warning(f"[CLEANUP] Garbage collection error: {gc_error}")
-            
-        except Exception as e:
-            logger.error(f"[CLEANUP] Error in cabin cleanup: {e}")
-
     def destroy_cabin(self, room_id: str, 
         user_id: str,
         source_language: str = "vi",

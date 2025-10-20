@@ -310,7 +310,7 @@ class SharedSocketManager:
             
             # DEBUG: Log test mode status and cabin_id
             if not hasattr(self, '_debug_test_mode_logged'):
-                logger.info(f"[NAT-DEBUG] 🔧 test_mode={self.test_mode}, cabin_to_client_address keys={list(self.cabin_to_client_address.keys())}")
+                logger.info(f"[NAT-DEBUG] test_mode={self.test_mode}, cabin_to_client_address keys={list(self.cabin_to_client_address.keys())}")
                 self._debug_test_mode_logged = True
             
             # TEST_MODE: Use learned client address, PRODUCTION: Use configured SFU

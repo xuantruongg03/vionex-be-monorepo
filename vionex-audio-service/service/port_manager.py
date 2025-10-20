@@ -75,7 +75,7 @@ class PortManager:
             for port in range(start_port, end_port + 1):
                 if port not in self._used_ports and self._is_port_available_unsafe(local_ip, port):
                     self._mark_port_used_unsafe(port)
-                    logger.info(f"✅ Allocated available port {port} (used ports: {len(self._used_ports)})")
+                    logger.info(f"Allocated available port {port} (used ports: {len(self._used_ports)})")
                     return port
             
             # Strategy 3: Fallback to OS auto-assignment
