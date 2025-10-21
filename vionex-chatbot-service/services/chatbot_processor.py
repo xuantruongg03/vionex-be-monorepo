@@ -1,11 +1,5 @@
 
-import logging
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+from utils.log_manager import logger
 from core.model import model  # Import pre-loaded model
 from clients.semantic import SemanticClient
 
@@ -40,6 +34,8 @@ class ChatBotProcessor:
             "Answer concisely and accurately:"
         )
 
+    def generate_response(self, data: str, answer: str) -> str:
+        return f'Generated response based on data: {data}. Answer from model: {answer}'
 
     def ask(self, question: str, room_id: str, organization_id: str = None) -> str:
         try:
@@ -59,7 +55,8 @@ class ChatBotProcessor:
                 generated_response = self.model.generate(prompt)
                 logger.info(f"Generated response: {generated_response} for question: {question} with {len(results)} results" + 
                            (f" for organization {organization_id}" if organization_id else ""))
-                return generated_response
+                # return generated_response
+                return self.generate_response(combined_transcript, generated_response)
             else:
                 logger.warning("No response from semantic service")
                 return "I'm sorry, I couldn't find an answer to your question."

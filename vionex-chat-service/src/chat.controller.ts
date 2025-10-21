@@ -1,6 +1,6 @@
-import { Controller, Get } from '@nestjs/common';
-import { ChatService } from './chat.service';
+import { Controller } from '@nestjs/common';
 import { GrpcMethod } from '@nestjs/microservices';
+import { ChatService } from './chat.service';
 import { ChatMessage, ChatMessageResponse, ReplyInfo } from './interface';
 
 @Controller()
@@ -13,6 +13,7 @@ export class ChatController {
         sender: string;
         sender_name: string;
         text: string;
+        org_id?: string;
         fileUrl?: string;
         fileName?: string;
         fileType?: string;
@@ -25,6 +26,7 @@ export class ChatController {
             data.sender,
             data.sender_name,
             data.text,
+            data.org_id,
             data.fileUrl,
             data.fileName,
             data.fileType,
