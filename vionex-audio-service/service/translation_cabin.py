@@ -180,81 +180,57 @@ class CabinStatus(Enum):
 @dataclass
 class HybridChunkBuffer:
     """
-    Hybrid chunk buffer:
-    - Startup phase: needs at least 0.5s audio before outputting first chunk
-    - After that: 2.0s window, 1.0s step (0.3s overlap)
-    - All calculations based on buffer length, not clock time
+    Tumbling Window Buffer (No Overlap)
+    
+    This buffer collects audio data and emits it in fixed-size, non-overlapping
+    chunks (tumbling windows). This is the simplest and most robust way to
+    prevent audio duplication caused by reprocessing overlapping segments.
+    
+    Logic:
+    1. Audio data is appended to an internal buffer.
+    2. When the buffer contains enough data for a full chunk (window_duration),
+       a chunk is sliced from the beginning of the buffer and returned.
+    3. The sliced portion is then removed from the buffer.
     """
-
-    init_buffer: float = 0.5       # First 0.5s to get context
     window_duration: float = 1.5   # Each chunk is 1.5s long
-    # window_duration: float = 2.0   # Each chunk is 2.0s long
-    step_duration: float = 0.75     # 0.75s overlap
-    # step_duration: float = 1.0     # 1.0s overlap
     sample_rate: int = 16000       # 16kHz mono PCM16
 
     def __post_init__(self):
         self._buffer: bytearray = bytearray()
-        self._next_start_bytes: int = 0
         self._bytes_per_sample: int = 2
-        self._started: bool = False
-
         self._window_bytes = int(self.window_duration * self.sample_rate * self._bytes_per_sample)
-        self._step_bytes = int(self.step_duration * self.sample_rate * self._bytes_per_sample)
-        self._init_bytes = int(self.init_buffer * self.sample_rate * self._bytes_per_sample)
 
     def add_audio_chunk(self, audio_data: bytes) -> Optional[bytes]:
-        """Add PCM to buffer, return a window when ready."""
+        """Add PCM to buffer and return a complete, non-overlapping chunk when ready."""
         if not audio_data:
             return None
 
         self._buffer.extend(audio_data)
 
-        # Not enough data yet, don't output
-        if not self._started:
-            if len(self._buffer) >= self._init_bytes:
-                self._started = True
-            else:
-                return None
-
-        # After start: check if enough data for 1 window
-        if (len(self._buffer) - self._next_start_bytes) >= self._window_bytes:
-            start = self._next_start_bytes
-            end = start + self._window_bytes
-            window = bytes(self._buffer[start:end])
-
-            # Slide buffer: advance step_bytes (default 1s)
-            self._next_start_bytes += self._step_bytes
-
-            # Periodic buffer cleanup: only keep (window_duration + some buffer)
-            # to ensure overlap works correctly
-            keep_bytes = self._window_bytes + self._step_bytes  # window + 1 step buffer
-            if self._next_start_bytes > keep_bytes:
-                # Trim fully processed portion
-                trim_bytes = self._next_start_bytes - keep_bytes
-                self._buffer = bytearray(self._buffer[trim_bytes:])
-                self._next_start_bytes = keep_bytes
-
-            return window
+        # Check if we have enough data for at least one full chunk
+        if len(self._buffer) >= self._window_bytes:
+            # Extract the first complete chunk
+            chunk = bytes(self._buffer[:self._window_bytes])
+            
+            # Remove the extracted chunk from the buffer (tumble forward)
+            self._buffer = self._buffer[self._window_bytes:]
+            
+            return chunk
 
         return None
 
     def get_processing_stats(self) -> dict:
-        total_dur = len(self._buffer) / (self.sample_rate * self._bytes_per_sample)
-        pending_dur = (len(self._buffer) - self._next_start_bytes) / (self.sample_rate * self._bytes_per_sample)
+        """Returns statistics about the current state of the buffer."""
+        buffered_duration = len(self._buffer) / (self.sample_rate * self._bytes_per_sample)
         return {
-            "buffer_duration": round(total_dur, 3),
-            "pending_duration": round(pending_dur, 3),
-            "init_buffer": self.init_buffer,
+            "buffer_duration": round(buffered_duration, 3),
             "window_size": self.window_duration,
-            "step_size": self.step_duration,
-            "overlap": self.window_duration - self.step_duration,
-            "started": self._started,
+            "pending_chunks": int(len(self._buffer) / self._window_bytes)
         }
 
     def clear(self):
+        """Clears the internal buffer."""
         self._buffer.clear()
-        self._next_start_bytes = 0
 
 class AudioRecorder:
     """
@@ -403,9 +379,9 @@ class TranslationCabin:
     # last_stt_result: str = ""  # Last STT result for duplicate detection
     # last_translated_text: str = ""  # Last translated text to track what was already TTS'd
     
-    # HYBRID WINDOW: New state for smart windowing
-    _is_new_speech_segment: bool = True
-    _processing_buffer: List[ContextChunk] = field(default_factory=list)
+    # HYBRID WINDOW: These states are now deprecated by the simpler Tumbling Window
+    # _is_new_speech_segment: bool = True
+    # _processing_buffer: List[ContextChunk] = field(default_factory=list)
 
 
 class TranslationCabinManager:
@@ -625,8 +601,9 @@ class TranslationCabinManager:
             # Cleanup intermediate data immediately
             del pcm_48k_stereo
 
-            # HYBRID WINDOW: New logic for smart, non-overlapping windowing
+            # HYBRID WINDOW logic is now deprecated. Using a simple Tumbling Window.
             complete_chunk = cabin.audio_buffer.add_audio_chunk(pcm_16k_mono)
+            
             if complete_chunk:
                 # Calculate chunk duration
                 chunk_duration = len(complete_chunk) / (16000 * 2)
@@ -644,46 +621,18 @@ class TranslationCabinManager:
                 if cabin.audio_recorder:
                     cabin.audio_recorder.write_audio(complete_chunk)
                 
-                # --- HYBRID WINDOW LOGIC ---
-                # 1. If it's a new speech segment, process the first chunk immediately
-                if cabin._is_new_speech_segment:
-                    logger.info(f"[HYBRID-WINDOW] Fast-tracking first chunk {context_chunk.chunk_id} for low latency.")
-                    processing_task = {
-                        'context_chunks': [context_chunk],
-                        'latest_chunk_id': context_chunk.chunk_id
-                    }
-                    try:
-                        cabin.chunk_queue.put_nowait(processing_task)
-                    except queue.Full:
-                        logger.warning("[HYBRID-WINDOW] Chunk queue full, dropping fast-track chunk.")
-                    
-                    cabin._is_new_speech_segment = False # Subsequent chunks will be buffered
-                    cabin._processing_buffer = [] # Clear buffer for next block
-                    
-                # 2. Otherwise, buffer subsequent chunks
-                else:
-                    cabin._processing_buffer.append(context_chunk)
-                    logger.debug(
-                        f"[HYBRID-WINDOW] Buffering chunk {context_chunk.chunk_id}. "
-                        f"Buffer size: {len(cabin._processing_buffer)}/2"
-                    )
-                    
-                    # 3. If buffer is full (2 chunks), process the block
-                    if len(cabin._processing_buffer) >= 2:
-                        logger.info(
-                            f"[HYBRID-WINDOW] Processing buffered block of {len(cabin._processing_buffer)} chunks."
-                        )
-                        processing_task = {
-                            'context_chunks': list(cabin._processing_buffer),
-                            'latest_chunk_id': context_chunk.chunk_id
-                        }
-                        try:
-                            cabin.chunk_queue.put_nowait(processing_task)
-                        except queue.Full:
-                            logger.warning("[HYBRID-WINDOW] Chunk queue full, dropping buffered block.")
-                        
-                        # Reset buffer for the next block
-                        cabin._processing_buffer = []
+                # --- TUMBLING WINDOW LOGIC ---
+                # The buffer now only returns complete, non-overlapping chunks.
+                # We can process them directly.
+                logger.info(f"[TUMBLING-WINDOW] Processing chunk {context_chunk.chunk_id} ({context_chunk.duration:.2f}s)")
+                processing_task = {
+                    'context_chunks': [context_chunk], # Still pass as a list for compatibility
+                    'latest_chunk_id': context_chunk.chunk_id
+                }
+                try:
+                    cabin.chunk_queue.put_nowait(processing_task)
+                except queue.Full:
+                    logger.warning("[TUMBLING-WINDOW] Chunk queue full, dropping chunk.")
             
         except Exception as e:
             logger.error(f"[AUDIO-CALLBACK] Error processing RTP packet for {cabin.cabin_id}: {e}")
@@ -866,7 +815,7 @@ class TranslationCabinManager:
             latest_chunk_id = processing_task.get('latest_chunk_id', 0)
             
             if not context_chunks:
-                logger.warning(f"[HYBRID-WINDOW] No chunks provided to process.")
+                logger.warning(f"[TUMBLING-WINDOW] No chunks provided to process.")
                 return
             
             # Step 1: Concatenate audio chunks from the block
@@ -874,22 +823,20 @@ class TranslationCabinManager:
             total_duration = sum(chunk.duration for chunk in context_chunks)
             
             logger.info(
-                f"[HYBRID-WINDOW-{latest_chunk_id}] Processing block: "
+                f"[TUMBLING-WINDOW-{latest_chunk_id}] Processing chunk: "
                 f"{len(context_chunks)} chunks, total {total_duration:.2f}s"
             )
             
-            # Step 2: VAD speech detection on the block
+            # Step 2: VAD is less critical now as we process fixed chunks, but can still be used as a filter.
             has_speech = cabin.vad.detect_speech(concatenated_audio)
             
             if not has_speech:
-                # If no speech in a block, reset to fast-track the next speech segment
-                logger.debug(f"[HYBRID-WINDOW-{latest_chunk_id}] No speech detected, resetting to fast-track mode.")
-                cabin._is_new_speech_segment = True
+                logger.debug(f"[TUMBLING-WINDOW-{latest_chunk_id}] No speech detected in chunk, skipping.")
                 return
             
             # Step 3: Speech detected → process through translation pipeline
             cabin.status = CabinStatus.TRANSLATING
-            logger.info(f"[HYBRID-WINDOW-{latest_chunk_id}] Speech detected, processing block...")
+            logger.info(f"[TUMBLING-WINDOW-{latest_chunk_id}] Speech detected, processing chunk...")
             
             # Get cached pipeline to avoid recreation overhead
             pipeline = self.get_or_create_pipeline(cabin)
@@ -923,25 +870,25 @@ class TranslationCabinManager:
                 
                 if success:
                     logger.info(
-                        f"[HYBRID-WINDOW-{latest_chunk_id}] Processed in {processing_time:.2f}s, "
+                        f"[TUMBLING-WINDOW-{latest_chunk_id}] Processed in {processing_time:.2f}s, "
                         f"text: '{translated_text[:50]}...', "
                         f"audio duration: {audio_duration:.2f}s, "
                         f"queue size: {cabin.playback_queue._queue.qsize()}"
                     )
                 else:
-                    logger.error(f"[HYBRID-WINDOW-{latest_chunk_id}] Failed to enqueue to playback queue")
+                    logger.error(f"[TUMBLING-WINDOW-{latest_chunk_id}] Failed to enqueue to playback queue")
             else:
                 error_msg = result.get('message', 'unknown')
-                logger.warning(f"[HYBRID-WINDOW-{latest_chunk_id}] Translation failed: {error_msg}")
+                logger.warning(f"[TUMBLING-WINDOW-{latest_chunk_id}] Translation failed: {error_msg}")
             
             cabin.status = CabinStatus.LISTENING
             
         except Exception as e:
             processing_time = time.time() - start_time
             cabin.status = CabinStatus.ERROR
-            logger.error(f"[HYBRID-WINDOW-{latest_chunk_id}] Error processing in {processing_time:.2f}s: {e}")
+            logger.error(f"[TUMBLING-WINDOW-{latest_chunk_id}] Error processing in {processing_time:.2f}s: {e}")
             import traceback
-            logger.error(f"[HYBRID-WINDOW-{latest_chunk_id}] Traceback: {traceback.format_exc()}")
+            logger.error(f"[TUMBLING-WINDOW-{latest_chunk_id}] Traceback: {traceback.format_exc()}")
             
             # Reset status for next chunk
             cabin.status = CabinStatus.LISTENING
@@ -973,133 +920,136 @@ class TranslationCabinManager:
             # Fallback: estimate 2s
             return 2.0
 
-    def _extract_new_translated_text(self, current_text: str, previous_text: str) -> str:
-        """
-        Extract ONLY the new portion from current_text that hasn't been TTS'd yet.
-        
-        Uses same multi-strategy approach as STT overlap detection.
-        
-        Args:
-            current_text: Full translated text from current context window
-            previous_text: Previously TTS'd translated text
-            
-        Returns:
-            New portion of text to TTS, or empty string if no new text
-        """
-        if not current_text:
-            return ""
-        
-        if not previous_text:
-            # First translation, return all
-            return current_text
-        
-        # Normalize text for comparison
-        curr_norm = current_text.strip()
-        prev_norm = previous_text.strip()
-        
-        if curr_norm == prev_norm:
-            # Exact duplicate
-            return ""
-        
-        # Strategy 1: Character-level exact prefix matching (most accurate)
-        if curr_norm.startswith(prev_norm):
-            new_text = curr_norm[len(prev_norm):].strip()
-            if new_text:
-                logger.debug(f"[TTS-OVERLAP] Character-level prefix match, new: '{new_text[:30]}...'")
-                return new_text
-        
-        # Strategy 2: Find previous as substring (handles minor variations)
-        prev_idx = curr_norm.find(prev_norm)
-        if prev_idx != -1:
-            new_text = curr_norm[prev_idx + len(prev_norm):].strip()
-            if new_text:
-                logger.debug(f"[TTS-OVERLAP] Substring match at {prev_idx}, new: '{new_text[:30]}...'")
-                return new_text
-        
-        # Strategy 3: Word-level matching with threshold
-        curr_words = curr_norm.split()
-        prev_words = prev_norm.split()
-        
-        # Find longest common prefix in words
-        common_prefix_len = 0
-        for i, (cw, pw) in enumerate(zip(curr_words, prev_words)):
-            if cw.lower() == pw.lower():
-                common_prefix_len = i + 1
-            else:
-                break
-        
-        # If >50% words match as prefix, extract remaining
-        if common_prefix_len > 0 and common_prefix_len >= len(prev_words) * 0.5:
-            new_words = curr_words[common_prefix_len:]
-            new_text = ' '.join(new_words).strip()
-            if new_text:
-                logger.debug(
-                    f"[TTS-OVERLAP] Word-level match ({common_prefix_len}/{len(prev_words)} words), "
-                    f"new: '{new_text[:30]}...'"
-                )
-                return new_text
-        
-        # Strategy 4: Fuzzy matching (last resort)
-        try:
-            from difflib import SequenceMatcher
-            ratio = SequenceMatcher(None, prev_norm, curr_norm).ratio()
-            
-            logger.debug(f"[TTS-OVERLAP] Similarity ratio: {ratio:.2f}")
-            
-            # CRITICAL: Check for duplicate content (same meaning, different wording)
-            if ratio > 0.6:  # 60% similarity → likely same content
-                if ratio >= 0.8:
-                    # Very high similarity → probably duplicate → SKIP
-                    logger.warning(
-                        f"[TTS-OVERLAP] HIGH similarity ({ratio:.2f}) detected - "
-                        f"likely duplicate content, SKIPPING TTS. "
-                        f"Prev: '{prev_norm[:50]}...', Curr: '{curr_norm[:50]}...'"
-                    )
-                    return ""  # Skip TTS for duplicate content
-                elif ratio >= 0.7:
-                    # High similarity → extract new portion if possible
-                    matcher = SequenceMatcher(None, prev_norm, curr_norm)
-                    match = matcher.find_longest_match(0, len(prev_norm), 0, len(curr_norm))
-                    
-                    if match.size > 0:
-                        # Extract text after longest match
-                        new_text = curr_norm[match.b + match.size:].strip()
-                        if new_text:
-                            logger.debug(
-                                f"[TTS-OVERLAP] Fuzzy match (ratio={ratio:.2f}), new: '{new_text[:30]}...'"
-                            )
-                            return new_text
-                    
-                    # No clear new portion but high similarity → skip
-                    logger.warning(
-                        f"[TTS-OVERLAP] HIGH similarity ({ratio:.2f}) but no clear new text, "
-                        f"SKIPPING to avoid duplicate. Prev: '{prev_norm[:50]}...', Curr: '{curr_norm[:50]}...'"
-                    )
-                    return ""
-                else:
-                    # Medium similarity (0.6-0.7) → might be variation of same content
-                    # Check word overlap
-                    prev_words_set = set(prev_norm.lower().split())
-                    curr_words_set = set(curr_norm.lower().split())
-                    common_words = prev_words_set & curr_words_set
-                    word_overlap_ratio = len(common_words) / max(len(prev_words_set), len(curr_words_set))
-                    
-                    if word_overlap_ratio > 0.6:
-                        logger.warning(
-                            f"[TTS-OVERLAP] MEDIUM similarity ({ratio:.2f}) with high word overlap "
-                            f"({word_overlap_ratio:.2f}) - likely same content rephrased, SKIPPING. "
-                            f"Prev: '{prev_norm[:50]}...', Curr: '{curr_norm[:50]}...'"
-                        )
-                        return ""  # Skip duplicate content
-        except Exception as e:
-            logger.warning(f"[TTS-OVERLAP] Fuzzy matching failed: {e}")
-        
-        # Low similarity → treat as completely new text
-        logger.info(
-            f"[TTS-OVERLAP] LOW similarity detected, treating as new text. "
-            f"Prev: '{prev_norm[:50]}...', Curr: '{curr_norm[:50]}...'"
-        )
-        return current_text
+    # def _extract_new_translated_text(self, current_text: str, previous_text: str) -> str:
+    #     """
+    #     DEPRECATED: This logic was for the old Sliding Window architecture.
+    #     It is no longer needed with the Tumbling Window approach.
+    #
+    #     Extract ONLY the new portion from current_text that hasn't been TTS'd yet.
+    #     
+    #     Uses same multi-strategy approach as STT overlap detection.
+    #     
+    #     Args:
+    #         current_text: Full translated text from current context window
+    #         previous_text: Previously TTS'd translated text
+    #         
+    #     Returns:
+    #         New portion of text to TTS, or empty string if no new text
+    #     """
+    #     if not current_text:
+    #         return ""
+    #     
+    #     if not previous_text:
+    #         # First translation, return all
+    #         return current_text
+    #     
+    #     # Normalize text for comparison
+    #     curr_norm = current_text.strip()
+    #     prev_norm = previous_text.strip()
+    #     
+    #     if curr_norm == prev_norm:
+    #         # Exact duplicate
+    #         return ""
+    #     
+    #     # Strategy 1: Character-level exact prefix matching (most accurate)
+    #     if curr_norm.startswith(prev_norm):
+    #         new_text = curr_norm[len(prev_norm):].strip()
+    #         if new_text:
+    #             logger.debug(f"[TTS-OVERLAP] Character-level prefix match, new: '{new_text[:30]}...'")
+    #             return new_text
+    #     
+    #     # Strategy 2: Find previous as substring (handles minor variations)
+    #     prev_idx = curr_norm.find(prev_norm)
+    #     if prev_idx != -1:
+    #         new_text = curr_norm[prev_idx + len(prev_norm):].strip()
+    #         if new_text:
+    #             logger.debug(f"[TTS-OVERLAP] Substring match at {prev_idx}, new: '{new_text[:30]}...'")
+    #             return new_text
+    #     
+    #     # Strategy 3: Word-level matching with threshold
+    #     curr_words = curr_norm.split()
+    #     prev_words = prev_norm.split()
+    #     
+    #     # Find longest common prefix in words
+    #     common_prefix_len = 0
+    #     for i, (cw, pw) in enumerate(zip(curr_words, prev_words)):
+    #         if cw.lower() == pw.lower():
+    #             common_prefix_len = i + 1
+    #         else:
+    #             break
+    #     
+    #     # If >50% words match as prefix, extract remaining
+    #     if common_prefix_len > 0 and common_prefix_len >= len(prev_words) * 0.5:
+    #         new_words = curr_words[common_prefix_len:]
+    #         new_text = ' '.join(new_words).strip()
+    #         if new_text:
+    #             logger.debug(
+    #                 f"[TTS-OVERLAP] Word-level match ({common_prefix_len}/{len(prev_words)} words), "
+    #                 f"new: '{new_text[:30]}...'"
+    #             )
+    #             return new_text
+    #     
+    #     # Strategy 4: Fuzzy matching (last resort)
+    #     try:
+    #         from difflib import SequenceMatcher
+    #         ratio = SequenceMatcher(None, prev_norm, curr_norm).ratio()
+    #         
+    #         logger.debug(f"[TTS-OVERLAP] Similarity ratio: {ratio:.2f}")
+    #         
+    #         # CRITICAL: Check for duplicate content (same meaning, different wording)
+    #         if ratio > 0.6:  # 60% similarity → likely same content
+    #             if ratio >= 0.8:
+    #                 # Very high similarity → probably duplicate → SKIP
+    #                 logger.warning(
+    #                     f"[TTS-OVERLAP] HIGH similarity ({ratio:.2f}) detected - "
+    #                     f"likely duplicate content, SKIPPING TTS. "
+    #                     f"Prev: '{prev_norm[:50]}...', Curr: '{curr_norm[:50]}...'"
+    #                 )
+    #                 return ""  # Skip TTS for duplicate content
+    #             elif ratio >= 0.7:
+    #                 # High similarity → extract new portion if possible
+    #                 matcher = SequenceMatcher(None, prev_norm, curr_norm)
+    #                 match = matcher.find_longest_match(0, len(prev_norm), 0, len(curr_norm))
+    #                 
+    #                 if match.size > 0:
+    #                     # Extract text after longest match
+    #                     new_text = curr_norm[match.b + match.size:].strip()
+    #                     if new_text:
+    #                         logger.debug(
+    #                             f"[TTS-OVERLAP] Fuzzy match (ratio={ratio:.2f}), new: '{new_text[:30]}...'"
+    #                         )
+    #                         return new_text
+    #                 
+    #                 # No clear new portion but high similarity → skip
+    #                 logger.warning(
+    #                     f"[TTS-OVERLAP] HIGH similarity ({ratio:.2f}) but no clear new text, "
+    #                     f"SKIPPING to avoid duplicate. Prev: '{prev_norm[:50]}...', Curr: '{curr_norm[:50]}...'"
+    #                 )
+    #                 return ""
+    #             else:
+    #                 # Medium similarity (0.6-0.7) → might be variation of same content
+    #                 # Check word overlap
+    #                 prev_words_set = set(prev_norm.lower().split())
+    #                 curr_words_set = set(curr_norm.lower().split())
+    #                 common_words = prev_words_set & curr_words_set
+    #                 word_overlap_ratio = len(common_words) / max(len(prev_words_set), len(curr_words_set))
+    #                 
+    #                 if word_overlap_ratio > 0.6:
+    #                     logger.warning(
+    #                         f"[TTS-OVERLAP] MEDIUM similarity ({ratio:.2f}) with high word overlap "
+    #                         f"({word_overlap_ratio:.2f}) - likely same content rephrased, SKIPPING. "
+    #                         f"Prev: '{prev_norm[:50]}...', Curr: '{curr_norm[:50]}...'"
+    #                     )
+    #                     return ""  # Skip duplicate content
+    #     except Exception as e:
+    #         logger.warning(f"[TTS-OVERLAP] Fuzzy matching failed: {e}")
+    #     
+    #     # Low similarity → treat as completely new text
+    #     logger.info(
+    #         f"[TTS-OVERLAP] LOW similarity detected, treating as new text. "
+    #         f"Prev: '{prev_norm[:50]}...', Curr: '{curr_norm[:50]}...'"
+    #     )
+    #     return current_text
 
 
     def _send_rtp_chunks_to_sfu(self, cabin: TranslationCabin, audio_data: bytes) -> bool:
