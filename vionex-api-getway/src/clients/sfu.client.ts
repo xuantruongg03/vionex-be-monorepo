@@ -37,6 +37,7 @@ export class SfuClientService implements OnModuleInit {
         return firstValueFrom(
             this.sfuService.createTransport({
                 room_id: roomId,
+                is_producer: isProducer,
             }),
         );
     }

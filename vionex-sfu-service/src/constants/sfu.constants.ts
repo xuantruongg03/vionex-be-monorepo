@@ -11,7 +11,7 @@
  * Maximum room size where all users can consume all streams
  * For rooms with ≤ this number, bandwidth optimization is disabled
  */
-export const SMALL_ROOM_MAX_USERS = 3;
+export const SMALL_ROOM_MAX_USERS = 11;
 
 // ============================================================================
 // PRIORITY STREAM CONFIGURATION

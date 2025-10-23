@@ -160,7 +160,8 @@ export class SfuController {
     @GrpcMethod('SfuService', 'CreateTransport')
     async handleCreateTransport(data: {
         room_id: string;
-    }): Promise<{ status: string; transport_data: string }> {
+        is_producer?: boolean;
+    }): Promise<{ status: string; transport_data: string; is_producer?: boolean }> {
         try {
             const result =
                 await this.sfuService.createWebRtcTransportWithIceServers(
@@ -177,9 +178,18 @@ export class SfuController {
                 iceServers: result.iceServers,
             };
 
+            // Store transport direction in appData for future reference
+            if (data.is_producer !== undefined) {
+                result.transport.appData = {
+                    ...result.transport.appData,
+                    isProducer: data.is_producer,
+                };
+            }
+
             return {
                 status: 'success',
                 transport_data: JSON.stringify({ transport: transportData }),
+                is_producer: data.is_producer, // Echo back the transport type
             };
         } catch (error) {
             console.error('Error creating WebRTC transport:', error);

@@ -1,21 +1,17 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import mediasoupTypes from 'mediasoup/node/lib/types';
+import {
+    MAX_PRIORITY_USERS,
+    SMALL_ROOM_MAX_USERS,
+    SPEAKER_INACTIVITY_THRESHOLD_MS
+} from './constants/sfu.constants';
 import * as T from './interface';
 import {
     createSafeCabinId,
-    createSafeTranslatedStreamId,
-    sanitizeId,
+    createSafeTranslatedStreamId
 } from './utils/sdp-helpers';
 import { WorkerPoolService } from './worker-pool/worker-pool.service';
-import {
-    SMALL_ROOM_MAX_USERS,
-    MAX_PRIORITY_USERS,
-    SPEAKING_THRESHOLD_MS,
-    SPEAKER_CLEANUP_INTERVAL_MS,
-    SPEAKER_INACTIVITY_THRESHOLD_MS,
-    CONSUMER_THRESHOLD,
-} from './constants/sfu.constants';
 
 @Injectable()
 export class SfuService implements OnModuleInit, OnModuleDestroy {
@@ -59,10 +55,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         private readonly workerPool: WorkerPoolService,
     ) {
         // Kích hoạt task cleanup cho active speakers
-        setInterval(
-            () => this.cleanupInactiveSpeakers(),
-            SPEAKER_CLEANUP_INTERVAL_MS,
-        );
+        // setInterval(
+        //     () => this.cleanupInactiveSpeakers(),
+        //     SPEAKER_CLEANUP_INTERVAL_MS,
+        // );
     }
     async onModuleInit() {
         try {
@@ -585,17 +581,24 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         // Step 1: Add currently speaking users (unlimited slots)
         const roomSpeakers = this.activeSpeakers.get(roomId);
         if (roomSpeakers) {
-            const currentTime = new Date();
-
+            // ✅ Add ALL speakers trong list, KHÔNG check timeout
             roomSpeakers.forEach((lastSpeakTime, peerId) => {
-                if (
-                    currentTime.getTime() - lastSpeakTime.getTime() <
-                    SPEAKING_THRESHOLD_MS
-                ) {
-                    prioritizedUsers.add(peerId);
-                }
+                prioritizedUsers.add(peerId);
             });
         }
+        // const roomSpeakers = this.activeSpeakers.get(roomId);
+        // if (roomSpeakers) {
+        //     const currentTime = new Date();
+
+        //     roomSpeakers.forEach((lastSpeakTime, peerId) => {
+        //         if (
+        //             currentTime.getTime() - lastSpeakTime.getTime() <
+        //             SPEAKING_THRESHOLD_MS
+        //         ) {
+        //             prioritizedUsers.add(peerId);
+        //         }
+        //     });
+        // }
 
         // Step 2: Add special users (unlimited slots - screen share, translation, etc.)
         const allRoomStreams = this.getStreamsByRoom(roomId);
@@ -1360,20 +1363,12 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         try {
             if (this.activeSpeakers.has(roomId)) {
                 const roomSpeakers = this.activeSpeakers.get(roomId);
-                const currentTime = new Date();
-                const speakThreshold = 2000; // 2 giây
-
                 roomSpeakers?.forEach((lastSpeakTime, peerId) => {
-                    if (
-                        currentTime.getTime() - lastSpeakTime.getTime() <
-                        speakThreshold
-                    ) {
-                        activeSpeakers.push({
-                            peer_id: peerId,
-                            last_speak_time: lastSpeakTime.getTime().toString(),
-                        });
-                    }
+                activeSpeakers.push({
+                    peer_id: peerId,
+                    last_speak_time: lastSpeakTime.getTime().toString(),
                 });
+            });
             }
 
             return { active_speakers: activeSpeakers };
@@ -1442,17 +1437,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
     isUserSpeaking(roomId: string, peerId: string): boolean {
         const roomSpeakers = this.activeSpeakers.get(roomId);
-        if (!roomSpeakers || !roomSpeakers.has(peerId)) {
-            return false;
-        }
-
-        const lastSpeakTime = roomSpeakers.get(peerId)!;
-        const currentTime = new Date();
-
-        return (
-            currentTime.getTime() - lastSpeakTime.getTime() <
-            SPEAKING_THRESHOLD_MS
-        );
+        return roomSpeakers?.has(peerId) || false;
     }
 
     private cleanupInactiveSpeakers() {
