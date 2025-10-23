@@ -77,7 +77,7 @@ check_pm2() {
         return 0
     else
         print_warning "PM2 is not installed. Installing PM2..."
-        npm install -g pm2
+        sudo npm install -g pm2
         print_success "PM2 installed successfully"
         return 0
     fi
@@ -237,7 +237,7 @@ setup_qdrant() {
     print_header "Setting up Qdrant Vector Database"
     
     # Check if Qdrant container is already running
-    if docker ps --format "table {{.Names}}" | grep -q "qdrant"; then
+    if sudo docker ps --format "table {{.Names}}" | grep -q "qdrant"; then
         print_success "Qdrant container is already running"
         
         # Test Qdrant connection
@@ -250,9 +250,9 @@ setup_qdrant() {
     fi
     
     # Check if Qdrant container exists but stopped
-    if docker ps -a --format "table {{.Names}}" | grep -q "qdrant"; then
+    if sudo docker ps -a --format "table {{.Names}}" | grep -q "qdrant"; then
         print_info "Found existing Qdrant container. Starting it..."
-        docker start qdrant
+        sudo docker start qdrant
         sleep 5
         
         # Test connection after starting
@@ -266,7 +266,7 @@ setup_qdrant() {
     
     # Create and start new Qdrant container
     print_info "No existing Qdrant container found. Creating new one..."
-    docker run -d \
+    sudo docker run -d \
         --name qdrant \
         -p 6333:6333 \
         -p 6334:6334 \
@@ -500,7 +500,7 @@ install_dependencies() {
     if [ -d "vionex-semantic-service" ]; then
         print_info "Installing Python dependencies for vionex-semantic-service..."
         cd "vionex-semantic-service"
-        apt install python3.12-venv
+        sudo apt install -y python3.12-venv
         
         # Check if virtual environment exists
         if [ ! -d "venv" ]; then
