@@ -4,7 +4,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-vector_model = SentenceTransformer(MODEL_VECTOR)
+vector_model = SentenceTransformer(MODEL_VECTOR, trust_remote_code=True)
 
 logger.info("[TRANSLATION] Loading NLLB-Distilled (facebook/nllb-200-distilled-600M)")
 
