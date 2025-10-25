@@ -1,8 +1,8 @@
 from utils.log_manager import logger
-import threading
 import time
 import uuid
 from typing import List
+from concurrent.futures import ThreadPoolExecutor
 
 from qdrant_client.http.models import (FieldCondition, Filter, MatchValue,
                                        PointStruct, PointVectors)
@@ -18,6 +18,9 @@ class SemanticProcessor:
         self.model = vector_model
         self.qdrant_client = qdrant_client
         self.translation_service = TranslateProcess()
+        
+        # Create thread pool for background translation
+        self.executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="translation")
 
         if self.model is None:
             logger.error("Cannot load vector model")
@@ -113,12 +116,9 @@ class SemanticProcessor:
                 collection_name=COLLECTION_NAME, points=[point], wait=True)
             logger.info(f"Saved original transcript for point_id: {point_id}")
 
-            # Trigger the translation and update in a separate thread
-            background_thread = threading.Thread(
-                target=self._translate_and_update_in_background,
-                args=(point_id, original_text)
-            )
-            background_thread.start()
+            # Submit translation task to thread pool (non-blocking)
+            logger.info(f"Submitting background translation task for point_id: {point_id}")
+            self.executor.submit(self._translate_and_update_in_background, point_id, original_text)
 
             return True
 

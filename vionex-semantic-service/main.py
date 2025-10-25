@@ -132,8 +132,36 @@ class VionexSemanticService(semantic_pb2_grpc.SemanticServiceServicer):
         
 def serve():
     """Start the gRPC server"""
+    import signal
+    import time
+    import os
+    
+    server = None
+    shutdown_requested = False
+    
+    def handle_shutdown(signum, frame):
+        nonlocal shutdown_requested
+        if shutdown_requested:
+            logger.warning("Shutdown already in progress, ignoring duplicate signal")
+            return
+        
+        shutdown_requested = True
+        logger.info(f"[SHUTDOWN] Received signal: {signum} (PID: {os.getpid()})")
+        logger.info(f"[SHUTDOWN] Signal name: {signal.Signals(signum).name if signum else 'UNKNOWN'}")
+        
+        if server:
+            logger.info("[SHUTDOWN] Stopping gRPC server gracefully (10s grace period)...")
+            server.stop(grace=10)
+            logger.info("[SHUTDOWN] Server stopped successfully")
+        else:
+            logger.warning("[SHUTDOWN] Server not initialized yet")
+    
     try:
-        logger.info("Starting Vionex Semantic Service gRPC server...")
+        logger.info(f"Starting Vionex Semantic Service gRPC server (PID: {os.getpid()})...")
+        
+        # Register signal handlers
+        signal.signal(signal.SIGTERM, handle_shutdown)
+        signal.signal(signal.SIGINT, handle_shutdown)
         
         # Create gRPC server
         server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
@@ -150,7 +178,12 @@ def serve():
         logger.info(f"Vionex Semantic Service running on {listen_addr}")
 
         # Wait for termination
-        server.wait_for_termination()
+        try:
+            while not shutdown_requested:
+                time.sleep(1)  # Sleep in shorter intervals to check shutdown flag
+        except KeyboardInterrupt:
+            logger.info("[SHUTDOWN] Keyboard interrupt received")
+            handle_shutdown(signal.SIGINT, None)
         
     except Exception as e:
         logger.error(f"Failed to start server: {e}")
@@ -164,7 +197,7 @@ def main():
     try:
         serve()
     except KeyboardInterrupt:
-        logger.info("Received shutdown signal")
+        logger.info("Main received shutdown signal")
     except Exception as e:
         logger.error(f"Service error: {e}")
         sys.exit(1)
