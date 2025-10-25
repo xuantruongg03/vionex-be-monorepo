@@ -59,9 +59,9 @@ class VionexSemanticService(semantic_pb2_grpc.SemanticServiceServicer):
             result = self.semantic_processor.save(
                 room_id=request.room_id, 
                 speaker=request.speaker, 
-                text=request.text, 
+                original_text=request.text,
+                original_language=language,
                 timestamp=timestamp, 
-                language=language,
                 organization_id=organization_id
             )
             

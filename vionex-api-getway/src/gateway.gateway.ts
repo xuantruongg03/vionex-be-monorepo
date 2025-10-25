@@ -2083,6 +2083,7 @@ export class GatewayGateway
                     isFile?: boolean;
                 };
             };
+            organizationId?: string;
         },
     ) {
         return this.chatHandler.handleSendMessage(client, data);
@@ -2110,6 +2111,7 @@ export class GatewayGateway
                     isFile?: boolean;
                 };
             };
+            organizationId?: string;
         },
     ) {
         return this.chatHandler.handleSendFileMessage(client, data);

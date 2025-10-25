@@ -73,6 +73,7 @@ export class ChatHandler {
                     isFile?: boolean;
                 };
             };
+            organizationId?: string;
         },
     ) {
         try {
@@ -94,6 +95,7 @@ export class ChatHandler {
                 text: data.message.text,
                 // Pass reply data as replyTo object
                 replyTo: data.message.replyTo,
+                org_id: data.organizationId, // Pass organizationId to chat service
             });
 
             if (response && (response.success || response.message)) {
@@ -155,6 +157,7 @@ export class ChatHandler {
                     isFile?: boolean;
                 };
             };
+            organizationId?: string; // Add organizationId parameter
         },
     ) {
         try {
@@ -170,6 +173,7 @@ export class ChatHandler {
                 isImage: data.message.isImage,
                 // Pass reply data as replyTo object
                 replyTo: data.message.replyTo,
+                org_id: data.organizationId, // Pass organizationId to chat service
             });
 
             if (response && response.success) {

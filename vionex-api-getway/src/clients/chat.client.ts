@@ -26,6 +26,7 @@ export class ChatClientService implements OnModuleInit {
         fileType?: string;
         fileSize?: number;
         isImage?: boolean;
+        org_id?: string; // Add organizationId field
         // Reply object
         replyTo?: {
             messageId: string;
