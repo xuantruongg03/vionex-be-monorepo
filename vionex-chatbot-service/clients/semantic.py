@@ -8,14 +8,25 @@ class SemanticClient:
     
     def __init__(self):
         """Initialize the Semantic Client"""
-        # Create async channel and stub
-        self.channel = grpc.aio.insecure_channel(f'{SEMANTIC_SERVICE_HOST}:{SEMANTIC_SERVICE_PORT}')
-        self.stub = semantic_pb2_grpc.SemanticServiceStub(self.channel)
+        # Delay channel creation until first use (lazy initialization)
+        self.channel = None
+        self.stub = None
+        self.service_host = SEMANTIC_SERVICE_HOST
+        self.service_port = SEMANTIC_SERVICE_PORT
         print("Semantic Client initialized")
+
+    def _ensure_connection(self):
+        """Ensure gRPC channel and stub are created (lazy initialization)"""
+        if self.channel is None:
+            self.channel = grpc.aio.insecure_channel(f'{self.service_host}:{self.service_port}')
+            self.stub = semantic_pb2_grpc.SemanticServiceStub(self.channel)
 
     async def search(self, room_id: str, text: str, organization_id: str = None):
         """Search for a transcript using the semantic service."""
         try:
+            # Ensure connection is established
+            self._ensure_connection()
+            
             # Create request with required fields
             request_params = {
                 'room_id': room_id,
