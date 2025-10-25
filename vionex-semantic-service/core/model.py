@@ -13,24 +13,64 @@ from utils.log_manager import logger
 
 vector_model = SentenceTransformer(MODEL_VECTOR, trust_remote_code=True)
 
-logger.info("[TRANSLATION] Loading NLLB-Distilled (facebook/nllb-200-distilled-600M)")
+logger.info(f"[DETECT MODEL] Loaded model")
 
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+import fasttext
+
+detect_model = fasttext.load_model("lid.176.ftz")
+
+logger.info("[TRANSLATION] Loading MarianMT models (Helsinki-NLP)")
+
+from transformers import MarianMTModel, MarianTokenizer
 import torch
 
-# Suppress the torch_dtype warning
-nllb_model = AutoModelForSeq2SeqLM.from_pretrained(
-    "facebook/nllb-200-distilled-600M",
-    dtype=torch.float16 if TYPE_ENGINE == "cuda" else torch.float32
-)
+# Load MarianMT models for each language pair
+translation_models = {}
+translation_tokenizers = {}
 
-nllb_tokenizer = AutoTokenizer.from_pretrained("facebook/nllb-200-distilled-600M")
-
+# Vietnamese to English
+logger.info("[TRANSLATION] Loading vi-en model...")
+vi_en_model_name = "Helsinki-NLP/opus-mt-vi-en"
+translation_tokenizers["vi-en"] = MarianTokenizer.from_pretrained(vi_en_model_name)
+translation_models["vi-en"] = MarianMTModel.from_pretrained(vi_en_model_name)
 if TYPE_ENGINE == "cuda":
-    nllb_model = nllb_model.to("cuda")
+    translation_models["vi-en"] = translation_models["vi-en"].to("cuda")
+logger.info("[TRANSLATION] vi-en model loaded successfully")
 
-# Create unified interface
-translation_models = {"nllb": nllb_model}
-translation_tokenizers = {"nllb": nllb_tokenizer}
+# Lao to English - URL will be provided later
+logger.info("[TRANSLATION] Loading lo-en model...")
+lo_en_model_name = "PLACEHOLDER_LO_EN_MODEL"  # Will be updated with actual model URL
+# translation_tokenizers["lo-en"] = MarianTokenizer.from_pretrained(lo_en_model_name)
+# translation_models["lo-en"] = MarianMTModel.from_pretrained(lo_en_model_name)
+# if TYPE_ENGINE == "cuda":
+#     translation_models["lo-en"] = translation_models["lo-en"].to("cuda")
+logger.info("[TRANSLATION] lo-en model - waiting for model URL")
 
-logger.info("[TRANSLATION] NLLB-Distilled loaded successfully (supports 200+ languages)")
+# English to English (no translation needed)
+translation_models["en-en"] = None
+translation_tokenizers["en-en"] = None
+logger.info("[TRANSLATION] en-en - no translation needed")
+
+logger.info(f"[TRANSLATION] MarianMT models loaded successfully: {list(translation_models.keys())}")
+
+# # Comment out NLLB model
+# logger.info("[TRANSLATION] Loading NLLB-Distilled (facebook/nllb-200-distilled-600M)")
+# from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+# import torch
+
+# # Suppress the torch_dtype warning
+# nllb_model = AutoModelForSeq2SeqLM.from_pretrained(
+#     "facebook/nllb-200-distilled-600M",
+#     dtype=torch.float16 if TYPE_ENGINE == "cuda" else torch.float32
+# )
+
+# nllb_tokenizer = AutoTokenizer.from_pretrained("facebook/nllb-200-distilled-600M")
+
+# if TYPE_ENGINE == "cuda":
+#     nllb_model = nllb_model.to("cuda")
+
+# # Create unified interface
+# translation_models = {"nllb": nllb_model}
+# translation_tokenizers = {"nllb": nllb_tokenizer}
+
+# logger.info("[TRANSLATION] NLLB-Distilled loaded successfully (supports 200+ languages)")

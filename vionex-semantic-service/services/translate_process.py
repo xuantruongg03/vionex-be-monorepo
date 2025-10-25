@@ -1,62 +1,67 @@
 import torch
-from core.model import translation_models, translation_tokenizers
-from langdetect import detect, LangDetectException
+from core.model import translation_models, translation_tokenizers, detect_model
 from utils.log_manager import logger
 
 class TranslateProcess:
     def __init__(self):
         self.models = translation_models
         self.tokenizers = translation_tokenizers
+        self.detect_model = detect_model
         
-        # NLLB language codes (ISO 639-3 with script)
-        self.nllb_lang_codes = {
-            "vi": "vie_Latn",  # Vietnamese (Latin script)
-            "en": "eng_Latn",  # English (Latin script)
-            "lo": "lao_Laoo"   # Lao (Lao script)
+        # Supported language pairs for MarianMT
+        self.supported_pairs = {
+            "vi": "vi-en",  # Vietnamese to English
+            "lo": "lo-en",  # Lao to English
+            "en": "en-en"   # English (no translation)
         }
-        logger.info("[TranslateProcess] Using NLLB-Distilled")
+        logger.info("[TranslateProcess] Using MarianMT (Helsinki-NLP)")
 
-    def _translate_nllb(self, text: str, src_lang: str, tgt_lang: str):
+    def _translate_marian(self, text: str, src_lang: str, tgt_lang: str = "en"):
         """
-        Revised NLLB translation function to explicitly accept source and target languages.
+        Translate text using MarianMT model for specific language pair.
         """
         try:
             # Validate input
             if not text or not text.strip():
-                logger.warning("[NLLB] Empty text received")
+                logger.warning("[MarianMT] Empty text received")
                 return ""
             
             text = text.strip()
             
             # Check text length
-            if len(text) > 5000:  # Prevent extremely long texts
-                logger.warning(f"[NLLB] Text too long ({len(text)} chars), truncating to 5000")
+            if len(text) > 5000:
+                logger.warning(f"[MarianMT] Text too long ({len(text)} chars), truncating to 5000")
                 text = text[:5000]
             
-            # Get NLLB language codes
-            src_code = self.nllb_lang_codes.get(src_lang)
-            tgt_code = self.nllb_lang_codes.get(tgt_lang)
-
-            if not src_code or not tgt_code:
-                logger.error(f"[NLLB] Unsupported language pair: {src_lang} -> {tgt_lang}")
+            # Get model pair key
+            pair_key = self.supported_pairs.get(src_lang)
+            
+            if not pair_key:
+                logger.error(f"[MarianMT] Unsupported source language: {src_lang}")
                 return text
-
-            model = self.models["nllb"]
-            tokenizer = self.tokenizers["nllb"]
             
-            # Set source language
-            tokenizer.src_lang = src_code
+            # If English to English, no translation needed
+            if pair_key == "en-en":
+                logger.info(f"[MarianMT] English detected, no translation needed")
+                return text
             
-            logger.info(f"[NLLB] Translating '{text}' | {src_code} → {tgt_code}")
+            # Get model and tokenizer for this pair
+            model = self.models.get(pair_key)
+            tokenizer = self.tokenizers.get(pair_key)
             
-            # Tokenize with proper settings
+            if not model or not tokenizer:
+                logger.error(f"[MarianMT] Model not loaded for pair: {pair_key}")
+                return text
+            
+            logger.info(f"[MarianMT] Translating '{text}' | {src_lang} → {tgt_lang} using {pair_key}")
+            
+            # Tokenize
             inputs = tokenizer(
                 text, 
                 return_tensors="pt", 
                 padding=True, 
                 truncation=True,
-                max_length=512,  # Increase max length
-                add_special_tokens=True
+                max_length=512
             )
             
             # Move to device
@@ -64,18 +69,15 @@ class TranslateProcess:
                 device = next(model.parameters()).device
                 inputs = {k: v.to(device) for k, v in inputs.items()}
             except Exception as e:
-                logger.warning(f"[NLLB] Could not move to device: {e}")
+                logger.warning(f"[MarianMT] Could not move to device: {e}")
             
-            # Generate translation with better parameters
+            # Generate translation
             with torch.no_grad():
                 translated = model.generate(
                     **inputs,
-                    forced_bos_token_id=tokenizer.convert_tokens_to_ids(tgt_code),
-                    max_length=512,  # Use max_length instead of max_new_tokens
-                    num_beams=5,  # Increase beam search
+                    max_length=512,
+                    num_beams=4,
                     early_stopping=True,
-                    no_repeat_ngram_size=2,
-                    length_penalty=1.0,
                     pad_token_id=tokenizer.pad_token_id,
                     eos_token_id=tokenizer.eos_token_id
                 )
@@ -83,22 +85,17 @@ class TranslateProcess:
             # Decode
             result = tokenizer.decode(translated[0], skip_special_tokens=True).strip()
             
-            logger.info(f"[NLLB] Translation result: '{result}'")
+            logger.info(f"[MarianMT] Translation result: '{result}'")
             
-            # Validation: Check if translation is reasonable
+            # Validation
             if not result or len(result) == 0:
-                logger.warning(f"[NLLB] Empty translation result, returning original text")
-                return text
-                
-            # If result is exactly same as input (unusual), return original
-            if result.lower() == text.lower():
-                logger.warning(f"[NLLB] Translation identical to input, returning original")
+                logger.warning(f"[MarianMT] Empty translation result, returning original text")
                 return text
             
             return result
             
         except Exception as e:
-            logger.error(f"[NLLB] Translation error {src_lang} -> {tgt_lang}: {e}")
+            logger.error(f"[MarianMT] Translation error {src_lang} -> {tgt_lang}: {e}")
             return text
 
     def translate(self, text: str, target_lang: str = "en"):
@@ -111,33 +108,36 @@ class TranslateProcess:
         try:
             text_stripped = text.strip()
             
-            # For very short text (< 4 characters), skip detection and default to Vietnamese
-            # This prevents misdetection like "sss" being detected as Finnish
-            if len(text_stripped) < 4:
-                logger.info(f"[Translate] Text too short ({len(text_stripped)} chars), defaulting to Vietnamese: '{text_stripped}'")
+            # Use FastText for language detection
+            predictions = self.detect_model.predict(text_stripped, k=1)
+            detected_lang_code = predictions[0][0].replace('__label__', '')  # e.g., '__label__vi' -> 'vi'
+            confidence = predictions[1][0]
+            
+            logger.info(f"[Translate] Detected language: '{detected_lang_code}' (confidence: {confidence:.2f}) for text: '{text_stripped[:50]}...'")
+            
+            # Map language code (might be 'vie' from fasttext, need to convert to 'vi')
+            # FastText returns ISO 639-3, we need ISO 639-1
+            lang_map = {
+                'vie': 'vi',  # Vietnamese
+                'lao': 'lo',  # Lao
+                'eng': 'en',  # English
+            }
+            source_lang = lang_map.get(detected_lang_code, detected_lang_code)
+            
+            # If detected language is not supported, default to Vietnamese
+            if source_lang not in self.supported_pairs:
+                logger.warning(f"[Translate] Detected language '{source_lang}' not supported, defaulting to Vietnamese")
                 source_lang = "vi"
-            else:
-                try:
-                    source_lang = detect(text_stripped)  # e.g., returns "vi", "en", "lo"
-                    logger.debug(f"[Translate] Detected language '{source_lang}' for text: '{text_stripped[:50]}...'")
-                    
-                    # If detected language is not supported, default to Vietnamese
-                    if source_lang not in self.nllb_lang_codes:
-                        logger.warning(f"[Translate] Detected language '{source_lang}' not supported, defaulting to Vietnamese")
-                        source_lang = "vi"
-                        
-                except LangDetectException:
-                    logger.warning(f"[Translate] Could not detect language, defaulting to Vietnamese: '{text_stripped[:50]}...'")
-                    source_lang = "vi"  # Default to Vietnamese
-
-            # 2. If source is the same as target, no translation needed
+            
+            # If source is the same as target, no translation needed
             if source_lang == target_lang:
-                logger.debug(f"[Translate] Source ({source_lang}) same as target ({target_lang}), skipping translation")
+                logger.info(f"[Translate] Source ({source_lang}) same as target ({target_lang}), skipping translation")
                 return text
 
-            # 3. Directly call _translate_nllb with the determined parameters
-            return self._translate_nllb(text, source_lang, target_lang)
+            # Translate using MarianMT
+            return self._translate_marian(text, source_lang, target_lang)
 
         except Exception as e:
             logger.error(f"Error in auto-translate: {e}")
-            return text # Return original text on error
+            return text
+
