@@ -79,7 +79,6 @@ export class ChatHandler {
         try {
             // Validate input
             if (!data.roomId || !data.message || !data.message.text) {
-                console.error('[ChatHandler] Invalid message data:', data);
                 this.eventService.emitError(
                     client,
                     'Invalid message data',
@@ -101,7 +100,7 @@ export class ChatHandler {
             if (response && (response.success || response.message)) {
                 // Extract the actual message object - handle both response formats
                 let actualMessage: any = null;
-                
+
                 if ('message' in response && response.message) {
                     // Response has message property
                     actualMessage = response.message;
@@ -109,9 +108,8 @@ export class ChatHandler {
                     // Response is the message itself
                     actualMessage = response;
                 }
-                
+
                 if (!actualMessage) {
-                    console.error('[ChatHandler] No message in response:', response);
                     this.eventService.emitError(
                         client,
                         'Failed to send message',

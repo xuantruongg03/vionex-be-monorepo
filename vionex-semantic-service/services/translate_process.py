@@ -100,12 +100,20 @@ class TranslateProcess:
             return ""
 
         try:
-            try:
-                source_lang = detect(text)  # e.g., returns "vi", "en", "lo"
-                logger.debug(f"[Translate] Detected language '{source_lang}' for text: '{text[:50]}...'")
-            except LangDetectException:
-                logger.warning(f"[Translate] Could not detect language, defaulting to Vietnamese: '{text[:50]}...'")
-                source_lang = "vi"  # Default to Vietnamese
+            text_stripped = text.strip()
+            
+            # For very short text (< 4 characters), skip detection and default to Vietnamese
+            # This prevents misdetection like "sss" being detected as Finnish
+            if len(text_stripped) < 4:
+                logger.info(f"[Translate] Text too short ({len(text_stripped)} chars), defaulting to Vietnamese: '{text_stripped}'")
+                source_lang = "vi"
+            else:
+                try:
+                    source_lang = detect(text_stripped)  # e.g., returns "vi", "en", "lo"
+                    logger.debug(f"[Translate] Detected language '{source_lang}' for text: '{text_stripped[:50]}...'")
+                except LangDetectException:
+                    logger.warning(f"[Translate] Could not detect language, defaulting to Vietnamese: '{text_stripped[:50]}...'")
+                    source_lang = "vi"  # Default to Vietnamese
 
             # 2. If source is the same as target, no translation needed
             if source_lang == target_lang:
