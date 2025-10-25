@@ -162,8 +162,7 @@ def serve():
 def main():
     """Main function"""
     try:
-        import asyncio
-        asyncio.run(serve())
+        serve()
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
     except Exception as e:

@@ -5,7 +5,7 @@ import uuid
 from typing import List
 
 from qdrant_client.http.models import (FieldCondition, Filter, MatchValue,
-                                       PointStruct)
+                                       PointStruct, PointVectors)
 
 from core.config import COLLECTION_NAME
 from core.model import vector_model
@@ -51,10 +51,10 @@ class SemanticProcessor:
                 wait=True
             )
 
-            # Update the vector itself
+            # Update the vector itself - use PointVectors instead of PointStruct
             self.qdrant_client.update_vectors(
                 collection_name=COLLECTION_NAME,
-                points=[PointStruct(id=point_id, vector=english_vector)],
+                points=[PointVectors(id=point_id, vector=english_vector)],
                 wait=True
             )
 

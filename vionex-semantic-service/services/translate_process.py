@@ -47,15 +47,16 @@ class TranslateProcess:
             # Set source language
             tokenizer.src_lang = src_code
             
-            logger.debug(f"[NLLB] Translating {src_lang}→{tgt_lang}: '{text[:50]}...'")
+            logger.info(f"[NLLB] Translating '{text}' | {src_code} → {tgt_code}")
             
-            # Tokenize
+            # Tokenize with proper settings
             inputs = tokenizer(
                 text, 
                 return_tensors="pt", 
                 padding=True, 
                 truncation=True,
-                max_length=256
+                max_length=512,  # Increase max length
+                add_special_tokens=True
             )
             
             # Move to device
@@ -65,24 +66,34 @@ class TranslateProcess:
             except Exception as e:
                 logger.warning(f"[NLLB] Could not move to device: {e}")
             
-            # Generate translation
+            # Generate translation with better parameters
             with torch.no_grad():
                 translated = model.generate(
                     **inputs,
                     forced_bos_token_id=tokenizer.convert_tokens_to_ids(tgt_code),
-                    max_new_tokens=128,
-                    num_beams=2,
-                    do_sample=False,
+                    max_length=512,  # Use max_length instead of max_new_tokens
+                    num_beams=5,  # Increase beam search
                     early_stopping=True,
-                    temperature=1.0,
-                    repetition_penalty=1.2,
-                    no_repeat_ngram_size=3
+                    no_repeat_ngram_size=2,
+                    length_penalty=1.0,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id
                 )
             
             # Decode
-            result = tokenizer.decode(translated[0], skip_special_tokens=True)
+            result = tokenizer.decode(translated[0], skip_special_tokens=True).strip()
             
-            logger.debug(f"[NLLB] Translation result: '{result[:50]}...'")
+            logger.info(f"[NLLB] Translation result: '{result}'")
+            
+            # Validation: Check if translation is reasonable
+            if not result or len(result) == 0:
+                logger.warning(f"[NLLB] Empty translation result, returning original text")
+                return text
+                
+            # If result is exactly same as input (unusual), return original
+            if result.lower() == text.lower():
+                logger.warning(f"[NLLB] Translation identical to input, returning original")
+                return text
             
             return result
             
@@ -109,6 +120,12 @@ class TranslateProcess:
                 try:
                     source_lang = detect(text_stripped)  # e.g., returns "vi", "en", "lo"
                     logger.debug(f"[Translate] Detected language '{source_lang}' for text: '{text_stripped[:50]}...'")
+                    
+                    # If detected language is not supported, default to Vietnamese
+                    if source_lang not in self.nllb_lang_codes:
+                        logger.warning(f"[Translate] Detected language '{source_lang}' not supported, defaulting to Vietnamese")
+                        source_lang = "vi"
+                        
                 except LangDetectException:
                     logger.warning(f"[Translate] Could not detect language, defaulting to Vietnamese: '{text_stripped[:50]}...'")
                     source_lang = "vi"  # Default to Vietnamese
