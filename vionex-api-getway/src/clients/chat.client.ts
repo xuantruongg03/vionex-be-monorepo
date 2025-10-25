@@ -35,18 +35,7 @@ export class ChatClientService implements OnModuleInit {
             isFile?: boolean;
         };
     }) {
-        return this.circuitBreaker.execute(async () => {
-            return RetryUtil.withRetry(
-                async () => {
-                    const response = await firstValueFrom(
-                        this.chatService.sendMessage(data),
-                    );
-                    return response;
-                },
-                3,
-                1000,
-            );
-        });
+        return await firstValueFrom(this.chatService.sendMessage(data));
     }
     async getMessages(data: { room_id: string }) {
         return this.circuitBreaker.execute(async () => {

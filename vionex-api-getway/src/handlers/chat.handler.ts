@@ -99,8 +99,32 @@ export class ChatHandler {
             });
 
             if (response && (response.success || response.message)) {
+                // Extract the actual message object - handle both response formats
+                let actualMessage: any = null;
+                
+                if ('message' in response && response.message) {
+                    // Response has message property
+                    actualMessage = response.message;
+                } else if ('sender_name' in response) {
+                    // Response is the message itself
+                    actualMessage = response;
+                }
+                
+                if (!actualMessage) {
+                    console.error('[ChatHandler] No message in response:', response);
+                    this.eventService.emitError(
+                        client,
+                        'Failed to send message',
+                        'SEND_MESSAGE_FAILED',
+                    );
+                    return { success: false, error: 'No message in response' };
+                }
+
                 const messageToEmit = {
-                    ...(response.message || response),
+                    ...actualMessage,
+                    // Map snake_case to camelCase for frontend compatibility
+                    senderName: actualMessage.sender_name,
+                    roomId: actualMessage.room_id,
                     // Ensure reply data is included in the emitted message
                     replyTo: data.message.replyTo,
                 };
@@ -176,9 +200,12 @@ export class ChatHandler {
                 org_id: data.organizationId, // Pass organizationId to chat service
             });
 
-            if (response && response.success) {
+            if (response && response.success && response.message) {
                 const messageToEmit = {
                     ...response.message,
+                    // Map snake_case to camelCase for frontend compatibility
+                    senderName: response.message.sender_name,
+                    roomId: response.message.room_id,
                     // Ensure reply data is included in the emitted message
                     replyTo: data.message.replyTo,
                 };

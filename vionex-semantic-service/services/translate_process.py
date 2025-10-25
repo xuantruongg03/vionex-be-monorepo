@@ -100,29 +100,20 @@ class TranslateProcess:
             return ""
 
         try:
-            text_stripped = text.strip()
-            
-            # Skip detection for very short texts (likely nonsense or abbreviations)
-            # These are often detected incorrectly
-            if len(text_stripped) < 4:
-                logger.info(f"[Translate] Text too short ({len(text_stripped)} chars), assuming Vietnamese: '{text_stripped}'")
-                source_lang = "vi"  # Default to Vietnamese for short texts
-            else:
-                # 1. Detect source language
-                try:
-                    source_lang = detect(text_stripped)  # e.g., returns "vi", "en", "lo"
-                    logger.debug(f"[Translate] Detected language '{source_lang}' for text: '{text_stripped[:50]}...'")
-                except LangDetectException:
-                    logger.warning(f"[Translate] Could not detect language, defaulting to Vietnamese: '{text_stripped[:50]}...'")
-                    source_lang = "vi"  # Default to Vietnamese
-            
+            try:
+                source_lang = detect(text)  # e.g., returns "vi", "en", "lo"
+                logger.debug(f"[Translate] Detected language '{source_lang}' for text: '{text[:50]}...'")
+            except LangDetectException:
+                logger.warning(f"[Translate] Could not detect language, defaulting to Vietnamese: '{text[:50]}...'")
+                source_lang = "vi"  # Default to Vietnamese
+
             # 2. If source is the same as target, no translation needed
             if source_lang == target_lang:
                 logger.debug(f"[Translate] Source ({source_lang}) same as target ({target_lang}), skipping translation")
-                return text_stripped
-            
+                return text
+
             # 3. Directly call _translate_nllb with the determined parameters
-            return self._translate_nllb(text_stripped, source_lang, target_lang)
+            return self._translate_nllb(text, source_lang, target_lang)
 
         except Exception as e:
             logger.error(f"Error in auto-translate: {e}")
