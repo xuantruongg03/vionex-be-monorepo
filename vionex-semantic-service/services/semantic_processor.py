@@ -74,14 +74,22 @@ class SemanticProcessor:
             # The initial vector is created from the original text
             initial_vector = self.model.encode(original_text).tolist()
 
-            # Parse timestamp
+            # Parse timestamp - handle both Unix timestamp (int) and ISO string
             parsed_timestamp = int(time.time())
             if timestamp:
                 try:
+                    # Try parsing as int (Unix timestamp)
                     parsed_timestamp = int(timestamp)
                 except (ValueError, TypeError):
-                    logger.warning(
-                        f"Invalid timestamp format: {timestamp}. Using current time.")
+                    # Try parsing as ISO datetime string
+                    try:
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(str(timestamp).replace('Z', '+00:00'))
+                        parsed_timestamp = int(dt.timestamp())
+                        logger.debug(f"Parsed ISO timestamp {timestamp} to {parsed_timestamp}")
+                    except Exception as e:
+                        logger.warning(f"Could not parse timestamp '{timestamp}': {e}. Using current time.")
+                        parsed_timestamp = int(time.time())
 
             payload = {
                 "original_text": original_text,

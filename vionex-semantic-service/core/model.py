@@ -1,9 +1,12 @@
 from sentence_transformers import SentenceTransformer
 from core.config import MODEL_VECTOR, TYPE_ENGINE
+import logging
+
+logger = logging.getLogger(__name__)
 
 vector_model = SentenceTransformer(MODEL_VECTOR)
 
-print("[TRANSLATION] Loading NLLB-Distilled (facebook/nllb-200-distilled-600M) - Direct use, no fallback")
+logger.info("[TRANSLATION] Loading NLLB-Distilled (facebook/nllb-200-distilled-600M)")
 
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 import torch
@@ -21,4 +24,4 @@ if TYPE_ENGINE == "cuda":
 translation_models = {"nllb": nllb_model}
 translation_tokenizers = {"nllb": nllb_tokenizer}
 
-print("[TRANSLATION] NLLB-Distilled loaded successfully (supports 200+ languages)")
+logger.info("[TRANSLATION] NLLB-Distilled loaded successfully (supports 200+ languages)")
