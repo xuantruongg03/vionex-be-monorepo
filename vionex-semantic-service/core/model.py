@@ -13,11 +13,25 @@ from utils.log_manager import logger
 
 vector_model = SentenceTransformer(MODEL_VECTOR, trust_remote_code=True)
 
-logger.info(f"[DETECT MODEL] Loaded model")
+logger.info("[DETECT MODEL] Loading FastText language detection model...")
 
 import fasttext
+import urllib.request
 
-detect_model = fasttext.load_model("lid.176.ftz")
+# Download FastText model if not exists
+fasttext_model_path = "lid.176.ftz"
+if not os.path.exists(fasttext_model_path):
+    logger.info("[DETECT MODEL] Downloading lid.176.ftz from FastText...")
+    url = "https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.ftz"
+    try:
+        urllib.request.urlretrieve(url, fasttext_model_path)
+        logger.info("[DETECT MODEL] Download completed!")
+    except Exception as e:
+        logger.error(f"[DETECT MODEL] Failed to download: {e}")
+        raise
+
+detect_model = fasttext.load_model(fasttext_model_path)
+logger.info("[DETECT MODEL] FastText model loaded successfully")
 
 logger.info("[TRANSLATION] Loading MarianMT models (Helsinki-NLP)")
 

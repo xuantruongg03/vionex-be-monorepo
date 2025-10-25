@@ -508,7 +508,7 @@ install_dependencies() {
         fi
         
         source venv/bin/activate
-        
+        sudo apt-get install -y python3-dev python3-pip build-essential g++
         pip install -r requirements.txt
         deactivate
         cd ..
