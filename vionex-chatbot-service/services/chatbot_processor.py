@@ -40,8 +40,13 @@ class ChatBotProcessor:
     async def ask(self, question: str, room_id: str, organization_id: str = None) -> str:
         try:
             # Call semantic service to search data
+            logger.info(f"Calling semantic service with room_id={room_id}, question={question}")
             results = await self.semantic_client.search(room_id=room_id, text=question, organization_id=organization_id)
+            
+            logger.info(f"Received results from semantic service: type={type(results)}, len={len(results) if results else 'None'}")
+            
             if results and len(results) > 0:
+                logger.info(f"Processing {len(results)} results from semantic service")
                 # Extract text from results and combine them
                 transcript_data = []
                 for result in results:
@@ -64,9 +69,7 @@ class ChatBotProcessor:
 
         except Exception as e:
             logger.error(f"Error processing question: {e}")
+            import traceback
+            traceback.print_exc()
             return "Error processing question"
-            
-        except Exception as e:
-            logger.error(f"Error saving transcript: {e}")
-            return False
     

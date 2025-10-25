@@ -39,10 +39,20 @@ class SemanticClient:
             
             request = semantic_pb2.SearchTranscriptsRequest(**request_params)
             
+            print(f"Calling semantic service with room_id={room_id}, query={text}, org={organization_id}")
+            
             # Await the async gRPC call
             response = await self.stub.SearchTranscripts(request)
+            
+            print(f"Semantic service response: {response}")
+            print(f"Results count: {len(response.results)}")
+            if response.results:
+                print(f"First result: {response.results[0]}")
+            
             return response.results
             
         except Exception as e:
             print(f"Error calling semantic service: {e}")
+            import traceback
+            traceback.print_exc()
             return []
