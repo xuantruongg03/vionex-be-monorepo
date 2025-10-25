@@ -1,15 +1,10 @@
 
 import grpc
-import logging
 import sys
 from concurrent import futures
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Import the centralized logger first
+from utils.log_manager import logger
 
 try:
     from core.config import GRPC_PORT
@@ -19,7 +14,7 @@ try:
 except Exception as e:
     logger.error(f"Error importing components: {e}")
     import traceback
-    traceback.print_exc()
+    logger.error(traceback.format_exc())
     sys.exit(1)
 
 
@@ -160,7 +155,7 @@ def serve():
     except Exception as e:
         logger.error(f"Failed to start server: {e}")
         import traceback
-        traceback.print_exc()
+        logger.error(traceback.format_exc())
         raise
 
 

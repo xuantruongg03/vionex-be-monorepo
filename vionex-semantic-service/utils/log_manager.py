@@ -31,10 +31,20 @@ def setup_logger():
     # Add the handler to the logger
     logger.addHandler(handler)
     
-    # Also add a console handler for immediate feedback during development
-    # console_handler = logging.StreamHandler()
-    # console_handler.setFormatter(formatter)
-    # logger.addHandler(console_handler)
+    # Disable propagation to root logger to prevent duplicate logs
+    logger.propagate = False
+    
+    # Silence external library loggers - only log errors
+    logging.getLogger('sentence_transformers').setLevel(logging.ERROR)
+    logging.getLogger('httpx').setLevel(logging.ERROR)
+    logging.getLogger('transformers').setLevel(logging.ERROR)
+    logging.getLogger('torch').setLevel(logging.ERROR)
+    logging.getLogger('qdrant_client').setLevel(logging.ERROR)
+    
+    # Disable root logger to prevent any console output
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.CRITICAL)
+    root_logger.handlers.clear()
     
     return logger
 

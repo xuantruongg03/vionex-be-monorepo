@@ -1,9 +1,7 @@
-import logging
 import torch
 from core.model import translation_models, translation_tokenizers
 from langdetect import detect, LangDetectException
-
-logger = logging.getLogger(__name__)
+from utils.log_manager import logger
 
 class TranslateProcess:
     def __init__(self):
