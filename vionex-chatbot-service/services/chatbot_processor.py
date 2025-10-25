@@ -43,13 +43,15 @@ class ChatBotProcessor:
             logger.info(f"Calling semantic service with room_id={room_id}, question={question}")
             results = await self.semantic_client.search(room_id=room_id, text=question, organization_id=organization_id)
             
-            logger.info(f"Received results from semantic service: type={type(results)}, len={len(results) if results else 'None'}")
+            # Convert to list to safely check length
+            results_list = list(results) if results else []
+            logger.info(f"Received {len(results_list)} results from semantic service")
             
-            if results and len(results) > 0:
-                logger.info(f"Processing {len(results)} results from semantic service")
+            if results_list and len(results_list) > 0:
+                logger.info(f"Processing {len(results_list)} results from semantic service")
                 # Extract text from results and combine them
                 transcript_data = []
-                for result in results:
+                for result in results_list:
                     transcript_data.append(result.text)
                 combined_transcript = "\n".join(transcript_data)
                 
@@ -58,13 +60,13 @@ class ChatBotProcessor:
                 
                 # Generate response using the model
                 generated_response = self.model.generate(prompt)
-                logger.info(f"Generated response: {generated_response} for question: {question} with {len(results)} results" + 
+                logger.info(f"Generated response: {generated_response} for question: {question} with {len(results_list)} results" + 
                            (f" for organization {organization_id}" if organization_id else "") +
                            (f" with transcript: {combined_transcript[:50]}..." if combined_transcript else ""))
                 # return generated_response
                 return self.generate_response(combined_transcript, generated_response)
             else:
-                logger.warning("No response from semantic service")
+                logger.warning(f"No results found from semantic service for room {room_id}")
                 return "I'm sorry, I couldn't find an answer to your question."
 
         except Exception as e:
