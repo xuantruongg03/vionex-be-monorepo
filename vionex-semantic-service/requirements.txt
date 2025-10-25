@@ -7,3 +7,4 @@ fasttext
 sentencepiece
 transformers
 torch
+numpy<2.0.0
