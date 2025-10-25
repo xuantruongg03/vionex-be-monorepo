@@ -37,10 +37,10 @@ class ChatBotProcessor:
     def generate_response(self, data: str, answer: str) -> str:
         return f'Generated response based on data: {data}. Answer from model: {answer}'
 
-    def ask(self, question: str, room_id: str, organization_id: str = None) -> str:
+    async def ask(self, question: str, room_id: str, organization_id: str = None) -> str:
         try:
             # Call semantic service to search data
-            results = self.semantic_client.search(room_id=room_id, text=question, organization_id=organization_id)
+            results = await self.semantic_client.search(room_id=room_id, text=question, organization_id=organization_id)
             if results and len(results) > 0:
                 # Extract text from results and combine them
                 transcript_data = []
@@ -54,7 +54,8 @@ class ChatBotProcessor:
                 # Generate response using the model
                 generated_response = self.model.generate(prompt)
                 logger.info(f"Generated response: {generated_response} for question: {question} with {len(results)} results" + 
-                           (f" for organization {organization_id}" if organization_id else ""))
+                           (f" for organization {organization_id}" if organization_id else "") +
+                           (f" with transcript: {combined_transcript[:50]}..." if combined_transcript else ""))
                 # return generated_response
                 return self.generate_response(combined_transcript, generated_response)
             else:

@@ -2,6 +2,7 @@
 import grpc
 import logging
 import sys
+import asyncio
 from concurrent import futures
 
 # Setup logging
@@ -53,7 +54,16 @@ class VionexChatBotService(chatbot_pb2_grpc.ChatbotServiceServicer):
 
             # Process the question using the chat bot processor with organization context
             organization_id = getattr(request, 'organization_id', None)
-            response = self.chatbot_processor.ask(request.question, request.room_id, organization_id)
+            
+            # Run async function in sync context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                response = loop.run_until_complete(
+                    self.chatbot_processor.ask(request.question, request.room_id, organization_id)
+                )
+            finally:
+                loop.close()
 
             return chatbot_pb2.AskChatBotResponse(
                 answer=response
@@ -97,8 +107,7 @@ def serve():
 def main():
     """Main function"""
     try:
-        import asyncio
-        asyncio.run(serve())
+        serve()
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
     except Exception as e:

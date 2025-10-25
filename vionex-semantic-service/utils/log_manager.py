@@ -32,9 +32,9 @@ def setup_logger():
     logger.addHandler(handler)
     
     # Also add a console handler for immediate feedback during development
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    # console_handler = logging.StreamHandler()
+    # console_handler.setFormatter(formatter)
+    # logger.addHandler(console_handler)
     
     return logger
 
