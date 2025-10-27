@@ -2297,6 +2297,142 @@ export class GatewayGateway
         }
     }
 
+    // ==================== ROOM LOCK HANDLERS ====================
+
+    @SubscribeMessage('sfu:lock-room')
+    async handleLockRoom(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            password: string;
+            creatorId: string;
+        },
+    ) {
+        try {
+            // Verify the user is authenticated
+            const peerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
+            if (!peerId) {
+                return {
+                    success: false,
+                    message: 'User not authenticated',
+                };
+            }
+
+            // Verify the user is the creator
+            if (peerId !== data.creatorId) {
+                return {
+                    success: false,
+                    message: 'Only room creator can lock the room',
+                };
+            }
+
+            // Call room service to lock the room
+            const response = (await this.roomClient.lockRoom(
+                data.roomId,
+                data.password,
+                data.creatorId,
+            )) as any;
+
+            if (response.status === 'success') {
+                // Broadcast lock event to all participants in the room
+                this.eventService.broadcastToRoom(
+                    client,
+                    data.roomId,
+                    'sfu:room-locked',
+                    {
+                        roomId: data.roomId,
+                        lockedBy: data.creatorId,
+                    },
+                );
+
+                return {
+                    success: true,
+                    message: response.message || 'Room locked successfully',
+                };
+            } else {
+                return {
+                    success: false,
+                    message: response.message || 'Failed to lock room',
+                };
+            }
+        } catch (error) {
+            logger.error('gateway.gateway.ts', 'Error locking room', error);
+            return {
+                success: false,
+                message: error.message || 'Failed to lock room',
+            };
+        }
+    }
+
+    @SubscribeMessage('sfu:unlock-room')
+    async handleUnlockRoom(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            creatorId: string;
+        },
+    ) {
+        try {
+            // Verify the user is authenticated
+            const peerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
+            if (!peerId) {
+                return {
+                    success: false,
+                    message: 'User not authenticated',
+                };
+            }
+
+            // Verify the user is the creator
+            if (peerId !== data.creatorId) {
+                return {
+                    success: false,
+                    message: 'Only room creator can unlock the room',
+                };
+            }
+
+            // Call room service to unlock the room
+            const response = (await this.roomClient.unlockRoom(
+                data.roomId,
+                data.creatorId,
+            )) as any;
+
+            if (response.status === 'success') {
+                // Broadcast unlock event to all participants in the room
+                this.eventService.broadcastToRoom(
+                    client,
+                    data.roomId,
+                    'sfu:room-unlocked',
+                    {
+                        roomId: data.roomId,
+                        unlockedBy: data.creatorId,
+                    },
+                );
+
+                return {
+                    success: true,
+                    message: response.message || 'Room unlocked successfully',
+                };
+            } else {
+                return {
+                    success: false,
+                    message: response.message || 'Failed to unlock room',
+                };
+            }
+        } catch (error) {
+            logger.error('gateway.gateway.ts', 'Error unlocking room', error);
+            return {
+                success: false,
+                message: error.message || 'Failed to unlock room',
+            };
+        }
+    }
+
     // ==================== VOTING HANDLERS ====================
 
     @SubscribeMessage('sfu:create-vote')

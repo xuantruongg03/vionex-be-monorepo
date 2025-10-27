@@ -44,8 +44,6 @@ export class VotingHandler {
         },
     ) {
         try {
-            console.log('[VotingHandler] Creating vote:', data);
-
             // Validate input
             if (
                 !data.roomId ||
@@ -83,12 +81,8 @@ export class VotingHandler {
                     'sfu:vote-created',
                     voteSession,
                 );
-                client.to(data.roomId).emit('sfu:vote-created', voteSession);
+                this.eventService.broadcastToRoom(client, data.roomId, 'sfu:vote-created', voteSession);
 
-                console.log(
-                    '[VotingHandler] Vote created successfully:',
-                    voteSession.id,
-                );
                 return { success: true, voteSession };
             } else {
                 const errorMsg = result?.error || 'Failed to create vote';
@@ -125,8 +119,6 @@ export class VotingHandler {
         },
     ) {
         try {
-            console.log('[VotingHandler] Submitting vote:', data);
-
             // Validate input
             if (
                 !data.roomId ||
@@ -167,10 +159,6 @@ export class VotingHandler {
                 );
                 client.to(data.roomId).emit('sfu:vote-updated', voteSession);
 
-                console.log(
-                    '[VotingHandler] Vote submitted successfully by:',
-                    data.voterId,
-                );
                 return { success: true, voteSession };
             } else {
                 const errorMsg = result?.error || 'Failed to submit vote';
@@ -205,7 +193,6 @@ export class VotingHandler {
         },
     ) {
         try {
-            console.log('[VotingHandler] Getting vote results:', data);
 
             // Validate input
             if (!data.roomId || !data.voteId) {
@@ -238,10 +225,6 @@ export class VotingHandler {
                     voteSession,
                 );
 
-                console.log(
-                    '[VotingHandler] Vote results sent for vote:',
-                    data.voteId,
-                );
                 return { success: true, voteSession };
             } else {
                 const errorMsg = result?.error || 'Failed to get vote results';
@@ -277,7 +260,6 @@ export class VotingHandler {
         },
     ) {
         try {
-            console.log('[VotingHandler] Ending vote:', data);
 
             // Validate input
             if (!data.roomId || !data.voteId || !data.creatorId) {
@@ -310,12 +292,9 @@ export class VotingHandler {
                     'sfu:vote-ended',
                     voteSession,
                 );
-                client.to(data.roomId).emit('sfu:vote-ended', voteSession);
+                // client.to(data.roomId).emit('sfu:vote-ended', voteSession);
+                this.eventService.broadcastToRoom(client, data.roomId, 'sfu:vote-ended', voteSession);
 
-                console.log(
-                    '[VotingHandler] Vote ended successfully:',
-                    data.voteId,
-                );
                 return { success: true, voteSession };
             } else {
                 const errorMsg = result?.error || 'Failed to end vote';
@@ -346,7 +325,6 @@ export class VotingHandler {
         },
     ) {
         try {
-            console.log('[VotingHandler] Getting active vote:', data);
 
             // Validate input
             if (!data.roomId) {
@@ -378,10 +356,6 @@ export class VotingHandler {
                         voteSession,
                     );
 
-                    console.log(
-                        '[VotingHandler] Active vote sent for room:',
-                        data.roomId,
-                    );
                     return { success: true, voteSession };
                 } else {
                     // No active vote
