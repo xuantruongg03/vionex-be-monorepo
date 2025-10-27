@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, OnModuleInit } from '@nestjs/common';
+import { ClientGrpc } from '@nestjs/microservices';
+import { firstValueFrom } from 'rxjs';
 import {
     Participant,
     RoomPassword,
@@ -8,12 +10,24 @@ import {
     VerifyRoomAccessResponse,
 } from './interface';
 
+interface ChatService {
+    removeRoomMessages(data: { room_id: string }): any;
+}
+
 @Injectable()
-export class RoomService {
+export class RoomService implements OnModuleInit {
     private rooms = new Map<string, Map<string, Participant>>();
     private roomPasswords = new Map<string, RoomPassword>();
     private orgRooms = new Map<string, OrganizationRoom>(); // NEW: Organization rooms
     private orgAccess = new Map<string, any[]>(); // NEW: Organization access cache
+    private chatService: ChatService;
+
+    constructor(@Inject('CHAT_SERVICE') private chatClient: ClientGrpc) {}
+
+    onModuleInit() {
+        this.chatService =
+            this.chatClient.getService<ChatService>('ChatService');
+    }
 
     /**
      * Checks if a room exists by its ID.
@@ -513,6 +527,21 @@ export class RoomService {
             // Clean up room password if it exists
             if (this.roomPasswords.has(roomId)) {
                 this.roomPasswords.delete(roomId);
+            }
+
+            // Delete chat messages for this room
+            try {
+                await firstValueFrom(
+                    this.chatService.removeRoomMessages({ room_id: roomId }),
+                );
+                console.log(
+                    `[RoomService] Deleted chat messages for room ${roomId}`,
+                );
+            } catch (error) {
+                console.error(
+                    `[RoomService] Error deleting chat messages for room ${roomId}:`,
+                    error,
+                );
             }
         }
         return {
