@@ -2878,6 +2878,7 @@ export class GatewayGateway
         data: {
             id: string;
             roomId: string;
+            roomKey?: string; // Room key for semantic context isolation
             text: string;
             organizationId?: string;
         },
