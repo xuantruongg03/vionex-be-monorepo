@@ -80,9 +80,23 @@ class SemanticProcessor:
             original_language: Language code
             timestamp: Timestamp
             organization_id: Organization ID (optional)
-            room_key: Unique room key for context isolation (NEW, replaces room_id for indexing)
+            room_key: Unique room key for context isolation (REQUIRED, must be UUID format)
         """
         try:
+            # VALIDATE room_key - MUST be provided and in UUID format
+            if not room_key:
+                error_msg = f"room_key is required but not provided. room_id={room_id}, speaker={speaker}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            # Validate UUID format (8-4-4-4-12 characters)
+            import re
+            uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            if not re.match(uuid_pattern, room_key.lower()):
+                error_msg = f"room_key must be in UUID format, got: {room_key}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
             # The initial vector is created from the original text
             initial_vector = self.model.encode(original_text).tolist()
 
@@ -103,14 +117,11 @@ class SemanticProcessor:
                         logger.warning(f"Could not parse timestamp '{timestamp}': {e}. Using current time.")
                         parsed_timestamp = int(time.time())
 
-            # Use room_key for indexing if provided, otherwise fallback to room_id
-            index_key = room_key if room_key else room_id
-
             payload = {
                 "original_text": original_text,
                 "original_language": original_language,
-                "room_id": room_id,  # Keep for backward compatibility
-                "room_key": index_key,  # NEW: Primary indexing field
+                "room_id": room_id,  # Keep for backward compatibility and display
+                "room_key": room_key,  # Primary indexing field (UUID)
                 "speaker": speaker,
                 "timestamp": parsed_timestamp,
             }
@@ -127,7 +138,7 @@ class SemanticProcessor:
 
             self.qdrant_client.upsert(
                 collection_name=COLLECTION_NAME, points=[point], wait=True)
-            logger.info(f"Saved original transcript for point_id: {point_id}, room_key: {index_key}")
+            logger.info(f"Saved original transcript for point_id: {point_id}, room_key: {room_key}")
 
             # Submit translation task to thread pool (non-blocking)
             logger.info(f"Submitting background translation task for point_id: {point_id}")
@@ -145,37 +156,43 @@ class SemanticProcessor:
         
         Args:
             query: Search query text
-            room_id: Room ID (for backward compatibility, fallback if room_key not provided)
+            room_id: Room ID (for display only, not used for filtering)
             limit: Maximum number of results
             organization_id: Organization ID for filtering
-            room_key: Unique room key for context isolation (NEW, preferred over room_id)
+            room_key: Unique room key for context isolation (REQUIRED, must be UUID)
         """
         try:
+            # VALIDATE room_key - MUST be provided and in UUID format
+            if not room_key:
+                error_msg = f"room_key is required for search but not provided. room_id={room_id}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            # Validate UUID format
+            import re
+            uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            if not re.match(uuid_pattern, room_key.lower()):
+                error_msg = f"room_key must be in UUID format, got: {room_key}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
             # Translate the search query to English
             english_query = self.translation_service.translate(query)
 
             # Vectorize the English query
             vector = self.model.encode(english_query).tolist()
 
-            # Build filter conditions - prioritize room_key over room_id
-            filter_conditions = []
-            if room_key:
-                # Use room_key for filtering (preferred)
-                filter_conditions.append(
-                    FieldCondition(key="room_key", match=MatchValue(value=room_key)))
-                logger.info(f"Searching with room_key: {room_key}")
-            elif room_id:
-                # Fallback to room_id for backward compatibility
-                filter_conditions.append(
-                    FieldCondition(key="room_id", match=MatchValue(value=room_id)))
-                logger.info(f"Searching with room_id (fallback): {room_id}")
+            # Build filter conditions - ONLY use room_key (no fallback)
+            filter_conditions = [
+                FieldCondition(key="room_key", match=MatchValue(value=room_key))
+            ]
+            logger.info(f"Searching with room_key: {room_key}")
             
             if organization_id:
                 filter_conditions.append(
                     FieldCondition(key="organization_id", match=MatchValue(value=organization_id)))
 
-            query_filter = Filter(
-                must=filter_conditions) if filter_conditions else None
+            query_filter = Filter(must=filter_conditions)
 
             # Perform search in Qdrant
             results = self.qdrant_client.search(
@@ -205,25 +222,32 @@ class SemanticProcessor:
 
     def get_text_by_room_id(self, room_id: str, organization_id: str = None, room_key: str = None) -> List[dict]:
         """
-        Get all transcripts for a specific room ID or room_key.
+        Get all transcripts for a specific room_key.
         
         Args:
-            room_id: Room ID (for backward compatibility)
+            room_id: Room ID (for display only, not used for filtering)
             organization_id: Organization ID for filtering
-            room_key: Unique room key for context isolation (NEW, preferred over room_id)
+            room_key: Unique room key for context isolation (REQUIRED, must be UUID)
         """
-        # Build filter conditions - prioritize room_key over room_id
-        filter_conditions = []
-        if room_key:
-            filter_conditions.append(
-                FieldCondition(key="room_key", match=MatchValue(value=room_key))
-            )
-            logger.info(f"Retrieving all transcripts with room_key: {room_key}")
-        elif room_id:
-            filter_conditions.append(
-                FieldCondition(key="room_id", match=MatchValue(value=room_id))
-            )
-            logger.info(f"Retrieving all transcripts with room_id (fallback): {room_id}")
+        # VALIDATE room_key - MUST be provided and in UUID format
+        if not room_key:
+            error_msg = f"room_key is required for get_text_by_room_id but not provided. room_id={room_id}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        # Validate UUID format
+        import re
+        uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        if not re.match(uuid_pattern, room_key.lower()):
+            error_msg = f"room_key must be in UUID format, got: {room_key}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        # Build filter conditions - ONLY use room_key (no fallback)
+        filter_conditions = [
+            FieldCondition(key="room_key", match=MatchValue(value=room_key))
+        ]
+        logger.info(f"Retrieving all transcripts with room_key: {room_key}")
 
         if organization_id:
             filter_conditions.append(

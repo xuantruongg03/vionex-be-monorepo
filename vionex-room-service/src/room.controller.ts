@@ -88,17 +88,26 @@ export class RoomGrpcController {
             // Get room_key for this room
             const roomKey = this.roomService.getRoomKey(data.room_id);
 
+            if (!roomKey) {
+                return {
+                    success: false,
+                    message: 'Room key not found',
+                    room_key: '',
+                };
+            }
+
             // Add user to room logic here if needed
             return {
                 success: true,
                 message: 'Successfully joined room',
-                room_key: roomKey || undefined,
+                room_key: roomKey,
             };
         } catch (error) {
             console.error(`Error joining room ${data.room_id}:`, error);
             return {
                 success: false,
                 message: 'Failed to join room',
+                room_key: '',
             };
         }
     }
@@ -147,6 +156,14 @@ export class RoomGrpcController {
             }
             const participants = room.participants || [];
 
+            // Get room_key
+            const roomKey = this.roomService.getRoomKey(data.room_id);
+
+            if (!roomKey) {
+                console.error(`Room key not found for room ${data.room_id}`);
+                return { data: null, success: false };
+            }
+
             // Serialize participants for gRPC transmission
             const serializedParticipants = participants.map((participant) => ({
                 socket_id: participant.socket_id,
@@ -169,6 +186,7 @@ export class RoomGrpcController {
                     room_id: room.room_id,
                     participants: serializedParticipants as any,
                     isLocked: room.isLocked,
+                    room_key: roomKey,
                 },
                 success: true,
             };

@@ -288,7 +288,8 @@ export class RoomService implements OnModuleInit {
      * @param peerId - The ID of the participant.
      * @param participant - The participant object to set.
      * @returns An object indicating the success of the operation.
-     */ async getRoom(roomId: string) {
+     */
+    async getRoom(roomId: string) {
         const room = this.rooms.get(roomId);
         if (!room) {
             return null;

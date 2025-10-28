@@ -197,7 +197,7 @@ message JoinRoomRequest {
 message JoinRoomResponse {
   bool success = 1;
   string message = 2;
-  optional string room_key = 3; // NEW: Room key for semantic context isolation
+  string room_key = 3; // Room key for semantic context isolation (required)
 }
 
 // Messages for LeaveRoom
@@ -230,6 +230,7 @@ message Room {
   string room_id = 1;
   repeated Participant participants = 2;
   bool isLocked = 3;
+  string room_key = 4; // Room key for semantic context isolation
 }
 
 // Participant definition

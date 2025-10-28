@@ -377,8 +377,15 @@ export class GatewayGateway
 
         // Initialize room if needed
         let room = await this.roomClient.getRoom(data.roomId);
+        let roomKey: string;
+
         if (!room.data || !room.data.room_id) {
-            await this.roomClient.createRoom(data.roomId);
+            // Create new room and get room_key
+            const createRoomResponse = await this.roomClient.createRoom(
+                data.roomId,
+            );
+            roomKey = createRoomResponse.data.roomKey; // Get room_key from create response
+
             // Create the media room in SFU service
             try {
                 await this.sfuClient.createMediaRoom(data.roomId);
@@ -396,6 +403,22 @@ export class GatewayGateway
                 return;
             }
             room = await this.roomClient.getRoom(data.roomId);
+        } else {
+            // Get existing room_key
+            roomKey = room.data.room_key;
+        }
+
+        if (!roomKey) {
+            logger.error(
+                'gateway.gateway.ts',
+                'Room key not found after room creation/retrieval',
+            );
+            this.eventService.emitError(
+                client,
+                'Failed to get room key',
+                'ROOM_KEY_ERROR',
+            );
+            return;
         }
 
         let hasExistingCreator = false;
@@ -446,6 +469,7 @@ export class GatewayGateway
                 peerId: existingParticipant.peer_id,
                 isCreator: existingParticipant.is_creator,
                 roomId: data.roomId,
+                roomKey: roomKey, // Include room_key in response
             });
 
             // Send router capabilities
@@ -533,6 +557,7 @@ export class GatewayGateway
                 peerId: participant.peer_id,
                 isCreator: participant.is_creator,
                 roomId: data.roomId,
+                roomKey: roomKey, // Include room_key in response
             });
 
             // Broadcast new peer joined to existing clients
