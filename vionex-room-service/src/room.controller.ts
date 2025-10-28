@@ -28,15 +28,17 @@ export class RoomGrpcController {
     async createRoom(data: I.CreateRoomRequest): Promise<I.CreateRoomResponse> {
         try {
             const roomId = data.room_id;
-            await this.roomService.createRoom(roomId);
+            const roomKey = await this.roomService.createRoom(roomId);
             return {
                 room_id: roomId,
+                room_key: roomKey,
                 message: 'Room created successfully',
                 success: true,
             };
         } catch (error) {
             return {
                 room_id: '',
+                room_key: '',
                 message: 'Failed to create room',
                 success: false,
             };
@@ -83,10 +85,14 @@ export class RoomGrpcController {
                 }
             }
 
+            // Get room_key for this room
+            const roomKey = this.roomService.getRoomKey(data.room_id);
+
             // Add user to room logic here if needed
             return {
                 success: true,
                 message: 'Successfully joined room',
+                room_key: roomKey || undefined,
             };
         } catch (error) {
             console.error(`Error joining room ${data.room_id}:`, error);
@@ -622,6 +628,7 @@ export class RoomGrpcController {
                 success: result.success,
                 message: result.message,
                 room_id: result.room_id,
+                room_key: result.room_key,
             };
         } catch (error) {
             console.error('Error creating organization room:', error);
@@ -629,6 +636,7 @@ export class RoomGrpcController {
                 success: false,
                 message: 'Failed to create organization room',
                 room_id: '',
+                room_key: '',
             };
         }
     }

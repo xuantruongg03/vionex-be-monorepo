@@ -1378,6 +1378,7 @@ export class GatewayGateway
             channels: number;
             isFinal?: boolean; // Indicates if this is the final chunk or periodic chunk
             organizationId?: string; // Organization ID for multi-tenant isolation
+            roomKey?: string; // NEW: Room key for semantic context isolation
         },
     ) {
         const isFinal = data.isFinal !== false; // Default to true for backward compatibility
@@ -1485,6 +1486,7 @@ export class GatewayGateway
                 sampleRate: data.sampleRate || 16000,
                 channels: data.channels || 1,
                 organizationId: data.organizationId, // Forward organization ID
+                roomKey: data.roomKey, // NEW: Forward room_key
             });
 
             logger.info(

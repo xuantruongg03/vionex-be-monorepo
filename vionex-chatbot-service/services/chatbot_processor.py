@@ -37,11 +37,25 @@ class ChatBotProcessor:
     def generate_response(self, data: str, answer: str) -> str:
         return f'Generated response based on data: {data}. Answer from model: {answer}'
 
-    async def ask(self, question: str, room_id: str, organization_id: str = None) -> str:
+    async def ask(self, question: str, room_id: str, organization_id: str = None, room_key: str = None) -> str:
+        """
+        Process a question and return an answer based on semantic context.
+        
+        Args:
+            question: User's question
+            room_id: Room ID (for backward compatibility)
+            organization_id: Organization ID for filtering
+            room_key: Unique room key for context isolation (NEW, preferred over room_id)
+        """
         try:
             # Call semantic service to search data
-            logger.info(f"Calling semantic service with room_id={room_id}, question={question}")
-            results = await self.semantic_client.search(room_id=room_id, text=question, organization_id=organization_id)
+            logger.info(f"Calling semantic service with room_id={room_id}, room_key={room_key}, question={question}")
+            results = await self.semantic_client.search(
+                room_id=room_id, 
+                text=question, 
+                organization_id=organization_id,
+                room_key=room_key  # NEW: Pass room_key
+            )
             
             # Convert to list to safely check length
             results_list = list(results) if results else []
@@ -62,11 +76,12 @@ class ChatBotProcessor:
                 generated_response = self.model.generate(prompt)
                 logger.info(f"Generated response: {generated_response} for question: {question} with {len(results_list)} results" + 
                            (f" for organization {organization_id}" if organization_id else "") +
+                           (f" with room_key {room_key}" if room_key else "") +
                            (f" with transcript: {combined_transcript[:50]}..." if combined_transcript else ""))
                 # return generated_response
                 return self.generate_response(combined_transcript, generated_response)
             else:
-                logger.warning(f"No results found from semantic service for room {room_id}")
+                logger.warning(f"No results found from semantic service for room {room_id} (room_key: {room_key})")
                 return "I'm sorry, I couldn't find an answer to your question."
 
         except Exception as e:

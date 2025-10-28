@@ -68,10 +68,19 @@ class SemanticProcessor:
             logger.error(
                 f"Error in background translation for point_id {point_id}: {e}")
 
-    def save(self, room_id: str, speaker: str, original_text: str, original_language: str, timestamp: int, organization_id: str = None):
+    def save(self, room_id: str, speaker: str, original_text: str, original_language: str, timestamp: int, organization_id: str = None, room_key: str = None):
         """
         Saves the original text and triggers a background translation.
         The initial vector is created from the original text for immediate searchability.
+        
+        Args:
+            room_id: Room ID (for display/backward compatibility)
+            speaker: Speaker name
+            original_text: Original text to save
+            original_language: Language code
+            timestamp: Timestamp
+            organization_id: Organization ID (optional)
+            room_key: Unique room key for context isolation (NEW, replaces room_id for indexing)
         """
         try:
             # The initial vector is created from the original text
@@ -94,10 +103,14 @@ class SemanticProcessor:
                         logger.warning(f"Could not parse timestamp '{timestamp}': {e}. Using current time.")
                         parsed_timestamp = int(time.time())
 
+            # Use room_key for indexing if provided, otherwise fallback to room_id
+            index_key = room_key if room_key else room_id
+
             payload = {
                 "original_text": original_text,
                 "original_language": original_language,
-                "room_id": room_id,
+                "room_id": room_id,  # Keep for backward compatibility
+                "room_key": index_key,  # NEW: Primary indexing field
                 "speaker": speaker,
                 "timestamp": parsed_timestamp,
             }
@@ -114,7 +127,7 @@ class SemanticProcessor:
 
             self.qdrant_client.upsert(
                 collection_name=COLLECTION_NAME, points=[point], wait=True)
-            logger.info(f"Saved original transcript for point_id: {point_id}")
+            logger.info(f"Saved original transcript for point_id: {point_id}, room_key: {index_key}")
 
             # Submit translation task to thread pool (non-blocking)
             logger.info(f"Submitting background translation task for point_id: {point_id}")
@@ -126,9 +139,16 @@ class SemanticProcessor:
             logger.error(f"Error saving transcript: {e}")
             return False
 
-    def search(self, query: str, room_id: str, limit: int = 10, organization_id: str = None) -> List[dict]:
+    def search(self, query: str, room_id: str, limit: int = 10, organization_id: str = None, room_key: str = None) -> List[dict]:
         """
         Translates the search query to English and searches based on the English vector.
+        
+        Args:
+            query: Search query text
+            room_id: Room ID (for backward compatibility, fallback if room_key not provided)
+            limit: Maximum number of results
+            organization_id: Organization ID for filtering
+            room_key: Unique room key for context isolation (NEW, preferred over room_id)
         """
         try:
             # Translate the search query to English
@@ -137,11 +157,19 @@ class SemanticProcessor:
             # Vectorize the English query
             vector = self.model.encode(english_query).tolist()
 
-            # Build filter conditions
+            # Build filter conditions - prioritize room_key over room_id
             filter_conditions = []
-            if room_id:
+            if room_key:
+                # Use room_key for filtering (preferred)
+                filter_conditions.append(
+                    FieldCondition(key="room_key", match=MatchValue(value=room_key)))
+                logger.info(f"Searching with room_key: {room_key}")
+            elif room_id:
+                # Fallback to room_id for backward compatibility
                 filter_conditions.append(
                     FieldCondition(key="room_id", match=MatchValue(value=room_id)))
+                logger.info(f"Searching with room_id (fallback): {room_id}")
+            
             if organization_id:
                 filter_conditions.append(
                     FieldCondition(key="organization_id", match=MatchValue(value=organization_id)))
@@ -175,13 +203,27 @@ class SemanticProcessor:
             logger.error(f"Error during search: {e}")
             return []
 
-    def get_text_by_room_id(self, room_id: str, organization_id: str = None) -> List[dict]:
+    def get_text_by_room_id(self, room_id: str, organization_id: str = None, room_key: str = None) -> List[dict]:
         """
-        Get all transcripts for a specific room ID.
+        Get all transcripts for a specific room ID or room_key.
+        
+        Args:
+            room_id: Room ID (for backward compatibility)
+            organization_id: Organization ID for filtering
+            room_key: Unique room key for context isolation (NEW, preferred over room_id)
         """
-        filter_conditions = [
-            FieldCondition(key="room_id", match=MatchValue(value=room_id))
-        ]
+        # Build filter conditions - prioritize room_key over room_id
+        filter_conditions = []
+        if room_key:
+            filter_conditions.append(
+                FieldCondition(key="room_key", match=MatchValue(value=room_key))
+            )
+            logger.info(f"Retrieving all transcripts with room_key: {room_key}")
+        elif room_id:
+            filter_conditions.append(
+                FieldCondition(key="room_id", match=MatchValue(value=room_id))
+            )
+            logger.info(f"Retrieving all transcripts with room_id (fallback): {room_id}")
 
         if organization_id:
             filter_conditions.append(

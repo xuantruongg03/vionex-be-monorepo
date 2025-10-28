@@ -18,6 +18,12 @@ export interface Participant {
     };
 }
 
+export interface RoomMetadata {
+    room_id: string;
+    room_key: string; // Unique key for semantic context isolation
+    created_at: Date;
+}
+
 export interface RoomPassword {
     password: string;
     creator_id: string;
@@ -67,6 +73,7 @@ interface CreateOrgRoomResponse {
     success: boolean;
     message: string;
     room_id: string;
+    room_key: string; // NEW: Return room_key to client
 }
 
 interface VerifyRoomAccessRequest {
@@ -109,6 +116,7 @@ interface CreateRoomRequest {
 
 interface CreateRoomResponse {
     room_id: string;
+    room_key: string; // NEW: Return room_key to client
     message: string;
     success: boolean;
 }
@@ -121,6 +129,7 @@ interface JoinRoomRequest {
 interface JoinRoomResponse {
     success: boolean;
     message: string;
+    room_key?: string; // NEW: Return room_key to client when joining
 }
 
 interface LeaveRoomRequest {

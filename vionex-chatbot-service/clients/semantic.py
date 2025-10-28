@@ -21,8 +21,16 @@ class SemanticClient:
             self.channel = grpc.aio.insecure_channel(f'{self.service_host}:{self.service_port}')
             self.stub = semantic_pb2_grpc.SemanticServiceStub(self.channel)
 
-    async def search(self, room_id: str, text: str, organization_id: str = None):
-        """Search for a transcript using the semantic service."""
+    async def search(self, room_id: str, text: str, organization_id: str = None, room_key: str = None):
+        """
+        Search for a transcript using the semantic service.
+        
+        Args:
+            room_id: Room ID (for backward compatibility)
+            text: Search query text
+            organization_id: Organization ID for filtering
+            room_key: Unique room key for context isolation (NEW, preferred over room_id)
+        """
         try:
             # Ensure connection is established
             self._ensure_connection()
@@ -37,9 +45,13 @@ class SemanticClient:
             if organization_id:
                 request_params['organization_id'] = organization_id
             
+            # Add room_key if provided (NEW)
+            if room_key:
+                request_params['room_key'] = room_key
+            
             request = semantic_pb2.SearchTranscriptsRequest(**request_params)
             
-            print(f"Calling semantic service with room_id={room_id}, query={text}, org={organization_id}")
+            print(f"Calling semantic service with room_id={room_id}, room_key={room_key}, query={text}, org={organization_id}")
             
             # Await the async gRPC call
             response = await self.stub.SearchTranscripts(request)

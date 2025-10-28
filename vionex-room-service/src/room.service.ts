@@ -8,7 +8,9 @@ import {
     CreateOrgRoomRequest,
     VerifyRoomAccessRequest,
     VerifyRoomAccessResponse,
+    RoomMetadata,
 } from './interface';
+import { generateRoomKey } from './common/generate';
 
 interface ChatService {
     removeRoomMessages(data: { room_id: string }): any;
@@ -20,6 +22,7 @@ export class RoomService implements OnModuleInit {
     private roomPasswords = new Map<string, RoomPassword>();
     private orgRooms = new Map<string, OrganizationRoom>(); // NEW: Organization rooms
     private orgAccess = new Map<string, any[]>(); // NEW: Organization access cache
+    private roomMetadata = new Map<string, RoomMetadata>(); // NEW: Store room_key mapping
     private chatService: ChatService;
 
     constructor(@Inject('CHAT_SERVICE') private chatClient: ClientGrpc) {}
@@ -85,9 +88,18 @@ export class RoomService implements OnModuleInit {
      * @param password - Optional password for the room.
      * @returns An object indicating the success of the operation and whether the user is the creator.
      */
-    async createRoom(roomId: string) {
+    async createRoom(roomId: string): Promise<string> {
         this.rooms.set(roomId, new Map());
-        return roomId;
+
+        // Generate and store room_key
+        const roomKey = generateRoomKey();
+        this.roomMetadata.set(roomId, {
+            room_id: roomId,
+            room_key: roomKey,
+            created_at: new Date(),
+        });
+
+        return roomKey;
     }
 
     /**
@@ -99,6 +111,7 @@ export class RoomService implements OnModuleInit {
         success: boolean;
         message: string;
         room_id: string;
+        room_key: string;
     }> {
         try {
             // Generate unique room ID with nanoid (will use crypto.randomUUID() for now)
@@ -109,6 +122,14 @@ export class RoomService implements OnModuleInit {
 
             // Create regular room structure
             this.rooms.set(roomId, new Map());
+
+            // Generate and store room_key
+            const roomKey = generateRoomKey();
+            this.roomMetadata.set(roomId, {
+                room_id: roomId,
+                room_key: roomKey,
+                created_at: new Date(),
+            });
 
             // Create organization room metadata
             const orgRoom: OrganizationRoom = {
@@ -137,6 +158,7 @@ export class RoomService implements OnModuleInit {
                 success: true,
                 message: 'Organization room created successfully',
                 room_id: roomId,
+                room_key: roomKey,
             };
         } catch (error) {
             console.error('Error creating org room:', error);
@@ -252,6 +274,7 @@ export class RoomService implements OnModuleInit {
             this.orgRooms.delete(roomId);
             this.rooms.delete(roomId);
             this.roomPasswords.delete(roomId);
+            this.roomMetadata.delete(roomId); // Clean up room_key
             return true;
         } catch (error) {
             console.error('Error removing org room:', error);
@@ -529,13 +552,15 @@ export class RoomService implements OnModuleInit {
                 this.roomPasswords.delete(roomId);
             }
 
+            // Clean up room_key metadata
+            if (this.roomMetadata.has(roomId)) {
+                this.roomMetadata.delete(roomId);
+            }
+
             // Delete chat messages for this room
             try {
                 await firstValueFrom(
                     this.chatService.removeRoomMessages({ room_id: roomId }),
-                );
-                console.log(
-                    `[RoomService] Deleted chat messages for room ${roomId}`,
                 );
             } catch (error) {
                 console.error(
@@ -665,6 +690,7 @@ export class RoomService implements OnModuleInit {
             // Clean up all room data
             this.rooms.delete(roomId);
             this.cleanupRoomPassword(roomId);
+            this.roomMetadata.delete(roomId); // Clean up room_key
 
             // Clean up organization room metadata if it exists
             if (this.orgRooms.has(roomId)) {
@@ -675,5 +701,15 @@ export class RoomService implements OnModuleInit {
             console.error(`Failed to remove room ${roomId}:`, error);
             return false;
         }
+    }
+
+    /**
+     * Get room_key for a given room_id
+     * @param roomId - Room ID
+     * @returns room_key or null if not found
+     */
+    getRoomKey(roomId: string): string | null {
+        const metadata = this.roomMetadata.get(roomId);
+        return metadata ? metadata.room_key : null;
     }
 }

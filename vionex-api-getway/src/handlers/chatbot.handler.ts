@@ -12,7 +12,10 @@ export class ChatBotHandler {
         private readonly eventService: WebSocketEventService,
         private readonly helperService: GatewayHelperService,
     ) {
-        logger.info('chatbot.handler.ts', '[ChatBotHandler] ChatBotHandler initialized as service');
+        logger.info(
+            'chatbot.handler.ts',
+            '[ChatBotHandler] ChatBotHandler initialized as service',
+        );
     }
 
     async handleAskChatBot(
@@ -20,6 +23,7 @@ export class ChatBotHandler {
         data: {
             id: string;
             roomId: string;
+            roomKey?: string; // NEW: Room key for semantic context isolation
             text: string;
             organizationId?: string;
         },
@@ -86,6 +90,7 @@ export class ChatBotHandler {
             const response = await this.chatbotClient.askChatBot({
                 question: data.text.trim(),
                 room_id: data.roomId,
+                room_key: data.roomKey, // NEW: Pass room_key
                 organization_id: data.organizationId,
             });
 
@@ -142,5 +147,4 @@ export class ChatBotHandler {
             }
         }
     }
-
 }

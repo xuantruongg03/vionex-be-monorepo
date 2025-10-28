@@ -53,6 +53,7 @@ export default interface AudioGRPCService {
         sampleRate: number;
         channels: number;
         organizationId?: string; // Organization ID for multi-tenant isolation
+        roomKey?: string; // NEW: Room key for semantic context isolation
     }): Observable<{
         success: boolean;
         transcript?: string;

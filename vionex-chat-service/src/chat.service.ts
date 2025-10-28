@@ -28,6 +28,7 @@ export class ChatService implements OnModuleInit {
         fileSize?: number,
         isImage?: boolean,
         replyTo?: ReplyInfo,
+        room_key?: string, // NEW: Room key for semantic context isolation
     ): Promise<ChatMessage | null> {
         try {
             const newMessage: ChatMessage = {
@@ -50,6 +51,7 @@ export class ChatService implements OnModuleInit {
                 this.semanticService
                     .saveTranscript({
                         room_id: newMessage.room_id,
+                        room_key: room_key, // NEW: Pass room_key
                         speaker: newMessage.sender_name,
                         text: newMessage.text,
                         timestamp: newMessage.timestamp,

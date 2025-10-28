@@ -37,7 +37,7 @@ class VionexSemanticService(semantic_pb2_grpc.SemanticServiceServicer):
         Save transcript to semantic service
         
         Args:
-            request: SaveTranscriptRequest containing room_id, speaker, text, timestamp, language, organization_id
+            request: SaveTranscriptRequest containing room_id, speaker, text, timestamp, language, organization_id, room_key
             context: gRPC context
             
         Returns:
@@ -50,6 +50,7 @@ class VionexSemanticService(semantic_pb2_grpc.SemanticServiceServicer):
             timestamp = request.timestamp if request.HasField('timestamp') else None
             language = request.language if request.HasField('language') else "vi"
             organization_id = request.organization_id if request.HasField('organization_id') else None
+            room_key = request.room_key if request.HasField('room_key') else None  # NEW
 
             result = self.semantic_processor.save(
                 room_id=request.room_id, 
@@ -57,7 +58,8 @@ class VionexSemanticService(semantic_pb2_grpc.SemanticServiceServicer):
                 original_text=request.text,
                 original_language=language,
                 timestamp=timestamp, 
-                organization_id=organization_id
+                organization_id=organization_id,
+                room_key=room_key  # NEW: Pass room_key
             )
             
             if result:
@@ -83,7 +85,7 @@ class VionexSemanticService(semantic_pb2_grpc.SemanticServiceServicer):
         Search for transcripts based on semantic similarity
         
         Args:
-            request: SearchRequest containing the query text and optional parameters
+            request: SearchRequest containing the query text and optional parameters (room_id, room_key, organization_id)
             context: gRPC context
             
         Returns:
@@ -92,20 +94,26 @@ class VionexSemanticService(semantic_pb2_grpc.SemanticServiceServicer):
         try:
             logger.info(f"SearchTranscripts request: {request.query}")
 
-            # Handle optional organization_id field
+            # Handle optional fields
             organization_id = request.organization_id if request.HasField('organization_id') else None
+            room_key = request.room_key if request.HasField('room_key') else None  # NEW
 
             search_results = []
             # Process when ask "summary" or "tóm tắt"
             if "summary" in request.query.lower() or "tóm tắt" in request.query.lower():
-                search_results = self.semantic_processor.get_text_by_room_id(request.room_id, organization_id)
+                search_results = self.semantic_processor.get_text_by_room_id(
+                    request.room_id, 
+                    organization_id,
+                    room_key  # NEW: Pass room_key
+                )
             else:
                 # Process the search query using the semantic processor
                 search_results = self.semantic_processor.search(
                     request.query, 
                     request.room_id, 
                     request.limit or 10, 
-                    organization_id
+                    organization_id,
+                    room_key  # NEW: Pass room_key
                 )
             
             # Convert search results to proto format

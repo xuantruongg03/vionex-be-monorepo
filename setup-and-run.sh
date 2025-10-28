@@ -379,7 +379,8 @@ EOF
         
         cat > vionex-room-service/.env << EOF
 ROOM_GRPC_PORT=30001
-
+CHAT_SERVICE_HOST=localhost
+CHAT_SERVICE_GRPC_PORT=30002
 # Other configurations
 NODE_ENV=$MODE
 EOF
@@ -446,6 +447,8 @@ EOF
         cat > vionex-chat-service/.env << EOF
 CHAT_GRPC_PORT=30002
 CHAT_GRPC_HOST=localhost
+SEMANTIC_PORT=30006
+SEMANTIC_HOST=localhost
 NODE_ENV=$MODE
 EOF
         print_success "Created/Updated environment file for vionex-chat-service"

@@ -44,7 +44,8 @@ message CreateOrgRoomRequest {
 message CreateOrgRoomResponse {
   bool success = 1;
   string message = 2;
-  string room_id = 3; 
+  string room_id = 3;
+  string room_key = 4; // NEW: Room key for semantic context isolation
 }
 
 message VerifyRoomAccessRequest {
@@ -184,6 +185,7 @@ message CreateRoomResponse {
   string room_id = 1;
   string message = 2;
   bool success = 3;
+  string room_key = 4; // NEW: Room key for semantic context isolation
 }
 
 // Messages for JoinRoom
@@ -195,6 +197,7 @@ message JoinRoomRequest {
 message JoinRoomResponse {
   bool success = 1;
   string message = 2;
+  optional string room_key = 3; // NEW: Room key for semantic context isolation
 }
 
 // Messages for LeaveRoom

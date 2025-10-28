@@ -1,3 +1,4 @@
+from datetime import datetime
 import logging
 import os
 from logging.handlers import RotatingFileHandler
@@ -21,8 +22,10 @@ def setup_logger():
     log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
 
-    log_file = os.path.join(log_dir, 'semantic_service.log')
+    log_file = os.path.join(log_dir, f'semantic_service_{timestamp}.log')
     
     # Get the service logger
     logger = logging.getLogger('SemanticService')

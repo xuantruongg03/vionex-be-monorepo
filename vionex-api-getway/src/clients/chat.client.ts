@@ -18,6 +18,7 @@ export class ChatClientService implements OnModuleInit {
 
     async sendMessage(data: {
         room_id: string;
+        room_key?: string; // NEW: Room key for semantic context isolation
         sender: string;
         sender_name: string;
         text: string;

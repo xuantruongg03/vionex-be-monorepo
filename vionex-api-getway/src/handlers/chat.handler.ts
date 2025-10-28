@@ -62,6 +62,7 @@ export class ChatHandler {
         client: Socket,
         data: {
             roomId: string;
+            roomKey?: string; // NEW: Room key for semantic context isolation
             message: {
                 sender: string;
                 senderName: string;
@@ -89,6 +90,7 @@ export class ChatHandler {
 
             const response = await this.chatClient.sendMessage({
                 room_id: data.roomId,
+                room_key: data.roomKey, // NEW: Pass room_key
                 sender: data.message.sender,
                 sender_name: data.message.senderName,
                 text: data.message.text,
@@ -163,6 +165,7 @@ export class ChatHandler {
         client: Socket,
         data: {
             roomId: string;
+            roomKey?: string; // NEW: Room key for semantic context isolation
             message: {
                 sender: string;
                 senderName: string;
@@ -185,6 +188,7 @@ export class ChatHandler {
         try {
             const response = await this.chatClient.sendMessage({
                 room_id: data.roomId,
+                room_key: data.roomKey, // NEW: Pass room_key
                 sender: data.message.sender,
                 sender_name: data.message.senderName,
                 text: data.message.text,

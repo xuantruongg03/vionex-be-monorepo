@@ -66,7 +66,7 @@ class VionexChatBotService(chatbot_pb2_grpc.ChatbotServiceServicer):
         Ask the chat bot a question
         
         Args:
-            request: AskChatBotRequest containing the prompt and optional parameters
+            request: AskChatBotRequest containing the prompt and optional parameters (room_id, organization_id, room_key)
             context: gRPC context
 
         Returns:
@@ -77,11 +77,12 @@ class VionexChatBotService(chatbot_pb2_grpc.ChatbotServiceServicer):
 
             # Process the question using the chat bot processor with organization context
             organization_id = getattr(request, 'organization_id', None)
+            room_key = getattr(request, 'room_key', None) if hasattr(request, 'room_key') else None  # NEW
             
             # Run async function using the global event loop
             loop = get_event_loop()
             future = asyncio.run_coroutine_threadsafe(
-                self.chatbot_processor.ask(request.question, request.room_id, organization_id),
+                self.chatbot_processor.ask(request.question, request.room_id, organization_id, room_key),  # NEW: Pass room_key
                 loop
             )
             response = future.result()

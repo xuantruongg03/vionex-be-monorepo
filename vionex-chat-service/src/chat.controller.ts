@@ -10,6 +10,7 @@ export class ChatController {
     @GrpcMethod('ChatService', 'SendMessage')
     async sendMessage(data: {
         room_id: string;
+        room_key?: string; // NEW: Room key for semantic context isolation
         sender: string;
         sender_name: string;
         text: string;
@@ -33,6 +34,7 @@ export class ChatController {
             data.fileSize,
             data.isImage,
             data.replyTo,
+            data.room_key, // NEW: Pass room_key
         );
         if (!rs) {
             return {
