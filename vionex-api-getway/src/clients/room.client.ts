@@ -76,13 +76,16 @@ export class RoomClientService implements OnModuleInit {
         );
     }
 
-    async createRoom(roomId: string) {
+    async createRoom() {
         try {
             const response = await firstValueFrom(
-                this.roomService.createRoom({ room_id: roomId }),
+                this.roomService.createRoom({}), // Empty request object
             );
             return {
-                data: { roomId: response.room_id, roomKey: response.room_key },
+                success: response.success,
+                room_id: response.room_id,
+                room_key: response.room_key,
+                message: response.message,
             };
         } catch (error) {
             console.error(`Error creating room:`, error);

@@ -91,9 +91,7 @@ export interface RoomGrpcService {
 
     isRoomExists(data: { room_id: string }): Observable<{ is_exists: boolean }>;
 
-    createRoom(data: {
-        room_id: string;
-    }): Observable<{
+    createRoom(data: {}): Observable<{
         room_id: string;
         message: string;
         success: boolean;

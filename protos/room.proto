@@ -41,6 +41,8 @@ message CreateOrgRoomRequest {
   string password = 6;
 }
 
+message CreateRoomRequest {}
+
 message CreateOrgRoomResponse {
   bool success = 1;
   string message = 2;
@@ -176,10 +178,6 @@ message IsRoomExistsResponse {
   bool is_exists = 1;
 }
 
-// Messages for CreateRoom
-message CreateRoomRequest {
-  string room_id = 1;
-}
 
 message CreateRoomResponse {
   string room_id = 1;

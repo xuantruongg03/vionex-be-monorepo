@@ -110,9 +110,6 @@ interface IsRoomExistsResponse {
     is_exists: boolean;
 }
 
-interface CreateRoomRequest {
-    room_id: string;
-}
 
 interface CreateRoomResponse {
     room_id: string;
@@ -287,7 +284,6 @@ interface RemoveProducerFromParticipantResponse {
 export {
     IsRoomExistsRequest,
     IsRoomExistsResponse,
-    CreateRoomRequest,
     CreateRoomResponse,
     JoinRoomRequest,
     JoinRoomResponse,

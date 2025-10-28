@@ -10,12 +10,13 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { AudioClientService } from './clients/audio.client';
-import { ChatBotClientService } from './clients/chatbot.client';
 import { InteractionClientService } from './clients/interaction.client';
 import { RoomClientService } from './clients/room.client';
 import { SfuClientService } from './clients/sfu.client';
 import { ChatHandler } from './handlers/chat.handler';
+import { ChatBotHandler } from './handlers/chatbot.handler';
 import { QuizHandler } from './handlers/quiz.handler';
+import { RaiseHandHandler } from './handlers/raisehand.handler';
 import { TranslationHandler } from './handlers/translation.handler';
 import { VotingHandler } from './handlers/voting.handler';
 import { WhiteboardHandler } from './handlers/whiteboard.handler';
@@ -25,8 +26,6 @@ import { HttpBroadcastService } from './services/http-broadcast.service';
 import { StreamService } from './services/stream.service';
 import { WebSocketEventService } from './services/websocket-event.service';
 import { logger } from './utils/log-manager';
-import { ChatBotHandler } from './handlers/chatbot.handler';
-import { RaiseHandHandler } from './handlers/raisehand.handler';
 
 @WebSocketGateway({
     transports: ['websocket', 'polling'],
@@ -56,7 +55,6 @@ export class GatewayGateway
         private readonly whiteboardHandler: WhiteboardHandler,
         private readonly helperService: GatewayHelperService,
         private readonly streamService: StreamService,
-        // private readonly chatbotClient: ChatBotClientService,
         private readonly chatbotHandler: ChatBotHandler,
         private readonly raiseHandHandler: RaiseHandHandler,
     ) {}
@@ -93,37 +91,6 @@ export class GatewayGateway
                     'gateway.gateway.ts',
                     `Room service lookup failed for ${client.id}, will try scanning approach`,
                 );
-
-                // Fallback: Search through socket.io rooms to find participant
-                // try {
-                //     // If still not found, do full scan
-                //     if (!peerId || !roomId) {
-                //         const allRooms =
-                //             await this.helperService.getAllRoomsWithParticipants();
-
-                //         for (const [currentRoomId, participants] of allRooms) {
-                //             const participant = participants.find(
-                //                 (p) =>
-                //                     p.socket_id === client.id ||
-                //                     (p.socket_id &&
-                //                         p.socket_id.includes(client.id)),
-                //             );
-
-                //             if (participant) {
-                //                 peerId =
-                //                     participant.peer_id || participant.peerId;
-                //                 roomId = currentRoomId;
-                //                 break;
-                //             }
-                //         }
-                //     }
-                // } catch (scanError) {
-                //     logger.error(
-                //         'gateway.gateway.ts',
-                //         `Error scanning for participant`,
-                //         scanError,
-                //     );
-                // }
             }
         }
 
@@ -174,22 +141,6 @@ export class GatewayGateway
                     peerId: peerId,
                     reason: 'voluntary', // User left voluntarily (disconnect)
                 });
-
-                // If this was the creator and there's a new creator, send the creator-changed event
-                const participant =
-                    await this.roomClient.getParticipantByPeerId(
-                        roomId,
-                        peerId,
-                    );
-                if (
-                    participant?.is_creator &&
-                    leaveRoomResponse?.data?.newCreator
-                ) {
-                    this.io.to(roomId).emit('sfu:creator-changed', {
-                        peerId: leaveRoomResponse.data.newCreator,
-                        isCreator: true,
-                    });
-                }
 
                 try {
                     const updatedRoom = await this.roomClient.getRoom(roomId);
@@ -381,10 +332,8 @@ export class GatewayGateway
 
         if (!room.data || !room.data.room_id) {
             // Create new room and get room_key
-            const createRoomResponse = await this.roomClient.createRoom(
-                data.roomId,
-            );
-            roomKey = createRoomResponse.data.roomKey; // Get room_key from create response
+            const createRoomResponse = await this.roomClient.createRoom();
+            roomKey = createRoomResponse.room_key;
 
             // Create the media room in SFU service
             try {
@@ -2822,7 +2771,7 @@ export class GatewayGateway
             }
             // Check if requester is the creator (has permission to kick)
             const roomResponse = await this.roomClient.getRoom(data.roomId);
-            const roomData = roomResponse?.data;
+            // const roomData = roomResponse?.data;
 
             // Find requester participant to check if they are creator
             const participants = await this.roomClient.getParticipants(
@@ -2867,19 +2816,6 @@ export class GatewayGateway
                     reason: 'kicked',
                 },
             );
-
-            // If this was the creator and there's a new creator, send the creator-changed event
-            if (leaveRoomResponse?.data?.newCreator) {
-                this.eventService.broadcastToRoom(
-                    client,
-                    data.roomId,
-                    'sfu:creator-changed',
-                    {
-                        peerId: leaveRoomResponse.data.newCreator,
-                        isCreator: true,
-                    },
-                );
-            }
 
             client.emit('sfu:kick-user-response', {
                 success: true,

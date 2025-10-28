@@ -1,16 +1,18 @@
-import { Injectable, Inject, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { ClientGrpc } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
+import { generateRoomKey } from './common/generate';
 import {
-    Participant,
-    RoomPassword,
-    OrganizationRoom,
     CreateOrgRoomRequest,
+    OrganizationRoom,
+    Participant,
+    RoomMetadata,
+    RoomPassword,
     VerifyRoomAccessRequest,
     VerifyRoomAccessResponse,
-    RoomMetadata,
 } from './interface';
-import { generateRoomKey } from './common/generate';
+import { generateShortRoomId } from './utils/helper';
+import { logger } from './utils/log-manager';
 
 interface ChatService {
     removeRoomMessages(data: { room_id: string }): any;
@@ -21,7 +23,6 @@ export class RoomService implements OnModuleInit {
     private rooms = new Map<string, Map<string, Participant>>();
     private roomPasswords = new Map<string, RoomPassword>();
     private orgRooms = new Map<string, OrganizationRoom>(); // NEW: Organization rooms
-    private orgAccess = new Map<string, any[]>(); // NEW: Organization access cache
     private roomMetadata = new Map<string, RoomMetadata>(); // NEW: Store room_key mapping
     private chatService: ChatService;
 
@@ -83,12 +84,25 @@ export class RoomService implements OnModuleInit {
     }
 
     /**
-     * Creates a new room with the specified ID and user ID.
-     * @param userId - The ID of the user creating the room.
-     * @param password - Optional password for the room.
-     * @returns An object indicating the success of the operation and whether the user is the creator.
+     * Creates a new room with server-generated unique ID.
+     * @returns An object containing the generated room_id and room_key.
      */
-    async createRoom(roomId: string): Promise<string> {
+    async createRoom(): Promise<{ roomId: string; roomKey: string }> {
+        // Generate unique room ID
+        let roomId: string;
+        let attempts = 0;
+        const maxAttempts = 10;
+
+        do {
+            roomId = generateShortRoomId();
+
+            attempts++;
+            if (attempts >= maxAttempts) {
+                throw new Error('Failed to generate unique room ID');
+            }
+        } while (this.rooms.has(roomId)); // Check for collision
+
+        // Create room
         this.rooms.set(roomId, new Map());
 
         // Generate and store room_key
@@ -99,7 +113,7 @@ export class RoomService implements OnModuleInit {
             created_at: new Date(),
         });
 
-        return roomKey;
+        return { roomId, roomKey };
     }
 
     /**
@@ -114,11 +128,23 @@ export class RoomService implements OnModuleInit {
         room_key: string;
     }> {
         try {
-            // Generate unique room ID with nanoid (will use crypto.randomUUID() for now)
-            const randomId =
-                Math.random().toString(36).substring(2, 15) +
-                Math.random().toString(36).substring(2, 15);
-            const roomId = `org_${randomId}`;
+            // Generate unique room ID with crypto.randomUUID
+            let roomId: string;
+            let attempts = 0;
+            const maxAttempts = 10;
+
+            do {
+                const randomId = crypto
+                    .randomUUID()
+                    .replace(/-/g, '')
+                    .substring(0, 10);
+                roomId = `org_${randomId}`;
+
+                attempts++;
+                if (attempts >= maxAttempts) {
+                    throw new Error('Failed to generate unique org room ID');
+                }
+            } while (this.rooms.has(roomId) || this.orgRooms.has(roomId));
 
             // Create regular room structure
             this.rooms.set(roomId, new Map());
@@ -161,7 +187,7 @@ export class RoomService implements OnModuleInit {
                 room_key: roomKey,
             };
         } catch (error) {
-            console.error('Error creating org room:', error);
+            logger.error('room.service.ts', 'Error creating org room', error);
             throw error;
         }
     }
@@ -226,7 +252,11 @@ export class RoomService implements OnModuleInit {
 
             return { can_join: false, reason: 'UNKNOWN_ROOM_TYPE' };
         } catch (error) {
-            console.error('Error verifying room access:', error);
+            logger.error(
+                'room.service.ts',
+                'Error verifying room access',
+                error,
+            );
             return { can_join: false, reason: 'VERIFICATION_FAILED' };
         }
     }
@@ -277,7 +307,7 @@ export class RoomService implements OnModuleInit {
             this.roomMetadata.delete(roomId); // Clean up room_key
             return true;
         } catch (error) {
-            console.error('Error removing org room:', error);
+            logger.error('room.service.ts', 'Error removing org room', error);
             return false;
         }
     }
@@ -343,9 +373,9 @@ export class RoomService implements OnModuleInit {
                     );
                 }
             } catch (error) {
-                console.warn(
-                    'Failed to parse RTP capabilities, setting to undefined:',
-                    error,
+                logger.warn(
+                    'room.service.ts',
+                    `Failed to parse RTP capabilities, setting to undefined: ${error.message}`,
                 );
                 participant.rtp_capabilities = undefined;
             }
@@ -564,8 +594,9 @@ export class RoomService implements OnModuleInit {
                     this.chatService.removeRoomMessages({ room_id: roomId }),
                 );
             } catch (error) {
-                console.error(
-                    `[RoomService] Error deleting chat messages for room ${roomId}:`,
+                logger.error(
+                    'room.service.ts',
+                    `Error deleting chat messages for room ${roomId}`,
                     error,
                 );
             }
@@ -610,8 +641,9 @@ export class RoomService implements OnModuleInit {
                 error: 'Participant not found in any room',
             };
         } catch (error) {
-            console.error(
-                'Error updating participant RTP capabilities:',
+            logger.error(
+                'room.service.ts',
+                'Error updating participant RTP capabilities',
                 error,
             );
             return {
@@ -699,7 +731,11 @@ export class RoomService implements OnModuleInit {
             }
             return true;
         } catch (error) {
-            console.error(`Failed to remove room ${roomId}:`, error);
+            logger.error(
+                'room.service.ts',
+                `Failed to remove room ${roomId}`,
+                error,
+            );
             return false;
         }
     }

@@ -13,7 +13,6 @@ import {
     UnauthorizedException,
     UseGuards,
 } from '@nestjs/common';
-import { Socket } from 'socket.io';
 import { AuthClientService } from './clients/auth.client';
 import { RoomClientService } from './clients/room.client';
 import { SfuClientService } from './clients/sfu.client';
@@ -29,7 +28,6 @@ class JwtAuthGuard implements CanActivate {
     async canActivate(context: ExecutionContext): Promise<boolean> {
         const request = context.switchToHttp().getRequest();
         const token = this.extractTokenFromHeader(request);
-        console.log('token: ', token);
 
         if (!token) {
             throw new UnauthorizedException('No token provided');
@@ -97,8 +95,9 @@ export class RoomHttpController {
             // Initialize room if needed
             let room = await this.roomClient.getRoom(roomId);
             if (!room.data || !room.data.room_id) {
-                await this.roomClient.createRoom(roomId);
-                room = await this.roomClient.getRoom(roomId);
+                throw new BadRequestException(
+                    'Room does not exist. Please create room first.',
+                );
             }
 
             // Check if participant already exists
@@ -399,11 +398,12 @@ export class RoomHttpController {
                 // Continue with default orgId
                 const roomId = body.roomId;
 
-                // Create room if it doesn't exist
+                // Org room should already exist (created via createOrgRoom)
                 let room = await this.roomClient.getRoom(roomId);
                 if (!room.data?.room_id) {
-                    await this.roomClient.createRoom(roomId);
-                    room = await this.roomClient.getRoom(roomId);
+                    throw new BadRequestException(
+                        'Organization room does not exist. Please create it first.',
+                    );
                 }
 
                 // Add participant with organization context
@@ -474,11 +474,12 @@ export class RoomHttpController {
 
             const roomId = body.roomId;
 
-            // Create room if it doesn't exist
+            // Org room should already exist (created via createOrgRoom)
             let room = await this.roomClient.getRoom(roomId);
             if (!room.data?.room_id) {
-                await this.roomClient.createRoom(roomId);
-                room = await this.roomClient.getRoom(roomId);
+                throw new BadRequestException(
+                    'Organization room does not exist. Please create it first.',
+                );
             }
 
             // Add participant with organization context
@@ -488,12 +489,12 @@ export class RoomHttpController {
                 transports: new Map(),
                 producers: new Map(),
                 consumers: new Map(),
-                is_creator: false, // TODO: Check if user is org room creator
+                is_creator: false,
                 time_arrive: new Date(),
                 name: req.user.name || `User-${body.peerId}`,
                 isAudioEnabled: true,
                 isVideoEnabled: true,
-                isHost: false, // TODO: Check if user is org room creator
+                isHost: false,
                 organizationId: orgId,
             };
 

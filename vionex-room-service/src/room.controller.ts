@@ -3,6 +3,7 @@ import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { isValidRoomId } from './common/validate';
 import * as I from './interface';
 import { RoomService } from './room.service';
+import { logger } from './utils/log-manager';
 
 @Controller()
 export class RoomGrpcController {
@@ -25,21 +26,23 @@ export class RoomGrpcController {
     }
 
     @GrpcMethod('RoomService', 'CreateRoom')
-    async createRoom(data: I.CreateRoomRequest): Promise<I.CreateRoomResponse> {
+    async createRoom(): Promise<I.CreateRoomResponse> {
         try {
-            const roomId = data.room_id;
-            const roomKey = await this.roomService.createRoom(roomId);
+            // Server generates unique room ID
+            const result = await this.roomService.createRoom();
+
             return {
-                room_id: roomId,
-                room_key: roomKey,
+                room_id: result.roomId,
+                room_key: result.roomKey,
                 message: 'Room created successfully',
                 success: true,
             };
         } catch (error) {
+            logger.error('room.controller.ts', 'Error creating room', error);
             return {
                 room_id: '',
                 room_key: '',
-                message: 'Failed to create room',
+                message: error.message || 'Failed to create room',
                 success: false,
             };
         }
@@ -69,8 +72,8 @@ export class RoomGrpcController {
                 const verifyRequest: I.VerifyRoomAccessRequest = {
                     room_id: data.room_id,
                     user_id: data.user_id,
-                    org_id: 'default', // TODO: Get from user context
-                    user_role: 'member', // TODO: Get from user context
+                    org_id: 'default',
+                    user_role: 'member',
                 };
 
                 const accessResult =
@@ -139,7 +142,7 @@ export class RoomGrpcController {
                 message: isAvailable.message,
             };
         } catch (error) {
-            console.error(`Error checking username availability:`, error);
+            logger.error('room.controller.ts', 'Error checking username availability', error);
             return {
                 success: false,
                 message: 'Error checking username availability',
@@ -160,7 +163,7 @@ export class RoomGrpcController {
             const roomKey = this.roomService.getRoomKey(data.room_id);
 
             if (!roomKey) {
-                console.error(`Room key not found for room ${data.room_id}`);
+                logger.error('room.controller.ts', `Room key not found for room ${data.room_id}`);
                 return { data: null, success: false };
             }
 
@@ -193,7 +196,7 @@ export class RoomGrpcController {
 
             return response;
         } catch (error) {
-            console.error(`Error getting room ${data.room_id}:`, error);
+            logger.error('room.controller.ts', `Error getting room ${data.room_id}`, error);
             return { data: null, success: false };
         }
     }
@@ -215,7 +218,7 @@ export class RoomGrpcController {
                         : 'Failed to add participant',
             };
         } catch (error) {
-            console.error(`Error setting participant:`, error);
+            logger.error('room.controller.ts', 'Error setting participant', error);
             return {
                 success: false,
                 message: 'Failed to add participant',
@@ -231,10 +234,7 @@ export class RoomGrpcController {
             const room = await this.roomService.getRoom(data.room_id);
             return { participants: room?.participants || [] };
         } catch (error) {
-            console.error(
-                `Error getting participants for room ${data.room_id}:`,
-                error,
-            );
+            logger.error('room.controller.ts', `Error getting participants for room ${data.room_id}`, error);
             return { participants: [] };
         }
     }
@@ -273,10 +273,7 @@ export class RoomGrpcController {
 
             return { participant: serializedParticipant as any };
         } catch (error) {
-            console.error(
-                `Error getting participant by peer ID ${data.peer_id}:`,
-                error,
-            );
+            logger.error('room.controller.ts', `Error getting participant by peer ID ${data.peer_id}`, error);
             return { participant: null };
         }
     }
@@ -310,10 +307,7 @@ export class RoomGrpcController {
 
             return { participant: response };
         } catch (error) {
-            console.error(
-                `Error getting participant by socket ID ${data.socket_id}:`,
-                error,
-            );
+            logger.error('room.controller.ts', `Error getting participant by socket ID ${data.socket_id}`, error);
             return { participant: null };
         }
     }
@@ -334,7 +328,7 @@ export class RoomGrpcController {
                     : 'Failed to remove participant',
             };
         } catch (error) {
-            console.error(`Error removing participant:`, error);
+            logger.error('room.controller.ts', 'Error removing participant', error);
             return {
                 success: false,
                 message: 'Failed to remove participant',
@@ -372,7 +366,7 @@ export class RoomGrpcController {
                     : 'Failed to set transport',
             };
         } catch (error) {
-            console.error(`Error setting transport:`, error);
+            logger.error('room.controller.ts', 'Error setting transport', error);
             return {
                 success: false,
                 message: 'Failed to set transport',
@@ -399,7 +393,7 @@ export class RoomGrpcController {
                     : 'Failed to set producer',
             };
         } catch (error) {
-            console.error(`Error setting producer:`, error);
+            logger.error('room.controller.ts', 'Error setting producer', error);
             return {
                 success: false,
                 message: 'Failed to set producer',
@@ -417,7 +411,7 @@ export class RoomGrpcController {
             );
             return { room_id: roomId || '' };
         } catch (error) {
-            console.error(`Error getting participant room:`, error);
+            logger.error('room.controller.ts', `Error getting participant room`, error);
             return { room_id: '' };
         }
     }
@@ -440,7 +434,7 @@ export class RoomGrpcController {
                     : 'Failed to remove producer',
             };
         } catch (error) {
-            console.error(`Error removing producer from participant:`, error);
+            logger.error('room.controller.ts', 'Error removing producer from participant', error);
             return {
                 success: false,
                 message: 'Failed to remove producer',
@@ -469,7 +463,7 @@ export class RoomGrpcController {
                 participant_id: data.participant_id,
             };
         } catch (error) {
-            console.error(`Error leaving room:`, error);
+            logger.error('room.controller.ts', 'Error leaving room', error);
             return {
                 success: false,
                 message: 'Failed to leave room',
@@ -500,10 +494,7 @@ export class RoomGrpcController {
                 error: result.error,
             };
         } catch (error) {
-            console.error(
-                'Error updating participant RTP capabilities:',
-                error,
-            );
+            logger.error('room.controller.ts', 'Error updating participant RTP capabilities', error);
             return {
                 success: false,
                 message: 'Failed to update RTP capabilities',
@@ -552,7 +543,7 @@ export class RoomGrpcController {
                 throw new RpcException('Failed to lock room');
             }
         } catch (error) {
-            console.error('Error locking room:', error);
+            logger.error('room.controller.ts', 'Error locking room', error);
             throw new RpcException(error.message || 'Failed to lock room');
         }
     }
@@ -599,7 +590,7 @@ export class RoomGrpcController {
                 );
             }
         } catch (error) {
-            console.error('Error unlocking room:', error);
+            logger.error('room.controller.ts', 'Error unlocking room', error);
             throw new RpcException(error.message || 'Failed to unlock room');
         }
     }
@@ -612,7 +603,7 @@ export class RoomGrpcController {
             const isLocked = this.roomService.isRoomLocked(data.room_id);
             return { is_locked: isLocked };
         } catch (error) {
-            console.error('Error checking room lock status:', error);
+            logger.error('room.controller.ts', 'Error checking room lock status', error);
             return { is_locked: false };
         }
     }
@@ -629,7 +620,7 @@ export class RoomGrpcController {
             );
             return { is_valid: isValid };
         } catch (error) {
-            console.error('Error verifying room password:', error);
+            logger.error('room.controller.ts', 'Error verifying room password', error);
             return { is_valid: false };
         }
     }
@@ -649,7 +640,7 @@ export class RoomGrpcController {
                 room_key: result.room_key,
             };
         } catch (error) {
-            console.error('Error creating organization room:', error);
+            logger.error('room.controller.ts', 'Error creating organization room', error);
             return {
                 success: false,
                 message: 'Failed to create organization room',
@@ -666,7 +657,7 @@ export class RoomGrpcController {
         try {
             return await this.roomService.verifyRoomAccess(data);
         } catch (error) {
-            console.error('Error verifying room access:', error);
+            logger.error('room.controller.ts', 'Error verifying room access', error);
             return {
                 can_join: false,
                 reason: 'VERIFICATION_FAILED',
@@ -706,7 +697,7 @@ export class RoomGrpcController {
                 rooms: mappedRooms as any,
             };
         } catch (error) {
-            console.error('Error getting organization rooms:', error);
+            logger.error('room.controller.ts', 'Error getting organization rooms', error);
             return {
                 success: false,
                 message: 'Failed to get organization rooms',

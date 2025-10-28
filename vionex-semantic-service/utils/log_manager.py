@@ -1,7 +1,6 @@
 from datetime import datetime
 import logging
 import os
-from logging.handlers import RotatingFileHandler
 
 # Flag to ensure setup only runs once
 _logger_initialized = False
@@ -9,7 +8,8 @@ _logger_instance = None
 
 def setup_logger():
     """
-    Sets up a centralized, rotating logger for the service.
+    Sets up a centralized logger for the service.
+    Creates one log file per day with the format: semantic_service_YYYY-MM-DD.log
     This function will only execute once, even if called multiple times.
     """
     global _logger_initialized, _logger_instance
@@ -23,9 +23,9 @@ def setup_logger():
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
     
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-
-    log_file = os.path.join(log_dir, f'semantic_service_{timestamp}.log')
+    # Create log file with current date
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    log_file = os.path.join(log_dir, f'semantic_service_{date_str}.log')
     
     # Get the service logger
     logger = logging.getLogger('SemanticService')
@@ -33,8 +33,8 @@ def setup_logger():
 
     # Prevent adding handlers multiple times
     if not logger.hasHandlers():
-        # Create a rotating file handler: 10MB per file, keep the last 5 files
-        handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8')
+        # Create a simple file handler for the daily log file
+        handler = logging.FileHandler(log_file, encoding='utf-8')
         
         # Create a logging format
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -55,7 +55,7 @@ def setup_logger():
         
         # Add file handler to library loggers if they don't have one
         if not lib_logger.hasHandlers():
-            lib_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8')
+            lib_handler = logging.FileHandler(log_file, encoding='utf-8')
             lib_handler.setFormatter(formatter)
             lib_logger.addHandler(lib_handler)
     
