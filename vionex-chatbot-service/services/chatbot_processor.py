@@ -1,11 +1,5 @@
 
-import logging
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+from utils.log_manager import logger
 from core.model import model  # Import pre-loaded model
 from clients.semantic import SemanticClient
 
@@ -40,15 +34,38 @@ class ChatBotProcessor:
             "Answer concisely and accurately:"
         )
 
+    def generate_response(self, data: str, answer: str) -> str:
+        return f'Generated response based on data: {data}. Answer from model: {answer}'
 
-    def ask(self, question: str, room_id: str, organization_id: str = None) -> str:
+    async def ask(self, question: str, room_id: str, organization_id: str = None, room_key: str = None) -> str:
+        """
+        Process a question and return an answer based on semantic context.
+        
+        Args:
+            question: User's question
+            room_id: Room ID (for backward compatibility)
+            organization_id: Organization ID for filtering
+            room_key: Unique room key for context isolation (NEW, preferred over room_id)
+        """
         try:
             # Call semantic service to search data
-            results = self.semantic_client.search(room_id=room_id, text=question, organization_id=organization_id)
-            if results and len(results) > 0:
+            logger.info(f"Calling semantic service with room_id={room_id}, room_key={room_key}, question={question}")
+            results = await self.semantic_client.search(
+                room_id=room_id, 
+                text=question, 
+                organization_id=organization_id,
+                room_key=room_key  # NEW: Pass room_key
+            )
+            
+            # Convert to list to safely check length
+            results_list = list(results) if results else []
+            logger.info(f"Received {len(results_list)} results from semantic service")
+            
+            if results_list and len(results_list) > 0:
+                logger.info(f"Processing {len(results_list)} results from semantic service")
                 # Extract text from results and combine them
                 transcript_data = []
-                for result in results:
+                for result in results_list:
                     transcript_data.append(result.text)
                 combined_transcript = "\n".join(transcript_data)
                 
@@ -57,18 +74,19 @@ class ChatBotProcessor:
                 
                 # Generate response using the model
                 generated_response = self.model.generate(prompt)
-                logger.info(f"Generated response: {generated_response} for question: {question} with {len(results)} results" + 
-                           (f" for organization {organization_id}" if organization_id else ""))
-                return generated_response
+                logger.info(f"Generated response: {generated_response} for question: {question} with {len(results_list)} results" + 
+                           (f" for organization {organization_id}" if organization_id else "") +
+                           (f" with room_key {room_key}" if room_key else "") +
+                           (f" with transcript: {combined_transcript[:50]}..." if combined_transcript else ""))
+                # return generated_response
+                return self.generate_response(combined_transcript, generated_response)
             else:
-                logger.warning("No response from semantic service")
+                logger.warning(f"No results found from semantic service for room {room_id} (room_key: {room_key})")
                 return "I'm sorry, I couldn't find an answer to your question."
 
         except Exception as e:
             logger.error(f"Error processing question: {e}")
+            import traceback
+            traceback.print_exc()
             return "Error processing question"
-            
-        except Exception as e:
-            logger.error(f"Error saving transcript: {e}")
-            return False
     

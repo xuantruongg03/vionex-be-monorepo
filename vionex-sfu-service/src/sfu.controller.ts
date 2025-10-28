@@ -3,6 +3,7 @@ import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { SfuService } from './sfu.service';
 import { Stream } from './interface';
 import * as mediasoupTypes from 'mediasoup/node/lib/types';
+import { logger } from './utils/log-manager';
 
 @Controller()
 export class SfuController {
@@ -72,7 +73,7 @@ export class SfuController {
                 data: JSON.stringify({ router: routerData }),
             };
         } catch (error) {
-            console.error('Error creating media room:', error);
+            logger.error('sfu.controller.ts', 'Error creating media room', error);
             throw new RpcException('Failed to create media room');
         }
     }
@@ -109,7 +110,10 @@ export class SfuController {
             // Get transport from SFU service registry
             const transport = this.sfuService.getTransport(transport_id);
             if (!transport) {
-                console.error(`Transport ${transport_id} not found`);
+                logger.error(
+                    'sfu.controller.ts',
+                    `Transport ${transport_id} not found`,
+                );
                 throw new RpcException(`Transport ${transport_id} not found`);
             }
 
@@ -136,7 +140,7 @@ export class SfuController {
                 transport: JSON.stringify(transport),
             };
         } catch (error) {
-            console.error('Error connecting transport:', error);
+            logger.error('sfu.controller.ts', 'Error connecting transport', error);
             throw new RpcException('Failed to connect transport');
         }
     }
@@ -160,7 +164,8 @@ export class SfuController {
     @GrpcMethod('SfuService', 'CreateTransport')
     async handleCreateTransport(data: {
         room_id: string;
-    }): Promise<{ status: string; transport_data: string }> {
+        is_producer?: boolean;
+    }): Promise<{ status: string; transport_data: string; is_producer?: boolean }> {
         try {
             const result =
                 await this.sfuService.createWebRtcTransportWithIceServers(
@@ -177,12 +182,25 @@ export class SfuController {
                 iceServers: result.iceServers,
             };
 
+            // Store transport direction in appData for future reference
+            if (data.is_producer !== undefined) {
+                result.transport.appData = {
+                    ...result.transport.appData,
+                    isProducer: data.is_producer,
+                };
+            }
+
             return {
                 status: 'success',
                 transport_data: JSON.stringify({ transport: transportData }),
+                is_producer: data.is_producer, // Echo back the transport type
             };
         } catch (error) {
-            console.error('Error creating WebRTC transport:', error);
+            logger.error(
+                'sfu.controller.ts',
+                'Error creating WebRTC transport',
+                error,
+            );
             throw new RpcException('Failed to create WebRTC transport');
         }
     }
@@ -194,8 +212,9 @@ export class SfuController {
     }): Promise<{ success: boolean; message: string }> {
         const result = this.sfuService.saveStream(data.stream);
         if (!result) {
-            console.error(
-                '[SFU CONTROLLER] Failed to save stream:',
+            logger.error(
+                'sfu.controller.ts',
+                '[SFU CONTROLLER] Failed to save stream',
                 data.stream.streamId,
             );
             throw new RpcException('Failed to save stream');
@@ -293,7 +312,10 @@ export class SfuController {
             }
 
             if (!data.room_id) {
-                console.error(`[SFU] Invalid roomId: ${data.room_id}`);
+                logger.error(
+                    'sfu.controller.ts',
+                    `[SFU] Invalid roomId: ${data.room_id}`,
+                );
                 throw new RpcException(`Invalid roomId: ${data.room_id}`);
             }
 
@@ -302,7 +324,8 @@ export class SfuController {
             try {
                 rtpCapabilities = JSON.parse(data.rtp_capabilities || '{}');
             } catch (error) {
-                console.warn(
+                logger.warn(
+                    'sfu.controller.ts',
                     '[SFU] Invalid RTP capabilities, using empty object',
                 );
                 rtpCapabilities = {};
@@ -313,7 +336,8 @@ export class SfuController {
             try {
                 participant = JSON.parse(data.participant_data || '{}');
             } catch (error) {
-                console.warn(
+                logger.warn(
+                    'sfu.controller.ts',
                     '[SFU] Invalid participant data, using empty object',
                 );
                 participant = {};
@@ -349,7 +373,7 @@ export class SfuController {
                 consumer_data: JSON.stringify(consumerData),
             };
         } catch (error) {
-            console.error('Error creating consumer:', error);
+            logger.error('sfu.controller.ts', 'Error creating consumer', error);
             throw new RpcException(
                 error.message || 'Failed to create consumer',
             );
@@ -370,7 +394,7 @@ export class SfuController {
                 router_data: JSON.stringify(router.rtpCapabilities),
             };
         } catch (error) {
-            console.error('Error getting media router:', error);
+            logger.error('sfu.controller.ts', 'Error getting media router', error);
             throw new RpcException('Failed to get media router');
         }
     }
@@ -393,7 +417,7 @@ export class SfuController {
                 message: 'Consumer resumed successfully',
             };
         } catch (error) {
-            console.error('Error resuming consumer:', error);
+            logger.error('sfu.controller.ts', 'Error resuming consumer', error);
             throw new RpcException(
                 error.message || 'Failed to resume consumer',
             );
@@ -418,7 +442,7 @@ export class SfuController {
                 message: 'Stream unpublished successfully',
             };
         } catch (error) {
-            console.error('Error unpublishing stream:', error);
+            logger.error('sfu.controller.ts', 'Error unpublishing stream', error);
             throw new RpcException(
                 error.message || 'Failed to unpublish stream',
             );
@@ -446,7 +470,7 @@ export class SfuController {
                 message: 'Stream updated successfully',
             };
         } catch (error) {
-            console.error('Error updating stream:', error);
+            logger.error('sfu.controller.ts', 'Error updating stream', error);
             throw new RpcException(error.message || 'Failed to update stream');
         }
     }
@@ -467,7 +491,11 @@ export class SfuController {
                 removed_streams: removedStreams,
             };
         } catch (error) {
-            console.error('Error removing participant media:', error);
+            logger.error(
+                'sfu.controller.ts',
+                'Error removing participant media',
+                error,
+            );
             throw new RpcException(
                 error.message || 'Failed to remove participant media',
             );
@@ -486,7 +514,7 @@ export class SfuController {
                 message: 'Media room closed successfully',
             };
         } catch (error) {
-            console.error('Error closing media room:', error);
+            logger.error('sfu.controller.ts', 'Error closing media room', error);
             throw new RpcException(
                 error.message || 'Failed to close media room',
             );
@@ -551,7 +579,7 @@ export class SfuController {
 
             return finalResponse;
         } catch (error) {
-            console.error('Error creating producer:', error);
+            logger.error('sfu.controller.ts', 'Error creating producer', error);
             throw new RpcException(
                 `Failed to create producer: ${error.message}`,
             );
@@ -576,7 +604,8 @@ export class SfuController {
             try {
                 rtpCapabilities = JSON.parse(data.rtp_capabilities || '{}');
             } catch (error) {
-                console.warn(
+                logger.warn(
+                    'sfu.controller.ts',
                     '[SFU Controller] Invalid RTP capabilities for pin',
                 );
                 rtpCapabilities = {};
@@ -595,7 +624,7 @@ export class SfuController {
                 pin_data: JSON.stringify(result),
             };
         } catch (error) {
-            console.error('Error pinning user:', error);
+            logger.error('sfu.controller.ts', 'Error pinning user', error);
             throw new RpcException(error.message || 'Failed to pin user');
         }
     }
@@ -628,7 +657,7 @@ export class SfuController {
                 unpin_data: JSON.stringify(result),
             };
         } catch (error) {
-            console.error('Error unpinning user:', error);
+            logger.error('sfu.controller.ts', 'Error unpinning user', error);
             throw new RpcException(error.message || 'Failed to unpin user');
         }
     }
@@ -654,7 +683,7 @@ export class SfuController {
 
             return result;
         } catch (error) {
-            console.error('Error handling speaking:', error);
+            logger.error('sfu.controller.ts', 'Error handling speaking', error);
             throw new RpcException(
                 error.message || 'Failed to handle speaking',
             );
@@ -680,7 +709,11 @@ export class SfuController {
 
             return result;
         } catch (error) {
-            console.error('Error handling stop speaking:', error);
+            logger.error(
+                'sfu.controller.ts',
+                'Error handling stop speaking',
+                error,
+            );
             throw new RpcException(
                 error.message || 'Failed to handle stop speaking',
             );
@@ -774,11 +807,9 @@ export class SfuController {
     }> {
         try {
             if (!data.room_id || !data.user_id) {
-                console.log(
-                    '[SFU Controller] Missing fields - room_id:',
-                    data.room_id,
-                    'user_id:',
-                    data.user_id,
+                logger.info(
+                    'sfu.controller.ts',
+                    `[SFU Controller] Missing fields - room_id: ${data.room_id}, user_id: ${data.user_id}`,
                 );
                 throw new RpcException(
                     'Missing required fields for listing translation cabins',
@@ -791,7 +822,11 @@ export class SfuController {
             });
             return result;
         } catch (error) {
-            console.error('Error handling list translation cabin:', error);
+            logger.error(
+                'sfu.controller.ts',
+                'Error handling list translation cabin',
+                error,
+            );
             throw new RpcException(
                 error.message || 'Failed to handle list translation cabin',
             );

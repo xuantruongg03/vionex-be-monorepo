@@ -10,6 +10,7 @@ message AskChatBotRequest {
     string question = 1;
     string room_id = 2;
     string organization_id = 3;
+    optional string room_key = 4; // NEW: Unique room key for context isolation (use instead of room_id)
 }
 
 message AskChatBotResponse {

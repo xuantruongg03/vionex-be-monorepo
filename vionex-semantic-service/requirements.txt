@@ -3,3 +3,8 @@ grpcio
 grpcio-tools
 sentence-transformers
 qdrant-client
+fasttext
+sentencepiece
+transformers
+torch
+numpy<2.0.0

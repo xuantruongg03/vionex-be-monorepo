@@ -46,12 +46,42 @@ export class TranslationHandler {
                 return { success: false, error: 'Missing required fields' };
             }
 
-            // B1. Allocate RTP port from Audio Service
-            const audioPortResponse =
-                await this.audioClient.allocateTranslationPort(
-                    data.roomId,
-                    data.targetUserId,
+            // Prevent user from creating cabin with themselves
+            if (data.sourceUserId === data.targetUserId) {
+                this.eventService.emitError(
+                    client,
+                    'Cannot create translation cabin with yourself',
+                    'SAME_USER_ERROR',
                 );
+                return {
+                    success: false,
+                    error: 'Cannot create translation cabin with yourself',
+                };
+            }
+
+            // B1. Allocate RTP port from Audio Service
+            let audioPortResponse;
+            try {
+                audioPortResponse =
+                    await this.audioClient.allocateTranslationPort(
+                        data.roomId,
+                        data.targetUserId,
+                    );
+            } catch (error) {
+                console.error(
+                    '[TranslationHandler] Error calling Audio Service:',
+                    error,
+                );
+                this.eventService.emitError(
+                    client,
+                    'Audio Service is not available',
+                    'AUDIO_SERVICE_UNAVAILABLE',
+                );
+                return {
+                    success: false,
+                    error: 'Audio Service is not available',
+                };
+            }
 
             if (!audioPortResponse.success) {
                 this.eventService.emitError(

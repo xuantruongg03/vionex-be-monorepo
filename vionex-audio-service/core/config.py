@@ -55,3 +55,11 @@ TYPE_ENGINE = os.getenv("TYPE_ENGINE", "cpu")
 
 # Logging configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_TO_FILE = os.getenv("LOG_TO_FILE", "true").lower() == "true"
+LOG_DIR = os.getenv("LOG_DIR", "logs")
+LOG_FILE_PREFIX = os.getenv("LOG_FILE_PREFIX", "audio_service")
+
+# DEV: Test mode for local development (enables client address learning)
+# DEV: Set ENABLE_TEST_MODE=true to allow test clients behind NAT to receive RTP
+# DEV: In production, this should be false (default) to use configured SFU host
+ENABLE_TEST_MODE = os.getenv("ENABLE_TEST_MODE", "false").lower() == "true"

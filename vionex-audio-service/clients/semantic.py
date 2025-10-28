@@ -27,13 +27,25 @@ class SemanticClient:
             self.stub = None
 
     async def save_transcript(self, data: Dict[str, Any]) -> bool:
-        """Save a transcript using the semantic service"""
+        """
+        Save a transcript using the semantic service
+        
+        Args:
+            data: Dictionary containing:
+                - room_id: Room ID
+                - room_key: Room key for semantic context isolation (NEW, optional)
+                - user_id: User/speaker ID
+                - text: Transcript text
+                - timestamp: Timestamp
+                - language: Language code
+                - organization_id: Organization ID (optional)
+        """
         try:
             if not self.stub:
                 logger.error("Semantic client not initialized")
                 return False
 
-            # Prepare request with organization_id support
+            # Prepare request with organization_id and room_key support
             request_params = {
                 'room_id': data.get('room_id', ''),
                 'speaker': data.get('user_id', ''),
@@ -45,6 +57,10 @@ class SemanticClient:
             # Add organization_id if provided
             if data.get('organization_id'):
                 request_params['organization_id'] = data.get('organization_id')
+            
+            # Add room_key if provided (NEW)
+            if data.get('room_key'):
+                request_params['room_key'] = data.get('room_key')
 
             request = semantic_pb2.SaveTranscriptRequest(**request_params)
             
@@ -52,6 +68,7 @@ class SemanticClient:
             
             if response.success:
                 logger.info(f"Transcript saved for room {data.get('room_id')}" + 
+                           (f" (room_key: {data.get('room_key')})" if data.get('room_key') else "") +
                            (f" (org: {data.get('organization_id')})" if data.get('organization_id') else ""))
                 return True
             else:

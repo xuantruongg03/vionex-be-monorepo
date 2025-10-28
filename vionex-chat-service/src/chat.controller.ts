@@ -1,6 +1,6 @@
-import { Controller, Get } from '@nestjs/common';
-import { ChatService } from './chat.service';
+import { Controller } from '@nestjs/common';
 import { GrpcMethod } from '@nestjs/microservices';
+import { ChatService } from './chat.service';
 import { ChatMessage, ChatMessageResponse, ReplyInfo } from './interface';
 
 @Controller()
@@ -10,9 +10,11 @@ export class ChatController {
     @GrpcMethod('ChatService', 'SendMessage')
     async sendMessage(data: {
         room_id: string;
+        room_key?: string; // NEW: Room key for semantic context isolation
         sender: string;
         sender_name: string;
         text: string;
+        org_id?: string;
         fileUrl?: string;
         fileName?: string;
         fileType?: string;
@@ -25,12 +27,14 @@ export class ChatController {
             data.sender,
             data.sender_name,
             data.text,
+            data.org_id,
             data.fileUrl,
             data.fileName,
             data.fileType,
             data.fileSize,
             data.isImage,
             data.replyTo,
+            data.room_key, // NEW: Pass room_key
         );
         if (!rs) {
             return {

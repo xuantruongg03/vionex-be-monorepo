@@ -91,14 +91,17 @@ export interface RoomGrpcService {
 
     isRoomExists(data: { room_id: string }): Observable<{ is_exists: boolean }>;
 
-    createRoom(data: {
+    createRoom(data: {}): Observable<{
         room_id: string;
-    }): Observable<{ room_id: string; message: string; success: boolean }>;
+        message: string;
+        success: boolean;
+        room_key: string;
+    }>;
 
     joinRoom(data: {
         room_id: string;
         user_id: string;
-    }): Observable<{ success: boolean; message: string }>;
+    }): Observable<{ success: boolean; message: string; room_key: string }>;
 
     isRoomLocked(data: { room_id: string }): Observable<{ locked: boolean }>;
 
@@ -113,6 +116,7 @@ export interface RoomGrpcService {
             room_id: string;
             participants: any;
             isLocked: boolean;
+            room_key: string;
         };
     }>;
 

@@ -58,6 +58,12 @@ class SharedSocketManager:
         # Port tracking (for compatibility/debugging)
         self.cabin_to_ports: Dict[str, tuple] = {}  # cabin_id → (virtual_rx_port, tx_port)
         
+        # DEV: Test mode support for local testing with NAT traversal
+        # DEV: When ENABLE_TEST_MODE=true, learn client addresses from incoming RTP
+        from core.config import ENABLE_TEST_MODE
+        self.test_mode = ENABLE_TEST_MODE  # DEV: Test mode flag
+        self.cabin_to_client_address: Dict[str, tuple] = {}  # DEV: cabin_id → (client_ip, client_port)
+        
         self._lock = threading.Lock()
         self.running = False
         self._rx_thread: Optional[threading.Thread] = None
@@ -80,32 +86,21 @@ class SharedSocketManager:
             self.rx_sock.setsockopt(socket_module.SOL_SOCKET, socket_module.SO_RCVBUF, 1 << 20)  # 1MB buffer
             self.rx_sock.bind(("0.0.0.0", audio_rx_port))
             self.rx_sock.settimeout(1.0)
-            logger.info(f"[SHARED-SOCKET] RX socket bound to 0.0.0.0:{audio_rx_port}")
 
-            # TX socket: Send all RTP packets to SFU
-            self.tx_sock = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_DGRAM)
-            self.tx_sock.setsockopt(socket_module.SOL_SOCKET, socket_module.SO_REUSEADDR, 1)
-
-            if tx_source_port > 0:  # Bind source port if SFU requires comedia:false
-                self.tx_sock.bind(("0.0.0.0", tx_source_port))
-                logger.info(f"[SHARED-SOCKET] TX socket bound to 0.0.0.0:{tx_source_port}")
-            else:
-                logger.info(f"[SHARED-SOCKET] TX socket created with ephemeral port")
+            # TX socket: Use SAME socket as RX for NAT traversal (replies from same port)
+            # This ensures client NAT router allows incoming packets (same connection)
+            self.tx_sock = self.rx_sock  # Reuse RX socket for sending
+            logger.info(f"[SHARED-SOCKET] Using single socket for RX/TX (port {audio_rx_port}) for NAT compatibility")
 
             self.running = True
-            
-            # Start RTP packet routing thread
-            logger.info(f"[SHARED-SOCKET] Starting RTP router thread...")
             self._start_rtp_router()
-            
-            # Wait a moment to ensure router thread started
             time.sleep(0.1)
             
-            logger.info(f"[SHARED-SOCKET] Initialized RX:{audio_rx_port}, TX source:{tx_source_port or 'ephemeral'}")
+            logger.info(f"[SHARED-SOCKET] Initialized (RX:{audio_rx_port}, test_mode={self.test_mode})")
             return True
             
         except Exception as e:
-            logger.error(f"[SHARED-SOCKET] ❌ Failed to initialize: {e}")
+            logger.error(f"[SHARED-SOCKET] Failed to initialize: {e}")
             return False
     
     def register_cabin_for_routing(self, cabin_id: str, ssrc: int, callback: Callable[[bytes], None]) -> Optional[tuple]:
@@ -143,7 +138,7 @@ class SharedSocketManager:
             self.cabin_callbacks[cabin_id] = callback
             self.cabin_to_ports[cabin_id] = (allocated_rx_port, allocated_tx_port)
             
-            logger.info(f"[SHARED-SOCKET] Registered cabin {cabin_id}: SSRC={ssrc}, allocated_ports=({allocated_rx_port}, {allocated_tx_port})")
+            logger.info(f"[SHARED-SOCKET] Registered cabin {cabin_id}: SSRC={ssrc}, allocated_ports=({allocated_rx_port}, {allocated_tx_port}), test_mode={self.test_mode}")
             return (allocated_rx_port, allocated_tx_port)
     
     def unregister_cabin(self, cabin_id: str) -> bool:
@@ -172,6 +167,12 @@ class SharedSocketManager:
                 port_manager.release_port(allocated_rx_port)
                 port_manager.release_port(allocated_tx_port)
             
+            # DEV: Cleanup learned client address in test mode
+            if cabin_id in self.cabin_to_client_address:  # DEV: Remove learned address
+                learned_addr = self.cabin_to_client_address[cabin_id]
+                del self.cabin_to_client_address[cabin_id]
+                logger.info(f"[NAT-CLEANUP] 🧹 Removed learned address for '{cabin_id}': {learned_addr[0]}:{learned_addr[1]}")
+            
             if ssrc is None:
                 logger.warning(f"[SHARED-SOCKET] Cabin {cabin_id} was not registered")
                 return False
@@ -182,6 +183,7 @@ class SharedSocketManager:
     def _start_rtp_router(self):
         """Start RTP packet routing thread"""
         if self._rx_thread and self._rx_thread.is_alive():
+            logger.warning("[SHARED-SOCKET] RTP router thread already running")
             return
         
         self._rx_thread = threading.Thread(
@@ -190,7 +192,6 @@ class SharedSocketManager:
             name="RTPRouter"
         )
         self._rx_thread.start()
-        logger.info("[SHARED-SOCKET] Started RTP packet router thread")
     
     def _rtp_packet_router(self):
         """
@@ -199,19 +200,26 @@ class SharedSocketManager:
         Receives RTP packets from SFU and routes them to appropriate 
         cabin callbacks based on SSRC mapping.
         """
+        logger.info("[RTP-ROUTER] Started")
         packet_count = 0
         
         while self.running:
             try:
                 if not self.rx_sock:
+                    logger.error("[RTP-ROUTER] ❌ RX socket is None!")
                     time.sleep(0.1)
                     continue
                 
-                # Receive RTP packet from SFU
+                # Receive RTP packet from SFU/client
                 data, addr = self.rx_sock.recvfrom(4096)
                 packet_count += 1
                 
+                # Log first packet only
+                if packet_count == 1:
+                    logger.info(f"[RTP-RX] First packet from {addr[0]}:{addr[1]}")
+                
                 if len(data) < 12:  # Minimum RTP header size
+                    logger.warning(f"[RTP-RX] Packet too small: {len(data)} bytes")
                     continue
                 
                 # Extract SSRC from RTP header (bytes 8-11)
@@ -221,6 +229,19 @@ class SharedSocketManager:
                 with self._lock:
                     cabin_id = self.ssrc_to_cabin.get(ssrc)
                     if cabin_id and cabin_id in self.cabin_callbacks:
+                        # DEV: Learn client address in test mode for NAT traversal
+                        # TEST_MODE: Learn client address from first RTP packet for NAT traversal
+                        if self.test_mode:
+                            if cabin_id not in self.cabin_to_client_address:
+                                self.cabin_to_client_address[cabin_id] = addr
+                                logger.info(f"[NAT-LEARN] Learned client address for cabin '{cabin_id}': {addr[0]}:{addr[1]}")
+                            else:
+                                # Check if address changed (NAT remapping)
+                                old_addr = self.cabin_to_client_address[cabin_id]
+                                if old_addr != addr:
+                                    logger.warning(f"[NAT-CHANGE] Client address changed for '{cabin_id}': {old_addr[0]}:{old_addr[1]} -> {addr[0]}:{addr[1]}")
+                                    self.cabin_to_client_address[cabin_id] = addr
+                        
                         callback = self.cabin_callbacks[cabin_id]
                         try:
                             # Call cabin's audio processing callback
@@ -260,14 +281,19 @@ class SharedSocketManager:
         
         # logger.info("[RTP-ROUTER] RTP packet router stopped")
     
-    def send_rtp_to_sfu(self, rtp_packet: bytes, sfu_host: str, sfu_port: int) -> bool:
+    def send_rtp_to_sfu(self, rtp_packet: bytes, sfu_host: str, sfu_port: int, cabin_id: str = None) -> bool:  # DEV: Added cabin_id param
         """
-        Send RTP packet to SFU using shared TX socket
+        Send RTP packet to SFU/client using shared TX socket
+        
+        DEV: In test mode, if cabin_id provided and client address learned,
+        DEV: sends to learned client address instead of configured SFU.
+        DEV: This enables test clients behind NAT to receive RTP packets.
         
         Args:
             rtp_packet: Complete RTP packet data
-            sfu_host: SFU server hostname/IP
-            sfu_port: SFU server port
+            sfu_host: SFU server hostname/IP (fallback for production)
+            sfu_port: SFU server port (fallback for production)
+            cabin_id: Cabin identifier (optional, for test mode address lookup)  # DEV: New param
             
         Returns:
             bool: True if packet sent successfully
@@ -277,11 +303,45 @@ class SharedSocketManager:
             return False
         
         try:
-            bytes_sent = self.tx_sock.sendto(rtp_packet, (sfu_host, sfu_port))
+            # DEV: Test mode - try learned client address first
+            target_addr = None
+            using_learned = False  # DEV: Track if using learned address
+            send_mode = "unknown"
+            
+            # DEBUG: Log test mode status and cabin_id
+            if not hasattr(self, '_debug_test_mode_logged'):
+                logger.info(f"[NAT-DEBUG] test_mode={self.test_mode}, cabin_to_client_address keys={list(self.cabin_to_client_address.keys())}")
+                self._debug_test_mode_logged = True
+            
+            # TEST_MODE: Use learned client address, PRODUCTION: Use configured SFU
+            if self.test_mode and cabin_id:
+                with self._lock:
+                    target_addr = self.cabin_to_client_address.get(cabin_id)
+                if target_addr:
+                    send_mode = "learned"
+            
+            # Fallback to configured SFU address
+            if not target_addr:
+                target_addr = (sfu_host, sfu_port)
+                send_mode = "configured"
+                if self.test_mode and cabin_id:
+                    logger.warning(f"[NAT-FALLBACK] No learned address for {cabin_id}, using configured: {sfu_host}:{sfu_port}")
+            
+            bytes_sent = self.tx_sock.sendto(rtp_packet, target_addr)
+            
+            # Track statistics
+            if not hasattr(self, '_tx_packet_count'):
+                self._tx_packet_count = 0
+            if not hasattr(self, '_tx_mode_count'):
+                self._tx_mode_count = {"learned": 0, "configured": 0}
+            
+            self._tx_packet_count += 1
+            self._tx_mode_count[send_mode] = self._tx_mode_count.get(send_mode, 0) + 1
+            
             return bytes_sent > 0
             
         except Exception as e:
-            logger.error(f"[SHARED-SOCKET] Error sending to {sfu_host}:{sfu_port}: {e}")
+            logger.error(f"[SHARED-SOCKET] Error sending: {e}")
             return False
 
     def stop(self):
@@ -300,12 +360,8 @@ class SharedSocketManager:
                 pass
             self.rx_sock = None
             
-        if self.tx_sock:
-            try:
-                self.tx_sock.close()
-            except:
-                pass
-            self.tx_sock = None
+        # TX socket is same as RX socket, so just set to None
+        self.tx_sock = None
         
         # Clear routing tables
         with self._lock:
@@ -349,12 +405,8 @@ def get_shared_socket_manager() -> SharedSocketManager:
     """
     global shared_socket_manager
     if shared_socket_manager is None:
-        logger.info("[SHARED-SOCKET] Creating new SharedSocketManager instance...")
         shared_socket_manager = SharedSocketManager()
         if not shared_socket_manager.initialize_shared_sockets():
-            logger.error("[SHARED-SOCKET] Failed to initialize shared socket manager!")
+            logger.error("[SHARED-SOCKET] Failed to initialize!")
             raise RuntimeError("Failed to initialize shared socket manager")
-        logger.info("[SHARED-SOCKET] SharedSocketManager created and initialized successfully")
-    else:
-        logger.info("[SHARED-SOCKET] Using existing SharedSocketManager instance")
     return shared_socket_manager

@@ -26,6 +26,8 @@ import { HttpBroadcastService } from './services/http-broadcast.service';
 import { ServiceErrorService } from './services/service-error.service';
 import { StreamService } from './services/stream.service';
 import { WebSocketEventService } from './services/websocket-event.service';
+import { RaiseHandHandler } from './handlers/raisehand.handler';
+import { ChatBotHandler } from './handlers/chatbot.handler';
 
 @Module({
     imports: [
@@ -172,6 +174,8 @@ import { WebSocketEventService } from './services/websocket-event.service';
         GatewayHelperService,
         StreamService,
         ServiceErrorService,
+        RaiseHandHandler,
+        ChatBotHandler
     ],
 })
 export class GatewayModule {}

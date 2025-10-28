@@ -24,6 +24,36 @@ export class GatewayController {
         };
     }
 
+    @Post('create-room')
+    async createRoom() {
+        try {
+            // Call room service to create room (server generates ID)
+            const result = await this.roomClient.createRoom();
+
+            if (!result.success) {
+                throw new HttpException(
+                    result.message || 'Failed to create room',
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                );
+            }
+
+            return {
+                data: {
+                    success: true,
+                    roomId: result.room_id,
+                    roomKey: result.room_key,
+                    message: result.message || 'Room created successfully',
+                },
+            };
+        } catch (error) {
+            console.error('Error creating room:', error);
+            throw new HttpException(
+                error.message || 'Failed to create room',
+                HttpStatus.INTERNAL_SERVER_ERROR,
+            );
+        }
+    }
+
     @Post('validate-username')
     async validateUsername(@Body() data: { roomId: string; username: string }) {
         const { roomId, username } = data;
@@ -150,9 +180,7 @@ export class GatewayController {
 
     // HTTP endpoint for getting users in room
     @Get('sfu/rooms/:roomId/users')
-    async getUsersInRoom(
-        @Param('roomId') roomId: string,
-    ) {
+    async getUsersInRoom(@Param('roomId') roomId: string) {
         try {
             const room = await this.roomClient.getRoom(roomId);
             if (!room || !room.data || !room.data.participants) {

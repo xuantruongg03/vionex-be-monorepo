@@ -41,10 +41,13 @@ message CreateOrgRoomRequest {
   string password = 6;
 }
 
+message CreateRoomRequest {}
+
 message CreateOrgRoomResponse {
   bool success = 1;
   string message = 2;
-  string room_id = 3; 
+  string room_id = 3;
+  string room_key = 4; // NEW: Room key for semantic context isolation
 }
 
 message VerifyRoomAccessRequest {
@@ -175,15 +178,12 @@ message IsRoomExistsResponse {
   bool is_exists = 1;
 }
 
-// Messages for CreateRoom
-message CreateRoomRequest {
-  string room_id = 1;
-}
 
 message CreateRoomResponse {
   string room_id = 1;
   string message = 2;
   bool success = 3;
+  string room_key = 4; // NEW: Room key for semantic context isolation
 }
 
 // Messages for JoinRoom
@@ -195,6 +195,7 @@ message JoinRoomRequest {
 message JoinRoomResponse {
   bool success = 1;
   string message = 2;
+  string room_key = 3; // Room key for semantic context isolation (required)
 }
 
 // Messages for LeaveRoom
@@ -227,6 +228,7 @@ message Room {
   string room_id = 1;
   repeated Participant participants = 2;
   bool isLocked = 3;
+  string room_key = 4; // Room key for semantic context isolation
 }
 
 // Participant definition

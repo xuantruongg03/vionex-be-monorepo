@@ -14,17 +14,18 @@ import time
 from concurrent import futures
 from typing import Dict, Any
 
-from core.config import GRPC_PORT
-from proto import audio_pb2_grpc, audio_pb2
-from service.audio_processor import AudioProcessor
-from service.translation_cabin import cabin_manager
-
-# Setup logging
+# Setup logging FIRST before importing other modules
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Import after logging is configured
+from core.config import GRPC_PORT
+from proto import audio_pb2_grpc, audio_pb2
+from service.audio_processor import AudioProcessor
+from service.translation_cabin import cabin_manager
 
 class AudioService(audio_pb2_grpc.AudioServiceServicer):
     """
@@ -89,10 +90,12 @@ class AudioService(audio_pb2_grpc.AudioServiceServicer):
                 return self._create_error_response("Invalid audio request")
 
             logger.info(f"Processing audio from {request.userId} in room {request.roomId}" + 
-                       (f" for organization {request.organizationId}" if hasattr(request, 'organizationId') and request.organizationId else ""))
+                       (f" for organization {request.organizationId}" if hasattr(request, 'organizationId') and request.organizationId else "") +
+                       (f" with room_key {request.roomKey}" if hasattr(request, 'roomKey') and request.roomKey else ""))
             
-            # Get organization_id from request if provided
+            # Get organization_id and room_key from request if provided
             organization_id = getattr(request, 'organizationId', None) if hasattr(request, 'organizationId') else None
+            room_key = getattr(request, 'roomKey', None) if hasattr(request, 'roomKey') else None  # NEW
             
             # Process audio asynchronously using the audio processor
             # This runs Whisper transcription in a thread executor
@@ -104,7 +107,8 @@ class AudioService(audio_pb2_grpc.AudioServiceServicer):
                 sample_rate=request.sampleRate or 16000,  # Default to 16kHz if not specified
                 channels=request.channels or 1,           # Default to mono if not specified
                 duration=request.duration,
-                organization_id=organization_id
+                organization_id=organization_id,
+                room_key=room_key  # NEW: Pass room_key to processor
             ))
             
             # Update statistics based on processing result
@@ -194,30 +198,38 @@ class AudioService(audio_pb2_grpc.AudioServiceServicer):
                 target_language='en'   # Default, will be updated in B3
             )
             
-            # Check if cabin creation failed
+            # Check if cabin creation failed (returns None on failure)
             if not cabin_info:
+                logger.error(f"Failed to create cabin for room={request.roomId}, user={request.userId}")
                 return audio_pb2.PortReply(
                     success=False,
                     port=0,
                     send_port=0,
-                    ready=False
+                    ready=False,
+                    ssrc=0
                 )
+            
+            logger.info(f"✅ Cabin created: room={request.roomId}, user={request.userId}, "
+                       f"ports=({cabin_info['rtp_port']}, {cabin_info['send_port']}), ssrc={cabin_info['ssrc']}")
             
             return audio_pb2.PortReply(
                 success=True,
                 port=cabin_info['rtp_port'],      # Receive port
                 send_port=cabin_info['send_port'], # Send port
-                ssrc=cabin_info['ssrc'],         # SSRC for the producer
+                ssrc=cabin_info['ssrc'],           # SSRC for the producer
                 ready=True
             )
             
         except Exception as e:
             logger.error(f"AllocateTranslationPort error: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return audio_pb2.PortReply(
                 success=False,
                 port=0,
                 send_port=0,
-                ready=False
+                ready=False,
+                ssrc=0
             )
 
     def CreateTranslationProduce(self, request, context):
@@ -335,6 +347,11 @@ def serve():
 
 def main():
     """Main function"""
+    # Initialize file-based logging
+    from core.logger_setup import setup_file_logger
+    log_file = setup_file_logger()
+    logger.info(f"File logging initialized: {log_file}")
+    
     try:
         serve()
     except KeyboardInterrupt:

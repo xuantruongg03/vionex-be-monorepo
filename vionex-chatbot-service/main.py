@@ -2,6 +2,8 @@
 import grpc
 import logging
 import sys
+import asyncio
+import threading
 from concurrent import futures
 
 # Setup logging
@@ -22,6 +24,25 @@ except Exception as e:
     traceback.print_exc()
     sys.exit(1)
 
+# Global event loop for async operations
+_loop = None
+_loop_thread = None
+
+def start_background_loop():
+    """Start a background event loop in a separate thread"""
+    global _loop
+    asyncio.set_event_loop(_loop)
+    _loop.run_forever()
+
+def get_event_loop():
+    """Get or create the global event loop"""
+    global _loop, _loop_thread
+    if _loop is None:
+        _loop = asyncio.new_event_loop()
+        _loop_thread = threading.Thread(target=start_background_loop, daemon=True)
+        _loop_thread.start()
+    return _loop
+
 
 class VionexChatBotService(chatbot_pb2_grpc.ChatbotServiceServicer):
     """
@@ -32,6 +53,9 @@ class VionexChatBotService(chatbot_pb2_grpc.ChatbotServiceServicer):
         """Initialize the chat bot service"""
         logger.info("Initializing Vionex Chat Bot Service...")
 
+        # Start background event loop
+        get_event_loop()
+        
         # Initialize chat bot processor
         self.chatbot_processor = ChatBotProcessor()
 
@@ -42,7 +66,7 @@ class VionexChatBotService(chatbot_pb2_grpc.ChatbotServiceServicer):
         Ask the chat bot a question
         
         Args:
-            request: AskChatBotRequest containing the prompt and optional parameters
+            request: AskChatBotRequest containing the prompt and optional parameters (room_id, organization_id, room_key)
             context: gRPC context
 
         Returns:
@@ -53,7 +77,15 @@ class VionexChatBotService(chatbot_pb2_grpc.ChatbotServiceServicer):
 
             # Process the question using the chat bot processor with organization context
             organization_id = getattr(request, 'organization_id', None)
-            response = self.chatbot_processor.ask(request.question, request.room_id, organization_id)
+            room_key = getattr(request, 'room_key', None) if hasattr(request, 'room_key') else None  # NEW
+            
+            # Run async function using the global event loop
+            loop = get_event_loop()
+            future = asyncio.run_coroutine_threadsafe(
+                self.chatbot_processor.ask(request.question, request.room_id, organization_id, room_key),  # NEW: Pass room_key
+                loop
+            )
+            response = future.result()
 
             return chatbot_pb2.AskChatBotResponse(
                 answer=response
@@ -97,8 +129,7 @@ def serve():
 def main():
     """Main function"""
     try:
-        import asyncio
-        asyncio.run(serve())
+        serve()
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
     except Exception as e:

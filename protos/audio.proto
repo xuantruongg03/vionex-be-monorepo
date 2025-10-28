@@ -65,6 +65,7 @@ message ProcessAudioBufferRequest {
   int32 sampleRate = 6;
   int32 channels = 7;
   optional string organizationId = 8; // Organization ID for multi-tenant isolation
+  optional string roomKey = 9; // NEW: Room key for semantic context isolation
 }
 
 /**
@@ -88,6 +89,7 @@ message ProcessAudioRequest {
   int64 timestamp = 3;
   bytes audioBuffer = 4;
   double duration = 5;
+  optional string roomKey = 6; // NEW: Room key for semantic context isolation
 }
 
 /**

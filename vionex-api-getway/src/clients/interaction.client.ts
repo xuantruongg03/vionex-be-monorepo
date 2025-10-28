@@ -138,13 +138,6 @@ export class InteractionClientService implements OnModuleInit {
     // Whiteboard methods
     async updateWhiteboard(roomId: string, elements: any[], state: string) {
         try {
-            console.log('[InteractionClient] updateWhiteboard called with:', {
-                roomId,
-                elementsCount: elements?.length,
-                sampleElement: elements?.[0],
-                stateLength: state?.length,
-            });
-
             // Convert elements to match gRPC proto structure
             const serializedElements =
                 elements?.map((element) => {
@@ -162,11 +155,6 @@ export class InteractionClientService implements OnModuleInit {
                     return protoElement;
                 }) || [];
 
-            console.log('[InteractionClient] Serialized elements:', {
-                count: serializedElements.length,
-                sample: serializedElements[0],
-            });
-
             const observable = this.whiteboardService.updateWhiteboard({
                 room_id: roomId,
                 elements: serializedElements,
@@ -174,7 +162,6 @@ export class InteractionClientService implements OnModuleInit {
             });
 
             const result = await firstValueFrom(observable);
-            console.log('[InteractionClient] updateWhiteboard result:', result);
             return result;
         } catch (error) {
             console.error('[InteractionClient] updateWhiteboard error:', error);
@@ -184,22 +171,11 @@ export class InteractionClientService implements OnModuleInit {
 
     async getWhiteboardData(roomId: string) {
         try {
-            console.log(
-                '[InteractionClient] getWhiteboardData called for room:',
-                roomId,
-            );
-
             const observable = this.whiteboardService.getWhiteboardData({
                 room_id: roomId,
             });
             const result: any = await firstValueFrom(observable);
 
-            console.log(
-                '[InteractionClient] getWhiteboardData raw result:',
-                result,
-            );
-
-            // Deserialize elements from gRPC proto structure back to full structure
             if (result?.success && result?.whiteboard_data?.elements) {
                 const deserializedElements =
                     result.whiteboard_data.elements.map((element) => {

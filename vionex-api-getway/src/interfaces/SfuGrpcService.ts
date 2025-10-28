@@ -10,7 +10,7 @@ export default interface SfuGrpcService {
     getMediaRouter(data: { room_id: string }): any;
 
     // Transport management
-    createTransport(data: { room_id: string }): any;
+    createTransport(data: { room_id: string, is_producer: boolean }): any;
 
     connectTransport(data: {
         transport_id: string;

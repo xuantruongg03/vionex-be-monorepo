@@ -17,3 +17,5 @@ MODEL_VECTOR = os.getenv("MODEL_VECTOR", "intfloat/e5-small-v2")  # Default mode
 
 # Logging configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+TYPE_ENGINE = os.getenv("TYPE_ENGINE", "cpu")  # 'cpu' or 'cuda'

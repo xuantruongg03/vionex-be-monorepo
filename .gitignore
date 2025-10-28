@@ -6,6 +6,10 @@
 **/dist
 **/build
 **/models
+**/docs
+**/logs
+
+todo.md
 
 # IDE/editor files
 .vscode/

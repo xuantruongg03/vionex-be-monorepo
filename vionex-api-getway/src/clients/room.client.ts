@@ -76,12 +76,17 @@ export class RoomClientService implements OnModuleInit {
         );
     }
 
-    async createRoom(roomId: string) {
+    async createRoom() {
         try {
             const response = await firstValueFrom(
-                this.roomService.createRoom({ room_id: roomId }),
+                this.roomService.createRoom({}), // Empty request object
             );
-            return { data: { roomId: response.room_id } };
+            return {
+                success: response.success,
+                room_id: response.room_id,
+                room_key: response.room_key,
+                message: response.message,
+            };
         } catch (error) {
             console.error(`Error creating room:`, error);
             throw new Error(`Failed to create room`);
@@ -302,7 +307,6 @@ export class RoomClientService implements OnModuleInit {
         socketId: string,
     ): Promise<{ peerId: string; roomId: string } | null> {
         try {
-
             const response = await firstValueFrom(
                 this.roomService.getParticipantBySocketId({
                     socket_id: socketId,

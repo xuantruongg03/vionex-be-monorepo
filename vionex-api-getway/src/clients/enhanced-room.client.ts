@@ -44,10 +44,10 @@ export class EnhancedRoomClientService implements OnModuleInit {
     });
   }
 
-  async createRoom(roomId: string) {
+  async createRoom() {
     return this.circuitBreaker.execute(async () => {
       return firstValueFrom(
-        this.roomService.createRoom({ room_id: roomId })
+        this.roomService.createRoom({})
       );
     });
   }

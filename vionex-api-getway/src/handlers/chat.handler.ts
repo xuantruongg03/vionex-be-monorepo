@@ -62,6 +62,7 @@ export class ChatHandler {
         client: Socket,
         data: {
             roomId: string;
+            roomKey?: string; // NEW: Room key for semantic context isolation
             message: {
                 sender: string;
                 senderName: string;
@@ -73,12 +74,12 @@ export class ChatHandler {
                     isFile?: boolean;
                 };
             };
+            organizationId?: string;
         },
     ) {
         try {
             // Validate input
             if (!data.roomId || !data.message || !data.message.text) {
-                console.error('[ChatHandler] Invalid message data:', data);
                 this.eventService.emitError(
                     client,
                     'Invalid message data',
@@ -89,16 +90,41 @@ export class ChatHandler {
 
             const response = await this.chatClient.sendMessage({
                 room_id: data.roomId,
+                room_key: data.roomKey, // NEW: Pass room_key
                 sender: data.message.sender,
                 sender_name: data.message.senderName,
                 text: data.message.text,
                 // Pass reply data as replyTo object
                 replyTo: data.message.replyTo,
+                org_id: data.organizationId, // Pass organizationId to chat service
             });
 
             if (response && (response.success || response.message)) {
+                // Extract the actual message object - handle both response formats
+                let actualMessage: any = null;
+
+                if ('message' in response && response.message) {
+                    // Response has message property
+                    actualMessage = response.message;
+                } else if ('sender_name' in response) {
+                    // Response is the message itself
+                    actualMessage = response;
+                }
+
+                if (!actualMessage) {
+                    this.eventService.emitError(
+                        client,
+                        'Failed to send message',
+                        'SEND_MESSAGE_FAILED',
+                    );
+                    return { success: false, error: 'No message in response' };
+                }
+
                 const messageToEmit = {
-                    ...(response.message || response),
+                    ...actualMessage,
+                    // Map snake_case to camelCase for frontend compatibility
+                    senderName: actualMessage.sender_name,
+                    roomId: actualMessage.room_id,
                     // Ensure reply data is included in the emitted message
                     replyTo: data.message.replyTo,
                 };
@@ -139,6 +165,7 @@ export class ChatHandler {
         client: Socket,
         data: {
             roomId: string;
+            roomKey?: string; // NEW: Room key for semantic context isolation
             message: {
                 sender: string;
                 senderName: string;
@@ -155,11 +182,13 @@ export class ChatHandler {
                     isFile?: boolean;
                 };
             };
+            organizationId?: string; // Add organizationId parameter
         },
     ) {
         try {
             const response = await this.chatClient.sendMessage({
                 room_id: data.roomId,
+                room_key: data.roomKey, // NEW: Pass room_key
                 sender: data.message.sender,
                 sender_name: data.message.senderName,
                 text: data.message.text,
@@ -170,11 +199,15 @@ export class ChatHandler {
                 isImage: data.message.isImage,
                 // Pass reply data as replyTo object
                 replyTo: data.message.replyTo,
+                org_id: data.organizationId, // Pass organizationId to chat service
             });
 
-            if (response && response.success) {
+            if (response && response.success && response.message) {
                 const messageToEmit = {
                     ...response.message,
+                    // Map snake_case to camelCase for frontend compatibility
+                    senderName: response.message.sender_name,
+                    roomId: response.message.room_id,
                     // Ensure reply data is included in the emitted message
                     replyTo: data.message.replyTo,
                 };

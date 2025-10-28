@@ -2,6 +2,7 @@ import { Socket } from 'socket.io';
 import { Injectable } from '@nestjs/common';
 import { RoomClientService } from '../clients/room.client';
 import { SfuClientService } from '../clients/sfu.client';
+import { logger } from '../utils/log-manager';
 
 @Injectable()
 export class GatewayHelperService {
@@ -15,6 +16,147 @@ export class GatewayHelperService {
         private readonly roomClient: RoomClientService,
         private readonly sfuClient: SfuClientService,
     ) {}
+
+    // ==================== SERVICE AVAILABILITY METHODS ====================
+
+    /**
+     * Check if error is a service unavailability error
+     */
+    private isServiceUnavailableError(error: any): boolean {
+        if (!error) return false;
+
+        // Check for gRPC errors
+        if (error.code) {
+            // gRPC status codes for unavailability
+            const unavailableCodes = [
+                14, // UNAVAILABLE
+                2, // UNKNOWN (connection issues)
+                4, // DEADLINE_EXCEEDED
+            ];
+            if (unavailableCodes.includes(error.code)) {
+                return true;
+            }
+        }
+
+        // Check for common connection error messages
+        const errorMessage = error.message?.toLowerCase() || '';
+        const unavailablePatterns = [
+            'econnrefused',
+            'enotfound',
+            'etimedout',
+            'unavailable',
+            'connection refused',
+            'connection timeout',
+            'service not available',
+            'failed to connect',
+            'network error',
+            'socket hang up',
+        ];
+
+        return unavailablePatterns.some((pattern) =>
+            errorMessage.includes(pattern),
+        );
+    }
+
+    /**
+     * Get service name from error context
+     */
+    private getServiceNameFromError(
+        error: any,
+        defaultService: string = 'Service',
+    ): string {
+        // Try to extract service name from error metadata
+        if (error.metadata) {
+            const service = error.metadata.get('service-name');
+            if (service) return service;
+        }
+
+        // Try to extract from error message
+        const message = error.message || '';
+        if (message.includes('RoomService')) return 'Room Service';
+        if (message.includes('SfuService')) return 'SFU Service';
+        if (message.includes('AudioService')) return 'Audio Service';
+        if (message.includes('InteractionService'))
+            return 'Interaction Service';
+        if (message.includes('ChatBotService')) return 'ChatBot Service';
+        if (message.includes('ChatService')) return 'Chat Service';
+
+        return defaultService;
+    }
+
+    /**
+     * Handle service error and emit to client if service is unavailable
+     * @param socket - Socket.io client socket
+     * @param error - Error object from service call
+     * @param serviceName - Name of the service (optional, will try to auto-detect)
+     * @param eventName - Event name for logging context (optional)
+     * @returns true if error was handled as service unavailable, false otherwise
+     */
+    handleServiceError(
+        socket: Socket,
+        error: any,
+        serviceName?: string,
+        eventName?: string,
+    ): boolean {
+        // Check if this is a service unavailability error
+        if (!this.isServiceUnavailableError(error)) {
+            return false;
+        }
+
+        // Determine service name
+        const service = serviceName || this.getServiceNameFromError(error);
+        const event = eventName ? ` for event '${eventName}'` : '';
+
+        // Log the service unavailability
+        logger.error(
+            'gateway.helper.ts',
+            `[GatewayHelper] ${service} is not available${event} - Socket: ${socket.id}, Error: ${error.message}, Code: ${error.code || 'N/A'}`,
+        );
+
+        // Emit error to client
+        socket.emit('error', {
+            type: 'SERVICE_UNAVAILABLE',
+            message: `${service} is not available. Please try again later.`,
+            service: service,
+            timestamp: new Date().toISOString(),
+        });
+
+        return true;
+    }
+
+    /**
+     * Wrap a service call with automatic error handling
+     * @param socket - Socket.io client socket
+     * @param serviceCall - Async function that calls the service
+     * @param serviceName - Name of the service
+     * @param eventName - Event name for logging context
+     * @returns Result of service call or null if service is unavailable
+     */
+    async callServiceSafely<T>(
+        socket: Socket,
+        serviceCall: () => Promise<T>,
+        serviceName: string,
+        eventName?: string,
+    ): Promise<T | null> {
+        try {
+            return await serviceCall();
+        } catch (error) {
+            // Handle service unavailability
+            const handled = this.handleServiceError(
+                socket,
+                error,
+                serviceName,
+                eventName,
+            );
+
+            if (!handled) {
+                // Re-throw if not a service unavailability error
+                throw error;
+            }
+
+            return null;
+        }
+    }
 
     // ==================== PARTICIPANT MAPPING METHODS ====================
 
@@ -121,16 +263,17 @@ export class GatewayHelperService {
                     participant,
                 );
             } else {
-                console.log(
+                logger.info(
+                    'gateway.helper.ts',
                     `[GatewayHelper] Participant ${peerId} not found via room service`,
                 );
             }
 
             return participant;
         } catch (error) {
-            console.error(
-                `[GatewayHelper] Error getting participant ${peerId} in room ${roomId}:`,
-                error,
+            logger.error(
+                'gateway.helper.ts',
+                `[GatewayHelper] Error getting participant ${peerId} in room ${roomId}: ${error}`,
             );
             return null;
         }
@@ -159,7 +302,10 @@ export class GatewayHelperService {
 
             return roomsMap;
         } catch (error) {
-            console.error('[GatewayHelper] Error getting all rooms:', error);
+            logger.error(
+                'gateway.helper.ts',
+                `[GatewayHelper] Error getting all rooms: ${error}`,
+            );
             return new Map();
         }
     }
@@ -186,9 +332,9 @@ export class GatewayHelperService {
             }
             return [];
         } catch (error) {
-            console.error(
-                `[GatewayHelper] Error getting participants for room ${roomId}:`,
-                error,
+            logger.error(
+                'gateway.helper.ts',
+                `[GatewayHelper] Error getting participants for room ${roomId}: ${error}`,
             );
             return [];
         }
@@ -207,17 +353,26 @@ export class GatewayHelperService {
         duration: number;
     }): boolean {
         if (!data.userId || typeof data.userId !== 'string') {
-            console.warn('[GatewayHelper] Invalid userId in audio chunk');
+            logger.warn(
+                'gateway.helper.ts',
+                '[GatewayHelper] Invalid userId in audio chunk',
+            );
             return false;
         }
 
         if (!data.roomId || typeof data.roomId !== 'string') {
-            console.warn('[GatewayHelper] Invalid roomId in audio chunk');
+            logger.warn(
+                'gateway.helper.ts',
+                '[GatewayHelper] Invalid roomId in audio chunk',
+            );
             return false;
         }
 
         if (!data.timestamp || typeof data.timestamp !== 'number') {
-            console.warn('[GatewayHelper] Invalid timestamp in audio chunk');
+            logger.warn(
+                'gateway.helper.ts',
+                '[GatewayHelper] Invalid timestamp in audio chunk',
+            );
             return false;
         }
 
@@ -228,7 +383,8 @@ export class GatewayHelperService {
         } else if (data.buffer instanceof ArrayBuffer) {
             bufferSize = data.buffer.byteLength;
         } else {
-            console.warn(
+            logger.warn(
+                'gateway.helper.ts',
                 '[GatewayHelper] Invalid buffer format in audio chunk',
             );
             return false;
@@ -239,7 +395,10 @@ export class GatewayHelperService {
             typeof data.duration !== 'number' ||
             data.duration <= 0
         ) {
-            console.warn('[GatewayHelper] Invalid duration in audio chunk');
+            logger.warn(
+                'gateway.helper.ts',
+                '[GatewayHelper] Invalid duration in audio chunk',
+            );
             return false;
         }
 
@@ -248,7 +407,8 @@ export class GatewayHelperService {
         const maxSize = 16000 * 2 * 3; // 3s = 96,000 bytes
 
         if (bufferSize < minSize || bufferSize > maxSize) {
-            console.warn(
+            logger.warn(
+                'gateway.helper.ts',
                 `[GatewayHelper] Audio buffer size out of range: ${bufferSize} bytes (min: ${minSize}, max: ${maxSize})`,
             );
             return false;
@@ -269,7 +429,8 @@ export class GatewayHelperService {
             // Check if socket is mapped to this user
             const mappedPeerId = this.connectionMap.get(socketId);
             if (mappedPeerId !== userId) {
-                console.warn(
+                logger.warn(
+                    'gateway.helper.ts',
                     `[GatewayHelper] Socket ${socketId} not mapped to user ${userId}`,
                 );
                 return false;
@@ -281,7 +442,8 @@ export class GatewayHelperService {
                 userId,
             );
             if (!participant) {
-                console.warn(
+                logger.warn(
+                    'gateway.helper.ts',
                     `[GatewayHelper] User ${userId} not found in room ${roomId}`,
                 );
                 return false;
@@ -289,7 +451,8 @@ export class GatewayHelperService {
 
             // Check if participant's socket matches
             if (participant.socket_id !== socketId) {
-                console.warn(
+                logger.warn(
+                    'gateway.helper.ts',
                     `[GatewayHelper] Socket mismatch for user ${userId} in room ${roomId}`,
                 );
                 return false;
@@ -297,9 +460,9 @@ export class GatewayHelperService {
 
             return true;
         } catch (error) {
-            console.error(
-                `[GatewayHelper] Error verifying user in room:`,
-                error,
+            logger.error(
+                'gateway.helper.ts',
+                `[GatewayHelper] Error verifying user in room: ${error}`,
             );
             return false;
         }
@@ -344,9 +507,9 @@ export class GatewayHelperService {
 
             return userStreams;
         } catch (error) {
-            console.error(
-                `[GatewayHelper] Error getting speaking user streams:`,
-                error,
+            logger.error(
+                'gateway.helper.ts',
+                `[GatewayHelper] Error getting speaking user streams: ${error}`,
             );
             return [];
         }
@@ -365,9 +528,9 @@ export class GatewayHelperService {
             }
             return metadata;
         } catch (error) {
-            console.error(
-                '[GatewayHelper] Failed to parse stream metadata:',
-                error,
+            logger.error(
+                'gateway.helper.ts',
+                `[GatewayHelper] Failed to parse stream metadata: ${error}`,
             );
             return { video: true, audio: true, type: 'webcam' };
         }
@@ -384,9 +547,9 @@ export class GatewayHelperService {
             }
             return rtpParameters;
         } catch (error) {
-            console.error(
-                '[GatewayHelper] Failed to parse stream RTP parameters:',
-                error,
+            logger.error(
+                'gateway.helper.ts',
+                `[GatewayHelper] Failed to parse stream RTP parameters: ${error}`,
             );
             return {};
         }

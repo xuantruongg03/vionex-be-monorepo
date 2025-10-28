@@ -131,11 +131,13 @@ message RemoveUserMediaResponse {
 // CreateTransport messages
 message CreateTransportRequest {
   string room_id = 1;
+  optional bool is_producer = 2; // true for send transport, false for recv transport
 }
 
 message CreateTransportResponse {
   string status = 1;
   optional string transport_data = 2; // JSON string
+  optional bool is_producer = 3; // Echo back the transport type
 }
 
 // SaveStream messages

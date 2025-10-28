@@ -1,16 +1,18 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import mediasoupTypes from 'mediasoup/node/lib/types';
+import {
+    MAX_PRIORITY_USERS,
+    SMALL_ROOM_MAX_USERS,
+    SPEAKER_INACTIVITY_THRESHOLD_MS,
+} from './constants/sfu.constants';
 import * as T from './interface';
 import {
     createSafeCabinId,
     createSafeTranslatedStreamId,
-    sanitizeId,
 } from './utils/sdp-helpers';
 import { WorkerPoolService } from './worker-pool/worker-pool.service';
-
-// SFU Configuration Constants
-export const MAX_PRIORITY_STREAMS = 10; // Maximum number of streams to consume for users 1-10
+import { logger } from './utils/log-manager';
 
 @Injectable()
 export class SfuService implements OnModuleInit, OnModuleDestroy {
@@ -53,14 +55,16 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         private configService: ConfigService,
         private readonly workerPool: WorkerPoolService,
     ) {
-        // Kích hoạt task cleanup cho active speakers
-        setInterval(() => this.cleanupInactiveSpeakers(), 5000);
     }
     async onModuleInit() {
         try {
             await this.initializeMediasoup();
         } catch (error) {
-            console.error('SfuService: Failed to initialize:', error);
+            logger.error(
+                'sfu.service.ts',
+                'SfuService: Failed to initialize',
+                error,
+            );
             throw error;
         }
     }
@@ -88,14 +92,16 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             this.webRtcServerId = this.webRtcServer.id;
             // Register error handler for the worker
             this.worker.on('died', () => {
-                console.error(
+                logger.error(
+                    'sfu.service.ts',
                     'Main mediasoup worker died, exiting in 2 seconds...',
                 );
                 setTimeout(() => process.exit(1), 2000);
             });
         } catch (error) {
-            console.error(
-                'Failed to create mediasoup worker or WebRTC server:',
+            logger.error(
+                'sfu.service.ts',
+                'Failed to create mediasoup worker or WebRTC server',
                 error,
             );
             throw error;
@@ -250,8 +256,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
             return transport;
         } catch (error) {
-            console.error(
-                `Failed to create WebRTC transport in room ${roomId}:`,
+            logger.error(
+                'sfu.service.ts',
+                `Failed to create WebRTC transport in room ${roomId}`,
                 error,
             );
             throw error;
@@ -384,7 +391,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 rtpCapabilities,
             });
         } catch (error) {
-            console.error('canConsume() error:', error);
+            logger.error('sfu.service.ts', 'canConsume() error', error);
             return false;
         }
     }
@@ -455,7 +462,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             this.streams.delete(streamId);
             return true;
         } else {
-            console.warn(`Stream with ID ${streamId} does not exist.`);
+            logger.warn(
+                'sfu.service.ts',
+                `Stream with ID ${streamId} does not exist`,
+            );
             return false;
         }
     }
@@ -473,14 +483,20 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             this.streams.delete(streamId);
             return true;
         }
-        console.warn(`Stream with ID ${streamId} does not exist.`);
+        logger.warn(
+            'sfu.service.ts',
+            `Stream with ID ${streamId} does not exist`,
+        );
         return false;
     }
 
     saveProducerToStream(producerId: string, stream: T.Stream): boolean {
         const hasStream = this.streams.get(stream.streamId);
         if (!hasStream) {
-            console.warn(`Stream with ID ${stream.streamId} does not exist.`);
+            logger.warn(
+                'sfu.service.ts',
+                `Stream with ID ${stream.streamId} does not exist`,
+            );
             return false;
         }
         this.producerToStream.set(producerId, stream);
@@ -522,7 +538,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         const mediaRoom = this.mediaRooms.get(roomId);
 
         if (!mediaRoom) {
-            console.log(`[SFU DEBUG] Media room ${roomId} not found`);
+            logger.debug(
+                'sfu.service.ts',
+                `[SFU DEBUG] Media room ${roomId} not found`,
+            );
             return false;
         }
 
@@ -536,20 +555,22 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             return true;
         }
 
-        // For small rooms (≤10 users), consume all streams
-        if (totalUsers <= 10) {
+        // For small rooms (≤SMALL_ROOM_MAX_USERS), consume all streams
+        if (totalUsers <= SMALL_ROOM_MAX_USERS) {
             return true;
         }
 
-        const isPriorityStream =
-            this.isSpecialUser(roomId, publisherId) ||
-            this.isUserSpeaking(roomId, publisherId);
-
-        if (isPriorityStream) {
+        // PRIORITY 1: Speaking users always consume (bypass limit)
+        if (this.isUserSpeaking(roomId, publisherId)) {
             return true;
         }
 
-        // For 11+ users, check if publisher is in prioritized users list
+        // PRIORITY 2: Special users (screen share, translation, etc.)
+        if (this.isSpecialUser(roomId, publisherId)) {
+            return true;
+        }
+
+        // PRIORITY 3: For large rooms (>SMALL_ROOM_MAX_USERS), check priority list
         const prioritizedUsers = this.getPrioritizedUsers(roomId);
         const isInPriorityList = prioritizedUsers.has(publisherId);
 
@@ -559,27 +580,29 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         return false;
     }
 
-    // This replaces the old static "first 10 streams" logic with intelligent prioritization
+    /**
+     * Get prioritized users for large rooms (>SMALL_ROOM_MAX_USERS)
+     *
+     * Priority allocation (only for rooms with >10 users):
+     * 1. Speaking users (unlimited, within SPEAKING_THRESHOLD_MS)
+     * 2. Special users (unlimited, screen share/translation)
+     * 3. Regular users (limited to MAX_PRIORITY_USERS, FIFO by stream creation time)
+     *
+     * Note: Pinned users are handled separately in shouldUserReceiveStream()
+     */
     private getPrioritizedUsers(roomId: string): Set<string> {
         const prioritizedUsers = new Set<string>();
 
-        // Step 1: Add currently speaking users (highest priority)
+        // Step 1: Add currently speaking users (unlimited slots)
         const roomSpeakers = this.activeSpeakers.get(roomId);
         if (roomSpeakers) {
-            const currentTime = new Date();
-            const speakingThreshold = 5000; // 5 seconds
-
+            // Add ALL speakers trong list, KHÔNG check timeout
             roomSpeakers.forEach((lastSpeakTime, peerId) => {
-                if (
-                    currentTime.getTime() - lastSpeakTime.getTime() <
-                    speakingThreshold
-                ) {
-                    prioritizedUsers.add(peerId);
-                }
+                prioritizedUsers.add(peerId);
             });
         }
 
-        // Step 2: Add special users (creators, admins, etc.)
+        // Step 2: Add special users (unlimited slots - screen share, translation, etc.)
         const allRoomStreams = this.getStreamsByRoom(roomId);
         const specialUsers = new Set<string>();
         allRoomStreams.forEach((stream) => {
@@ -591,19 +614,21 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             prioritizedUsers.add(userId);
         });
 
-        // Step 3: Fill remaining slots with streams based on priority
+        // Step 3: Fill remaining slots with regular users (limited to MAX_PRIORITY_USERS)
+        // This ensures first-joined users get priority when room is crowded
         const remainingSlots = Math.max(
             0,
-            MAX_PRIORITY_STREAMS - prioritizedUsers.size,
+            MAX_PRIORITY_USERS - prioritizedUsers.size,
         );
         if (remainingSlots > 0) {
-            // Get streams sorted by priority (excluding already prioritized users)
+            // Get streams sorted by priority (FIFO - older streams first)
+            // Exclude already prioritized users (speaking/special)
             const sortedStreams = this.sortStreamsByPriority(
                 allRoomStreams,
                 roomId,
             ).filter((stream) => !prioritizedUsers.has(stream.publisherId));
 
-            // Add users from highest priority streams until we reach the limit
+            // Add users from highest priority streams until we reach MAX_PRIORITY_USERS
             const addedUsers = new Set<string>();
             for (const stream of sortedStreams) {
                 if (addedUsers.size >= remainingSlots) break;
@@ -617,17 +642,17 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         return prioritizedUsers;
     }
 
-    //TODO: Additional method to get recent speakers (from old code)
-    private getRecentSpeakers(roomId: string, limit: number): string[] {
-        // Logic này có thể được mở rộng để track speaking activity
-        // Hiện tại chỉ return empty array
-        return [];
-    }
+    // //TODO: Additional method to get recent speakers (from old code)
+    // private getRecentSpeakers(roomId: string, limit: number): string[] {
+    //     // Logic này có thể được mở rộng để track speaking activity
+    //     // Hiện tại chỉ return empty array
+    //     return [];
+    // }
 
-    // Method to notify user about stream changes (from old code)
-    private notifyUserStreamChanges(roomId: string, userId: string): void {
-        // Logic này có thể được mở rộng để notify qua WebSocket
-    }
+    // // Method to notify user about stream changes (from old code)
+    // private notifyUserStreamChanges(roomId: string, userId: string): void {
+    //     // Logic này có thể được mở rộng để notify qua WebSocket
+    // }
 
     getStreamByProducerId(producerId: string): T.Stream | undefined {
         return this.producerToStream.get(producerId);
@@ -798,7 +823,11 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 metadata: stream.metadata, // Include stream metadata for client processing
             };
         } catch (error) {
-            console.error(`[SFU] Failed to create consumer:`, error);
+            logger.error(
+                'sfu.service.ts',
+                '[SFU] Failed to create consumer',
+                error,
+            );
             throw error;
         }
     }
@@ -860,7 +889,8 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     getStream(streamId: string): T.Stream | null {
         const stream = this.streams.get(streamId) || null;
         if (!stream) {
-            console.error(
+            logger.error(
+                'sfu.service.ts',
                 `[SFU] Stream ${streamId} not found in streams registry`,
             );
         }
@@ -962,12 +992,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             const totalStreams = this.getStreamsByRoom(data.roomId).length;
             const isInPriority = this.isStreamInPriority(data.roomId, streamId);
 
-            // Notify about stream changes
-            this.notifyUserStreamChanges(
-                data.roomId,
-                data.participant.peerId || data.participant.peer_id,
-            );
-
             return {
                 producer,
                 producerId: producer.id,
@@ -976,7 +1000,11 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 totalStreams: totalStreams,
             };
         } catch (error) {
-            console.error(`[SFU] Failed to create producer:`, error);
+            logger.error(
+                'sfu.service.ts',
+                '[SFU] Failed to create producer',
+                error,
+            );
             throw error;
         }
     }
@@ -1160,8 +1188,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                         });
                     }
                 } catch (error) {
-                    console.error(
-                        `[SFU] Failed to create consumer for pinned stream ${stream.streamId}:`,
+                    logger.error(
+                        'sfu.service.ts',
+                        `[SFU] Failed to create consumer for pinned stream ${stream.streamId}`,
                         error,
                     );
                 }
@@ -1175,7 +1204,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 existingConsumer: wasAlreadyPinned,
             };
         } catch (error) {
-            console.error(`[SFU] Error in pinUser:`, error);
+            logger.error('sfu.service.ts', '[SFU] Error in pinUser', error);
             return {
                 success: false,
                 message: `Failed to pin user: ${error.message}`,
@@ -1251,7 +1280,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 };
             }
         } catch (error) {
-            console.error(`[SFU] Error in unpinUser:`, error);
+            logger.error('sfu.service.ts', '[SFU] Error in unpinUser', error);
             return {
                 success: false,
                 message: `Failed to unpin user: ${error.message}`,
@@ -1281,8 +1310,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 message: 'Speaker updated with priority',
             };
         } catch (error) {
-            console.error(
-                `[SFU] Error handling speaking for ${peerId} in room ${roomId}:`,
+            logger.error(
+                'sfu.service.ts',
+                `[SFU] Error handling speaking for ${peerId} in room ${roomId}`,
                 error,
             );
             return {
@@ -1319,8 +1349,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 message: 'Speaker stopped and priorities rebalanced',
             };
         } catch (error) {
-            console.error(
-                `[SFU] Error handling stop speaking for ${peerId} in room ${roomId}:`,
+            logger.error(
+                'sfu.service.ts',
+                `[SFU] Error handling stop speaking for ${peerId} in room ${roomId}`,
                 error,
             );
             return {
@@ -1340,26 +1371,19 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         try {
             if (this.activeSpeakers.has(roomId)) {
                 const roomSpeakers = this.activeSpeakers.get(roomId);
-                const currentTime = new Date();
-                const speakThreshold = 2000; // 2 giây
-
                 roomSpeakers?.forEach((lastSpeakTime, peerId) => {
-                    if (
-                        currentTime.getTime() - lastSpeakTime.getTime() <
-                        speakThreshold
-                    ) {
-                        activeSpeakers.push({
-                            peer_id: peerId,
-                            last_speak_time: lastSpeakTime.getTime().toString(),
-                        });
-                    }
+                    activeSpeakers.push({
+                        peer_id: peerId,
+                        last_speak_time: lastSpeakTime.getTime().toString(),
+                    });
                 });
             }
 
             return { active_speakers: activeSpeakers };
         } catch (error) {
-            console.error(
-                `[SFU] Error getting active speakers for room ${roomId}:`,
+            logger.error(
+                'sfu.service.ts',
+                `[SFU] Error getting active speakers for room ${roomId}`,
                 error,
             );
             return { active_speakers: [] };
@@ -1422,41 +1446,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
     isUserSpeaking(roomId: string, peerId: string): boolean {
         const roomSpeakers = this.activeSpeakers.get(roomId);
-        if (!roomSpeakers || !roomSpeakers.has(peerId)) {
-            return false;
-        }
-
-        const lastSpeakTime = roomSpeakers.get(peerId)!;
-        const currentTime = new Date();
-        const speakThreshold = 2000; // 2 giây
-
-        return currentTime.getTime() - lastSpeakTime.getTime() < speakThreshold;
-    }
-
-    private cleanupInactiveSpeakers() {
-        const currentTime = new Date();
-        const inactivityThreshold = 5000; // 5s
-        let totalCleaned = 0;
-        let roomsCleaned = 0;
-
-        this.activeSpeakers.forEach((roomSpeakers, roomId) => {
-            const inactiveSpeakers: string[] = [];
-
-            roomSpeakers.forEach((lastSpeakTime, peerId) => {
-                if (
-                    currentTime.getTime() - lastSpeakTime.getTime() >
-                    inactivityThreshold
-                ) {
-                    inactiveSpeakers.push(peerId);
-                }
-            });
-
-            // Delete inactive speakers
-            inactiveSpeakers.forEach((peerId) => {
-                roomSpeakers.delete(peerId);
-                totalCleaned++;
-            });
-        });
+        return roomSpeakers?.has(peerId) || false;
     }
 
     private async handleSpeakingUserStreamPriority(
@@ -1467,7 +1457,8 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             // Step 1: Get the media room
             const mediaRoom = this.mediaRooms.get(roomId);
             if (!mediaRoom) {
-                console.warn(
+                logger.warn(
+                    'sfu.service.ts',
                     `[SFU] Media room ${roomId} not found for priority handling`,
                 );
                 return;
@@ -1479,7 +1470,8 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 speakingPeerId,
             );
             if (speakingUserStreams.length === 0) {
-                console.log(
+                logger.info(
+                    'sfu.service.ts',
                     `[SFU] No streams found for speaking user ${speakingPeerId}`,
                 );
                 return;
@@ -1498,8 +1490,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 speakingUserStreams,
             );
         } catch (error) {
-            console.error(
-                `[SFU] Error handling speaking user stream priority:`,
+            logger.error(
+                'sfu.service.ts',
+                '[SFU] Error handling speaking user stream priority',
                 error,
             );
         }
@@ -1625,10 +1618,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    /**
-     * ENHANCED: Sort streams by priority with optimized special stream detection
-     * Tận dụng metadata có sẵn để tối ưu performance
-     */
     private sortStreamsByPriority(
         streams: T.Stream[],
         roomId: string,
@@ -1675,9 +1664,41 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 return bSpeakingPriority - aSpeakingPriority;
             }
 
-            // Priority 5: Age (newer streams have higher priority)
-            return b.streamId.localeCompare(a.streamId);
+            // FIX: Priority 5 - FIFO by timestamp (older streams first)
+            // Extract timestamp from streamId format: "user1_video_1759990931787_i3cnx"
+            const aTimestamp = this.extractTimestampFromStreamId(a.streamId);
+            const bTimestamp = this.extractTimestampFromStreamId(b.streamId);
+
+            if (aTimestamp !== bTimestamp) {
+                return aTimestamp - bTimestamp; // Older first (FIFO)
+            }
+
+            // Fallback: Alphabetical order if timestamps are equal
+            return a.streamId.localeCompare(b.streamId);
         });
+    }
+
+    /**
+     * Extract timestamp from streamId
+     * Format: "user1_video_1759990931787_i3cnx"
+     *         [0]    [1]   [2]        [3]
+     */
+    private extractTimestampFromStreamId(streamId: string): number {
+        try {
+            const parts = streamId.split('_');
+            if (parts.length >= 3) {
+                const timestamp = parseInt(parts[2], 10);
+                if (!isNaN(timestamp)) {
+                    return timestamp;
+                }
+            }
+        } catch (error) {
+            logger.warn(
+                'sfu.service.ts',
+                `[SFU] Failed to extract timestamp from streamId: ${streamId}`,
+            );
+        }
+        return 0; // Fallback to 0 if parsing fails
     }
 
     /**
@@ -1708,13 +1729,13 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 return true;
             }
         }
-
-        // TODO: Add room creator logic when participant data is available
-        // Could check against room creator ID stored in room metadata
-
         return false;
     }
 
+    /**
+     * ENHANCED: Pause consumers for a specific stream
+     * This allows dynamic stream management without closing connections
+     */
     /**
      * ENHANCED: Pause consumers for a specific stream
      * This allows dynamic stream management without closing connections
@@ -1730,18 +1751,28 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         if (!consumers) return;
 
         for (const consumer of consumers) {
-            if (!consumer.closed) {
-                try {
-                    await consumer.pause();
-                    console.log(
-                        `[SFU] Paused consumer ${consumer.id} for stream ${streamId}`,
-                    );
-                } catch (error) {
-                    console.error(
-                        `[SFU] Error pausing consumer ${consumer.id}:`,
-                        error,
-                    );
-                }
+            // FIX: Check if already paused or closed before pausing
+            if (consumer.closed) {
+                continue; // Skip closed consumers
+            }
+
+            if (consumer.paused) {
+                // Already paused, skip to avoid duplicate logs
+                continue;
+            }
+
+            try {
+                await consumer.pause();
+                logger.info(
+                    'sfu.service.ts',
+                    `[SFU] Paused consumer ${consumer.id} for stream ${streamId}`,
+                );
+            } catch (error) {
+                logger.error(
+                    'sfu.service.ts',
+                    `[SFU] Error pausing consumer ${consumer.id}`,
+                    error,
+                );
             }
         }
     }
@@ -1811,13 +1842,14 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             for (const stream of pausedStreams) {
                 if (currentPriorityUsers.has(stream.publisherId)) {
                     await this.resumeStreamConsumers(stream.streamId, roomId);
-                    console.log(
+                    logger.info(
+                        'sfu.service.ts',
                         `[SFU] Resumed stream ${stream.streamId} from priority user ${stream.publisherId}`,
                     );
                 }
             }
         } catch (error) {
-            console.error(`[SFU] Error rebalancing stream priorities:`, error);
+            logger.error('sfu.service.ts', '[SFU] Error rebalancing stream priorities', error);
         }
     }
 
@@ -1839,12 +1871,14 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             if (!consumer.closed && consumer.paused) {
                 try {
                     await consumer.resume();
-                    console.log(
+                    logger.info(
+                        'sfu.service.ts',
                         `[SFU] Resumed consumer ${consumer.id} for stream ${streamId}`,
                     );
                 } catch (error) {
-                    console.error(
-                        `[SFU] Error resuming consumer ${consumer.id}:`,
+                    logger.error(
+                        'sfu.service.ts',
+                        `[SFU] Error resuming consumer ${consumer.id}`,
                         error,
                     );
                 }
@@ -1882,8 +1916,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
             return result;
         } catch (error) {
-            console.error(
-                `[SFU Service] Error allocating port for ${targetUserId} in room ${roomId}:`,
+            logger.error(
+                'sfu.service.ts',
+                `[SFU Service] Error allocating port for ${targetUserId} in room ${roomId}`,
                 error,
             );
             return {
@@ -1932,7 +1967,8 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
             // Check if cabin already exists
             if (this.translationCabins.has(cabinId)) {
-                console.log(
+                logger.info(
+                    'sfu.service.ts',
                     `[SFU Service] Translation cabin already exists: ${cabinId}`,
                 );
                 const existing = this.translationCabins.get(cabinId);
@@ -1953,7 +1989,8 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 targetUserId,
             );
             if (!audioProducer) {
-                console.error(
+                logger.error(
+                    'sfu.service.ts',
                     `[SFU Service] No audio producer found for user ${targetUserId}`,
                 );
                 return {
@@ -2091,8 +2128,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 streamId: translatedStreamId,
             };
         } catch (error) {
-            console.error(
-                `[SFU Service] Error creating bidirectional translation for ${targetUserId}:`,
+            logger.error(
+                'sfu.service.ts',
+                `[SFU Service] Error creating bidirectional translation for ${targetUserId}`,
                 error,
             );
             return {
@@ -2111,7 +2149,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         try {
             const mediaRoom = this.mediaRooms.get(roomId);
             if (!mediaRoom) {
-                console.log(`[SFU] Media room ${roomId} not found`);
+                logger.info(
+                    'sfu.service.ts',
+                    `[SFU] Media room ${roomId} not found`,
+                );
                 return null;
             }
 
@@ -2133,8 +2174,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
             return audioProducer || null;
         } catch (error) {
-            console.error(
-                `Error finding audio producer for user ${userId}:`,
+            logger.error(
+                'sfu.service.ts',
+                `Error finding audio producer for user ${userId}`,
                 error,
             );
             return null;
@@ -2157,7 +2199,8 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         try {
             const cabin = this.translationCabins.get(cabinId);
             if (!cabin) {
-                console.log(
+                logger.info(
+                    'sfu.service.ts',
                     `[SFU Service] Translation cabin ${cabinId} not found`,
                 );
                 return {
@@ -2177,7 +2220,8 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             const isStillInUse =
                 this.translationCabins.has(cabinId) && cabin.consumers.size > 0;
             if (isStillInUse) {
-                console.log(
+                logger.info(
+                    'sfu.service.ts',
                     `[SFU Service] Translation cabin ${cabinId} is still in use, skipping destruction`,
                 );
                 return {
@@ -2203,7 +2247,8 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             // Remove from registry
             this.translationCabins.delete(cabinId);
 
-            console.log(
+            logger.info(
+                'sfu.service.ts',
                 `[SFU Service] Successfully destroyed translation cabin ${cabinId}`,
             );
             return {
@@ -2211,8 +2256,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 message: '10001', // 10001 is code in message from sfu to mark cabin is not use and destroy success
             };
         } catch (error) {
-            console.error(
-                `[SFU Service] Error destroying translation cabin ${cabinId}:`,
+            logger.error(
+                'sfu.service.ts',
+                `[SFU Service] Error destroying translation cabin ${cabinId}`,
                 error,
             );
             return {
@@ -2262,8 +2308,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 message: 'Translation cabins listed successfully',
             };
         } catch (error) {
-            console.error(
-                `[SFU Service] Error listing translation cabins:`,
+            logger.error(
+                'sfu.service.ts',
+                `[SFU Service] Error listing translation cabins`,
                 error,
             );
             return {
@@ -2283,7 +2330,8 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 if (cabinId.startsWith(roomId)) {
                     cabinsToRemove.push(cabinId);
 
-                    console.log(
+                    logger.info(
+                        'sfu.service.ts',
                         `[SFU Service] Cleaning up translation cabin: ${cabinId}`,
                     );
 
@@ -2296,8 +2344,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                             cabin.receiveTransport.close();
                         }
                     } catch (error) {
-                        console.error(
-                            `[SFU Service] Error closing receive transport for cabin ${cabinId}:`,
+                        logger.error(
+                            'sfu.service.ts',
+                            `[SFU Service] Error closing receive transport for cabin ${cabinId}`,
                             error,
                         );
                     }
@@ -2310,8 +2359,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                             cabin.sendTransport.close();
                         }
                     } catch (error) {
-                        console.error(
-                            `[SFU Service] Error closing send transport for cabin ${cabinId}:`,
+                        logger.error(
+                            'sfu.service.ts',
+                            `[SFU Service] Error closing send transport for cabin ${cabinId}`,
                             error,
                         );
                     }
@@ -2322,8 +2372,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                             cabin.consumer.close();
                         }
                     } catch (error) {
-                        console.error(
-                            `[SFU Service] Error closing consumer for cabin ${cabinId}:`,
+                        logger.error(
+                            'sfu.service.ts',
+                            `[SFU Service] Error closing consumer for cabin ${cabinId}`,
                             error,
                         );
                     }
@@ -2334,8 +2385,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                             cabin.producer.close();
                         }
                     } catch (error) {
-                        console.error(
-                            `[SFU Service] Error closing producer for cabin ${cabinId}:`,
+                        logger.error(
+                            'sfu.service.ts',
+                            `[SFU Service] Error closing producer for cabin ${cabinId}`,
                             error,
                         );
                     }
@@ -2352,8 +2404,9 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                                 mediaRoom.consumers.delete(cabin.streamId);
                             }
                         } catch (error) {
-                            console.error(
-                                `[SFU Service] Error removing stream ${cabin.streamId} for cabin ${cabinId}:`,
+                            logger.error(
+                                'sfu.service.ts',
+                                `[SFU Service] Error removing stream ${cabin.streamId} for cabin ${cabinId}`,
                                 error,
                             );
                         }
@@ -2370,13 +2423,15 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             });
 
             if (cabinsToRemove.length > 0) {
-                console.log(
+                logger.info(
+                    'sfu.service.ts',
                     `[SFU Service] Successfully cleaned up ${cabinsToRemove.length} translation cabins for room ${roomId}`,
                 );
             }
         } catch (error) {
-            console.error(
-                `[SFU Service] Error clearing translation cabins for room ${roomId}:`,
+            logger.error(
+                'sfu.service.ts',
+                `[SFU Service] Error clearing translation cabins for room ${roomId}`,
                 error,
             );
         }
@@ -2397,7 +2452,8 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             userPins.delete(userId);
         }
 
-        console.log(
+        logger.info(
+            'sfu.service.ts',
             `[SFU] Cleared all pins for user ${userId} in room ${roomId}`,
         );
     }
@@ -2407,7 +2463,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
      */
     clearPinsForRoom(roomId: string): void {
         this.pinnedUsers.delete(roomId);
-        console.log(`[SFU] Cleared all pins for room ${roomId}`);
+        logger.info('sfu.service.ts', `[SFU] Cleared all pins for room ${roomId}`);
     }
 
     /**

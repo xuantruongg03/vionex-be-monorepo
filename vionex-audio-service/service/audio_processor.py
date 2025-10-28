@@ -55,7 +55,8 @@ class AudioProcessor:
         sample_rate: int = SAMPLE_RATE, 
         channels: int = 1,
         duration: float = 0,
-        organization_id: str = None
+        organization_id: str = None,
+        room_key: str = None  # NEW: Room key for semantic context isolation
     ) -> Dict[str, Any]:
         """
         Process audio buffer and transcribe
@@ -68,6 +69,7 @@ class AudioProcessor:
             channels: Number of channels
             duration: Duration in milliseconds
             organization_id: Organization ID for multi-tenant isolation
+            room_key: Room key for semantic context isolation (NEW)
             
         Returns:
             Processing result dictionary
@@ -98,7 +100,7 @@ class AudioProcessor:
             transcript_saved = False
             if result and result.get('text', '').strip():
                 transcript_saved = await self._save_transcript(
-                    result, room_id, user_id, audio_duration, organization_id
+                    result, room_id, user_id, audio_duration, organization_id, room_key  # NEW: Pass room_key
                 )
                 self.stats['successful'] += 1
             else:
@@ -361,7 +363,8 @@ class AudioProcessor:
         room_id: str, 
         user_id: str, 
         duration: float,
-        organization_id: str = None
+        organization_id: str = None,
+        room_key: str = None  # NEW: Room key for semantic context isolation
     ) -> bool:
         """Save transcript to JSON file and semantic service"""
         try:
@@ -379,10 +382,15 @@ class AudioProcessor:
             if organization_id:
                 transcript_data['organization_id'] = organization_id
             
+            # Add room_key if provided (NEW)
+            if room_key:
+                transcript_data['room_key'] = room_key
+            
             # Send to semantic service
             await self._send_to_semantic(transcript_data)
             
             logger.info(f"Transcript saved for {user_id} in {room_id}" + 
+                       (f" (room_key: {room_key})" if room_key else "") +
                        (f" (org: {organization_id})" if organization_id else ""))
             return True
             

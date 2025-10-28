@@ -123,9 +123,10 @@ export class OrganizationService {
             });
 
             if (!user || !user.organization) {
-                throw new NotFoundException(
-                    'User not found or not part of any organization',
-                );
+                return {
+                    success: false,
+                    message: 'User not found or not part of any organization',
+                };
             }
 
             const memberCount = await this.userRepository.count({
@@ -168,7 +169,10 @@ export class OrganizationService {
             });
 
             if (!user || !user.organization) {
-                throw new NotFoundException('Organization not found');
+                return {
+                    success: false,
+                    message: 'Organization not found',
+                };
             }
 
             // Only owner can update organization
@@ -306,7 +310,11 @@ export class OrganizationService {
             });
 
             if (!user || !user.organization) {
-                throw new NotFoundException('Organization not found');
+                return {
+                    success: false,
+                    message: 'Organization not found',
+                    members: [],
+                };
             }
 
             const members = await this.userRepository.find({
@@ -460,9 +468,11 @@ export class OrganizationService {
                 orgId: organization.id,
             };
         } catch (error) {
-            throw new BadRequestException(
-                'Failed to verify organization email',
-            );
+            return {
+                success: false,
+                message: 'Failed to verify organization email',
+                isOrgEmail: false,
+            };
         }
     }
 }

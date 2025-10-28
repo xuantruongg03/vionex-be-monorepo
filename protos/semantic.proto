@@ -14,6 +14,7 @@ message SaveTranscriptRequest {
     optional string timestamp = 4; // Optional timestamp for the transcript
     optional string language = 5; // Optional language code (e.g., "en", "vi")
     optional string organization_id = 6; // Organization ID for multi-tenant isolation
+    optional string room_key = 7; // NEW: Unique room key for context isolation (prevents room_id collision)
 }
 
 message SaveTranscriptResponse {
@@ -26,6 +27,7 @@ message SearchTranscriptsRequest {
     string room_id = 2; // Optional room ID to filter results
     optional int32 limit = 3;
     optional string organization_id = 4; // Organization ID for multi-tenant isolation
+    optional string room_key = 5; // NEW: Unique room key for context isolation (use instead of room_id)
 }
 
 message SearchTranscriptsResponse {

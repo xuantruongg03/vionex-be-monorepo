@@ -47,6 +47,8 @@ message SendMessageRequest {
   optional bool isImage = 9;
   // Reply fields
   optional ReplyInfo replyTo = 10;
+  // NEW: Room key for semantic context isolation
+  optional string room_key = 11;
 }
 
 message SendMessageResponse {

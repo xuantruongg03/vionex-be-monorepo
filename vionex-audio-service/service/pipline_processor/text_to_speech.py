@@ -3,10 +3,14 @@ import io
 import os
 import logging
 from scipy.io.wavfile import write as write_wav
+import torch
 
+# REPLACE MODEL: CosyVoice2 for voice cloning
 from core.model import tts_model
 
-# Import voice cloning manager - lazy import to avoid circular dependencies
+logger = logging.getLogger(__name__)
+
+# Voice cloning availability check (lazy)
 _voice_cloning_available = None
 
 def _check_voice_cloning_availability():
@@ -21,144 +25,112 @@ def _check_voice_cloning_availability():
             logger.warning(f"[TTS] Voice cloning not available: {e}")
     return _voice_cloning_available
 
-# Initialize logger if not already done
-if 'logger' not in locals():
-    logger = logging.getLogger(__name__)
-# Default speaker audio file path - prioritize Docker mount path, fallback to local
-# Docker mount path where XTTS-v2 model is mounted
+# Default speaker configuration
 DOCKER_SPEAKER_WAV = "/root/.local/share/tts/tts_models--multilingual--multi-dataset--xtts_v2/samples/en_sample.wav"
-TARGET_SR = 16000
-# Local development path
 _current_dir = os.path.dirname(os.path.abspath(__file__))
-_service_root = os.path.dirname(os.path.dirname(_current_dir))  # Go up 2 levels to vionex-audio-service
+_service_root = os.path.dirname(os.path.dirname(_current_dir))
 LOCAL_SPEAKER_WAV = os.path.join(_service_root, "models", "XTTS-v2", "samples", "en_sample.wav")
-
-# Use Docker path if exists, otherwise fallback to local path
 DEFAULT_SPEAKER_WAV = DOCKER_SPEAKER_WAV if os.path.exists(DOCKER_SPEAKER_WAV) else LOCAL_SPEAKER_WAV
+TARGET_SR = 16000
 
+# ===== TTS Entry Point =====
 def tts(text: str, language: str = "en", user_id: str = None, room_id: str = None,
-        speaker_embedding: np.ndarray = None, speaker_wav_path: str = None, 
+        speaker_embedding: np.ndarray = None, speaker_wav_path: str = None,
         return_format: str = "wav") -> bytes:
     """
-    Enhanced TTS với progressive voice cloning
+    Text-to-Speech with XTTS-v2 voice cloning
     
     Args:
-        text (str): The text to convert to speech.
-        language (str): Target language for TTS (en, vi, lo, etc.)
-        user_id (str, optional): User ID for voice cloning lookup
-        room_id (str, optional): Room ID for voice cloning lookup
-        speaker_embedding (np.ndarray, optional): Explicit speaker embedding
-        speaker_wav_path (str, optional): Path to speaker audio file for voice cloning
-        return_format (str): Output format ("wav" or "pcm16")
-    
-    Returns:
-        bytes: The audio data in specified format
+        text: Text to synthesize
+        language: Target language for TTS
+        user_id: User ID for voice cloning lookup
+        room_id: Room ID for voice cloning lookup
+        speaker_embedding: (Deprecated, kept for compatibility)
+        speaker_wav_path: Custom speaker audio path
+        return_format: "wav" or "pcm16"
         
-    Voice Selection Priority:
-        1. Explicit speaker_embedding parameter
-        2. User's cloned voice (user_id + room_id) 
-        3. speaker_wav_path parameter
-        4. Default speaker
+    Returns:
+        Audio data in requested format
+    """
+    return _tts_cosyvoice(text, language, user_id, room_id, speaker_embedding, speaker_wav_path, return_format)
+
+def _tts_cosyvoice(text, language, user_id, room_id, speaker_embedding, speaker_wav_path, return_format):
+    """
+    XTTS-v2 TTS with voice cloning
     """
     try:
-        # Validate input
         if not text or not text.strip():
-            raise ValueError("Text input is empty or None")
+            raise ValueError("Text input is empty")
+        text = text.strip()
         
-        # Language mapping for XTTS
-        xtts_lang_map = {"vi": "vi", "en": "en", "lo": "lo"}
-        xtts_language = xtts_lang_map.get(language, "en")
+        # ===== 1) Voice selection - Get speaker wav path =====
+        selected_speaker_wav = None
         
-        # VOICE SELECTION LOGIC
-        selected_embedding = None
-        voice_source = "default"
-        
-        # Priority 1: Explicit embedding
-        if speaker_embedding is not None:
-            selected_embedding = speaker_embedding
-            voice_source = "explicit_embedding"
-            logger.debug("[TTS] Using explicit speaker embedding")
-            
-        # Priority 2: User's cloned voice
+        if speaker_wav_path and os.path.exists(speaker_wav_path):
+            selected_speaker_wav = speaker_wav_path
         elif user_id and room_id and _check_voice_cloning_availability():
             try:
                 from ..voice_cloning.voice_clone_manager import get_voice_clone_manager
                 voice_manager = get_voice_clone_manager()
-                user_embedding = voice_manager.get_user_embedding(user_id, room_id)
-                if user_embedding is not None:
-                    selected_embedding = user_embedding
-                    voice_source = "cloned_voice"
-                    logger.info(f"[TTS] Using cloned voice for user {user_id} (embedding size: {user_embedding.shape})")
-                else:
-                    logger.debug(f"[TTS] No cloned voice found for user {user_id}_{room_id}")
+                
+                # Get audio path
+                cloned_path = voice_manager.get_user_audio_path(user_id, room_id)
+                if cloned_path and os.path.exists(cloned_path):
+                    selected_speaker_wav = cloned_path
+                    logger.info(f"[XTTS] Using cloned voice from: {cloned_path}")
+                        
             except Exception as e:
-                logger.warning(f"[TTS] Failed to get cloned voice for {user_id}_{room_id}: {e}")
+                logger.warning(f"[XTTS] Failed to get cloned voice: {e}")
         
-        # Limit text length to prevent TTS errors (max 200 chars for stability)
-        if len(text) > 200:
-            text = text[:200]
-            logger.warning(f"[TTS] Text truncated to 200 characters to prevent errors")
-        
-        # Generate waveform từ text
-        if selected_embedding is not None:
-            try:
-                wav = tts_model.tts(text=text, speaker_embedding=selected_embedding, language=xtts_language)
-            except Exception as e:
-                logger.warning(f"[TTS] Voice cloning failed ({e}), falling back to default voice")
-                selected_embedding = None  # Fallback to default
-        
-        if selected_embedding is None:
-            if speaker_wav_path and os.path.exists(speaker_wav_path):
-                wav = tts_model.tts(text=text, speaker_wav=speaker_wav_path, language=xtts_language)
-                voice_source = "speaker_wav"
-            else:
-                # Fallback to default speaker
-                if not os.path.exists(DEFAULT_SPEAKER_WAV):
-                    raise FileNotFoundError(f"Default speaker audio file not found: {DEFAULT_SPEAKER_WAV}")
-                wav = tts_model.tts(text=text, speaker_wav=DEFAULT_SPEAKER_WAV, language=xtts_language)
-                voice_source = "default"
-
-        if wav is None:
-            raise RuntimeError("TTS model returned None")
-        
-        # Check waveform type and convert properly
-        if hasattr(wav, 'numpy'):  # If it's a tensor
-            wav = wav.numpy()
+        if not selected_speaker_wav:
+            selected_speaker_wav = DEFAULT_SPEAKER_WAV
             
-        wav = np.array(wav)
+        if not os.path.exists(selected_speaker_wav):
+            raise FileNotFoundError(f"Speaker audio file not found: {selected_speaker_wav}")
         
-        # **Important **: Return to Native Sample Rate from TTS to avoid Resampling unnecessary
-        src_sr = getattr(tts_model, "output_sample_rate", None)
-        if not src_sr:
-            # XTTS v2 standard rate
-            src_sr = 22050
-            logger.info(f"[TTS] Using XTTS v2 standard sample rate: {src_sr}Hz")
+        # ===== 2) XTTS-v2 inference =====
+        logger.info(f"[XTTS] Generating speech: '{text[:50]}...'")
+        logger.info(f"[XTTS] Speaker audio: {selected_speaker_wav}")
+        logger.info(f"[XTTS] Language: {language}")
         
-        logger.debug(f"[TTS] Audio info: {len(wav)} samples @ {src_sr}Hz = {len(wav)/src_sr:.2f}s, voice: {voice_source}")
+        # Use tts_to_file or tts method
+        wav = tts_model.tts(
+            text=text,
+            speaker_wav=selected_speaker_wav,
+            language=language
+        )
         
-        # Gentle amplification for quiet audio
-        max_abs = np.max(np.abs(wav))
-        if max_abs < 0.3:  # Audio too quiet
-            amplification = min(0.7 / max_abs, 3.0)  # Max 3x amplification
-            wav = wav * amplification
-
-        wav = np.clip(wav, -1.0, 1.0)
-        pcm16 = (wav * 32767.0).astype(np.int16)
-
-        if return_format == "pcm16":
+        # Convert to numpy array if needed
+        if isinstance(wav, list):
+            final_audio = np.array(wav, dtype=np.float32)
+        elif hasattr(wav, 'cpu'):
+            final_audio = wav.cpu().numpy().astype(np.float32)
+        else:
+            final_audio = np.array(wav, dtype=np.float32)
+        
+        src_sr = 24000  # XTTS-v2 outputs at 24kHz
+        
+        # Amplification if needed
+        peak = float(np.max(np.abs(final_audio))) if final_audio.size else 1.0
+        if peak < 0.3 and peak > 0:
+            final_audio = final_audio * min(0.7 / peak, 3.0)
+        
+        # Convert to PCM16
+        final_audio = np.clip(final_audio, -1.0, 1.0)
+        pcm16 = (final_audio * 32767.0).astype(np.int16)
+        
+        if return_format.lower() == "pcm16":
             return pcm16.tobytes()
         
-        # Returns wav with Native Sample Rate (not Force 16KHz)
         buf = io.BytesIO()
-        write_wav(buf, rate=src_sr, data=pcm16) 
-        out = buf.getvalue()
-        buf.close()
-        return out
+        write_wav(buf, rate=src_sr, data=pcm16)
+        return buf.getvalue()
         
     except Exception as e:
-        logger.error(f"TTS Error Details: {type(e).__name__}: {str(e)}")
-        raise 
+        logger.error(f"[XTTS] TTS Error: {type(e).__name__}: {str(e)}")
+        raise
 
+# ===== Voice Cloning Helpers =====
 def clone_and_save_embedding(audio_path: str, embedding_path: str):
     """
     Clone voice from audio file and save embedding

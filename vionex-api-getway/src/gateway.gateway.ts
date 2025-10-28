@@ -10,12 +10,13 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { AudioClientService } from './clients/audio.client';
-import { ChatBotClientService } from './clients/chatbot.client';
 import { InteractionClientService } from './clients/interaction.client';
 import { RoomClientService } from './clients/room.client';
 import { SfuClientService } from './clients/sfu.client';
 import { ChatHandler } from './handlers/chat.handler';
+import { ChatBotHandler } from './handlers/chatbot.handler';
 import { QuizHandler } from './handlers/quiz.handler';
+import { RaiseHandHandler } from './handlers/raisehand.handler';
 import { TranslationHandler } from './handlers/translation.handler';
 import { VotingHandler } from './handlers/voting.handler';
 import { WhiteboardHandler } from './handlers/whiteboard.handler';
@@ -24,6 +25,7 @@ import { Participant } from './interfaces/interface';
 import { HttpBroadcastService } from './services/http-broadcast.service';
 import { StreamService } from './services/stream.service';
 import { WebSocketEventService } from './services/websocket-event.service';
+import { logger } from './utils/log-manager';
 
 @WebSocketGateway({
     transports: ['websocket', 'polling'],
@@ -53,7 +55,8 @@ export class GatewayGateway
         private readonly whiteboardHandler: WhiteboardHandler,
         private readonly helperService: GatewayHelperService,
         private readonly streamService: StreamService,
-        private readonly chatbotClient: ChatBotClientService,
+        private readonly chatbotHandler: ChatBotHandler,
+        private readonly raiseHandHandler: RaiseHandHandler,
     ) {}
 
     afterInit(server: Server) {
@@ -61,13 +64,14 @@ export class GatewayGateway
     }
 
     handleConnection(client: Socket) {
-        // Ensure socket server is set (backup in case afterInit didn't run)
+        logger.info('gateway.gateway.ts', `Client connected: ${client.id}`);
         if (!this.httpBroadcastService['io']) {
             this.httpBroadcastService.setSocketServer(this.io);
         }
     }
 
     async handleDisconnect(client: Socket) {
+        logger.info('gateway.gateway.ts', `Client disconnecting: ${client.id}`);
         // Get participant info before cleanup
         let peerId = this.helperService.getParticipantBySocketId(client.id);
         let roomId = peerId
@@ -83,43 +87,18 @@ export class GatewayGateway
                     roomId = participantInfo.roomId;
                 }
             } catch (error) {
-                console.log(
-                    `[Gateway] Room service lookup failed, will try scanning approach`,
+                logger.warn(
+                    'gateway.gateway.ts',
+                    `Room service lookup failed for ${client.id}, will try scanning approach`,
                 );
-
-                // Fallback: Search through socket.io rooms to find participant
-                try {
-                    // If still not found, do full scan
-                    if (!peerId || !roomId) {
-                        const allRooms =
-                            await this.helperService.getAllRoomsWithParticipants();
-
-                        for (const [currentRoomId, participants] of allRooms) {
-                            const participant = participants.find(
-                                (p) =>
-                                    p.socket_id === client.id ||
-                                    (p.socket_id &&
-                                        p.socket_id.includes(client.id)),
-                            );
-
-                            if (participant) {
-                                peerId =
-                                    participant.peer_id || participant.peerId;
-                                roomId = currentRoomId;
-                                break;
-                            }
-                        }
-                    }
-                } catch (scanError) {
-                    console.error(
-                        `[Gateway] Error scanning for participant:`,
-                        scanError,
-                    );
-                }
             }
         }
 
         if (peerId && roomId) {
+            logger.info(
+                'gateway.gateway.ts',
+                `Participant ${peerId} leaving room ${roomId}`,
+            );
             try {
                 try {
                     const removeMediaResponse =
@@ -143,8 +122,9 @@ export class GatewayGateway
                         }
                     }
                 } catch (error) {
-                    console.error(
-                        '[BACKEND] Error removing participant media:',
+                    logger.error(
+                        'gateway.gateway.ts',
+                        'Error removing participant media',
                         error,
                     );
                 }
@@ -161,22 +141,6 @@ export class GatewayGateway
                     peerId: peerId,
                     reason: 'voluntary', // User left voluntarily (disconnect)
                 });
-
-                // If this was the creator and there's a new creator, send the creator-changed event
-                const participant =
-                    await this.roomClient.getParticipantByPeerId(
-                        roomId,
-                        peerId,
-                    );
-                if (
-                    participant?.is_creator &&
-                    leaveRoomResponse?.data?.newCreator
-                ) {
-                    this.io.to(roomId).emit('sfu:creator-changed', {
-                        peerId: leaveRoomResponse.data.newCreator,
-                        isCreator: true,
-                    });
-                }
 
                 try {
                     const updatedRoom = await this.roomClient.getRoom(roomId);
@@ -198,14 +162,16 @@ export class GatewayGateway
                         });
                     }
                 } catch (error) {
-                    console.error(
-                        '[BACKEND] Error broadcasting updated users list:',
+                    logger.error(
+                        'gateway.gateway.ts',
+                        'Error broadcasting updated users list',
                         error,
                     );
                 }
             } catch (error) {
-                console.error(
-                    '[BACKEND] Error calling room service leave room:',
+                logger.error(
+                    'gateway.gateway.ts',
+                    'Error calling room service leave room',
                     error,
                 );
             }
@@ -214,8 +180,9 @@ export class GatewayGateway
             try {
                 await this.autoDestroyCabins(peerId, roomId);
             } catch (error) {
-                console.error(
-                    '[BACKEND] Error auto-destroying translation cabins:',
+                logger.error(
+                    'gateway.gateway.ts',
+                    'Error auto-destroying translation cabins',
                     error,
                 );
             }
@@ -256,9 +223,9 @@ export class GatewayGateway
                         });
                     }
                 } catch (err) {
-                    console.log(
-                        '[Gateway] Error listing cabins for participant:',
-                        err,
+                    logger.warn(
+                        'gateway.gateway.ts',
+                        `Error listing cabins for participant: ${err.message || err}`,
                     );
                 }
             }
@@ -308,7 +275,11 @@ export class GatewayGateway
                 }
             }
         } catch (error) {
-            console.error('[Gateway] Error in auto destroy cabins:', error);
+            logger.error(
+                'gateway.gateway.ts',
+                'Error in auto destroy cabins',
+                error,
+            );
         }
     }
 
@@ -357,13 +328,22 @@ export class GatewayGateway
 
         // Initialize room if needed
         let room = await this.roomClient.getRoom(data.roomId);
+        let roomKey: string;
+
         if (!room.data || !room.data.room_id) {
-            await this.roomClient.createRoom(data.roomId);
+            // Create new room and get room_key
+            const createRoomResponse = await this.roomClient.createRoom();
+            roomKey = createRoomResponse.room_key;
+
             // Create the media room in SFU service
             try {
                 await this.sfuClient.createMediaRoom(data.roomId);
             } catch (error) {
-                console.error('Failed to create media room:', error);
+                logger.error(
+                    'gateway.gateway.ts',
+                    'Failed to create media room',
+                    error,
+                );
                 this.eventService.emitError(
                     client,
                     'Failed to initialize media room',
@@ -372,6 +352,22 @@ export class GatewayGateway
                 return;
             }
             room = await this.roomClient.getRoom(data.roomId);
+        } else {
+            // Get existing room_key
+            roomKey = room.data.room_key;
+        }
+
+        if (!roomKey) {
+            logger.error(
+                'gateway.gateway.ts',
+                'Room key not found after room creation/retrieval',
+            );
+            this.eventService.emitError(
+                client,
+                'Failed to get room key',
+                'ROOM_KEY_ERROR',
+            );
+            return;
         }
 
         let hasExistingCreator = false;
@@ -422,6 +418,7 @@ export class GatewayGateway
                 peerId: existingParticipant.peer_id,
                 isCreator: existingParticipant.is_creator,
                 roomId: data.roomId,
+                roomKey: roomKey, // Include room_key in response
             });
 
             // Send router capabilities
@@ -436,7 +433,11 @@ export class GatewayGateway
                     },
                 );
             } catch (error) {
-                console.error('Failed to get router capabilities:', error);
+                logger.error(
+                    'gateway.gateway.ts',
+                    'Failed to get router capabilities (reconnecting participant)',
+                    error,
+                );
                 this.eventService.emitError(
                     client,
                     'Failed to get router capabilities',
@@ -492,11 +493,11 @@ export class GatewayGateway
                         data.peerId,
                     );
                 } catch (error) {
-                    console.error(
-                        'Failed to initialize whiteboard permissions:',
+                    logger.error(
+                        'gateway.gateway.ts',
+                        'Failed to initialize whiteboard permissions',
                         error,
                     );
-                    // Don't fail the join process for whiteboard initialization failure
                 }
             }
 
@@ -505,6 +506,7 @@ export class GatewayGateway
                 peerId: participant.peer_id,
                 isCreator: participant.is_creator,
                 roomId: data.roomId,
+                roomKey: roomKey, // Include room_key in response
             });
 
             // Broadcast new peer joined to existing clients
@@ -538,10 +540,18 @@ export class GatewayGateway
                         .emit('sfu:users-updated', { users });
                 }
             } catch (error) {
-                console.error('Error broadcasting updated users list:', error);
+                logger.error(
+                    'gateway.gateway.ts',
+                    'Error broadcasting updated users list (after join)',
+                    error,
+                );
             }
         } catch (error) {
-            console.error('Error setting participant:', error);
+            logger.error(
+                'gateway.gateway.ts',
+                'Error setting participant',
+                error,
+            );
             this.eventService.emitError(
                 client,
                 'Failed to join room',
@@ -557,7 +567,11 @@ export class GatewayGateway
                 routerRtpCapabilities: routerCapabilities,
             });
         } catch (error) {
-            console.error('Failed to get router capabilities:', error);
+            logger.error(
+                'gateway.gateway.ts',
+                'Failed to get router capabilities',
+                error,
+            );
             this.eventService.emitError(
                 client,
                 'Failed to get router capabilities',
@@ -619,7 +633,11 @@ export class GatewayGateway
                 this.eventService.emitToClient(client, 'sfu:streams', []);
             }
         } catch (error) {
-            console.error('Failed to get existing streams:', error);
+            logger.error(
+                'gateway.gateway.ts',
+                'Failed to get existing streams',
+                error,
+            );
             this.eventService.emitToClient(client, 'sfu:streams', []);
         }
     }
@@ -639,16 +657,10 @@ export class GatewayGateway
                 data.roomId ||
                 (await this.helperService.getRoomIdBySocketId(client.id));
 
-            console.log(
-                `[Gateway] Setting RTP capabilities for peer ${peerId} in room ${roomId}`,
-            );
-            console.log(
-                `[Gateway] RTP capabilities codecs count: ${data.rtpCapabilities?.codecs?.length || 0}`,
-            );
-
             if (!peerId || !roomId) {
-                console.error(
-                    `[Gateway] Invalid participant or room info - peerId: ${peerId}, roomId: ${roomId}`,
+                logger.error(
+                    'gateway.gateway.ts',
+                    `Invalid participant or room info - peerId: ${peerId}, roomId: ${roomId}`,
                 );
                 client.emit('sfu:error', {
                     message: 'Invalid participant or room information',
@@ -667,31 +679,16 @@ export class GatewayGateway
 
             // Store RTP capabilities in room service for persistence and retrieval
             try {
-                console.log(
-                    `[Gateway] Storing RTP capabilities in room service for peer ${peerId}`,
-                );
                 const rtpResult =
                     await this.roomClient.updateParticipantRtpCapabilities(
                         peerId,
                         data.rtpCapabilities,
                     );
-
-                if (rtpResult.success) {
-                    console.log(
-                        `[Gateway] Successfully stored RTP capabilities for peer ${peerId}`,
-                    );
-                } else {
-                    console.warn(
-                        '[Gateway] Failed to store RTP capabilities in room service:',
-                        rtpResult.error,
-                    );
-                }
             } catch (error) {
-                console.warn(
-                    '[Gateway] Error storing RTP capabilities in room service:',
-                    error,
+                logger.warn(
+                    'gateway.gateway.ts',
+                    `Error storing RTP capabilities in room service: ${error.message || error}`,
                 );
-                // Don't fail the whole operation for this
             }
 
             client.emit('sfu:rtp-capabilities-set', { success: true });
@@ -738,8 +735,9 @@ export class GatewayGateway
                     );
                     actualTransportData = parsedData.transport || parsedData;
                 } catch (error) {
-                    console.error(
-                        '[Gateway] Failed to parse transport_data:',
+                    logger.error(
+                        'gateway.gateway.ts',
+                        'Failed to parse transport_data',
                         error,
                     );
                     actualTransportData = transportInfo;
@@ -854,8 +852,9 @@ export class GatewayGateway
                 try {
                     producerData = JSON.parse((result as any).producer_data);
                 } catch (e) {
-                    console.error(
-                        '[Gateway] Failed to parse producer_data:',
+                    logger.error(
+                        'gateway.gateway.ts',
+                        'Failed to parse producer_data',
                         e,
                     );
                 }
@@ -880,13 +879,21 @@ export class GatewayGateway
                 appData: safeMetadata,
             });
 
-            // Emit stream-added to all users in room (including sender)
-            this.io.to(roomId).emit('sfu:stream-added', {
-                streamId: streamId,
-                publisherId: peerId,
-                metadata: safeMetadata,
-                rtpParameters: data.rtpParameters,
-            });
+            // FIXED: Only broadcast stream-added for non-dummy producers
+            // Dummy producers (video: false or audio: false) should not be consumed
+            const isDummyProducer =
+                (data.kind === 'video' && safeMetadata.video === false) ||
+                (data.kind === 'audio' && safeMetadata.audio === false);
+
+            if (!isDummyProducer) {
+                // Emit stream-added to all users in room (including sender)
+                this.io.to(roomId).emit('sfu:stream-added', {
+                    streamId: streamId,
+                    publisherId: peerId,
+                    metadata: safeMetadata,
+                    rtpParameters: data.rtpParameters,
+                });
+            }
 
             // If this is a screen share, emit special screen share event
             if (isScreenShare && data.kind === 'video') {
@@ -917,9 +924,9 @@ export class GatewayGateway
         try {
             // Validate streamId before proceeding
             if (!data.streamId || data.streamId === 'undefined') {
-                console.error(
-                    '[Gateway] Invalid streamId in consume request:',
-                    data.streamId,
+                logger.error(
+                    'gateway.gateway.ts',
+                    `Invalid streamId in consume request: ${data.streamId}`,
                 );
                 client.emit('sfu:error', {
                     message: `Invalid streamId: ${data.streamId}. StreamId cannot be undefined or null.`,
@@ -928,9 +935,9 @@ export class GatewayGateway
             }
 
             if (!data.transportId) {
-                console.error(
-                    '[Gateway] Invalid transportId in consume request:',
-                    data.transportId,
+                logger.error(
+                    'gateway.gateway.ts',
+                    `Invalid transportId in consume request: ${data.transportId}`,
                 );
                 client.emit('sfu:error', {
                     message: `Invalid transportId: ${data.transportId}. TransportId cannot be undefined or null.`,
@@ -946,7 +953,10 @@ export class GatewayGateway
                 (await this.helperService.getRoomIdBySocketId(client.id));
 
             if (!peerId || !roomId) {
-                console.error('[Gateway] Missing peerId or roomId for consume');
+                logger.error(
+                    'gateway.gateway.ts',
+                    'Missing peerId or roomId for consume',
+                );
                 return { success: false, error: 'Missing peerId or roomId' };
             }
 
@@ -958,9 +968,9 @@ export class GatewayGateway
                     peerId,
                 );
             } catch (error) {
-                console.log(
-                    '[Gateway] Could not get participant data for consume:',
-                    error,
+                logger.warn(
+                    'gateway.gateway.ts',
+                    `Could not get participant data for consume: ${error.message || error}`,
                 );
                 participant = { peer_id: peerId, is_creator: false };
             }
@@ -986,18 +996,22 @@ export class GatewayGateway
                         (consumerInfo as any).consumer_data,
                     );
                 } else {
-                    console.error(
-                        '[Gateway] No consumer_data in response:',
-                        consumerInfo,
+                    logger.error(
+                        'gateway.gateway.ts',
+                        `No consumer_data in response: ${JSON.stringify(consumerInfo)}`,
                     );
                     throw new Error('Invalid consumer response format');
                 }
             } catch (parseError) {
-                console.error(
-                    '[Gateway] Failed to parse consumer data:',
+                logger.error(
+                    'gateway.gateway.ts',
+                    'Failed to parse consumer data',
                     parseError,
                 );
-                console.error('[Gateway] Raw consumer info:', consumerInfo);
+                logger.error(
+                    'gateway.gateway.ts',
+                    `Raw consumer info: ${JSON.stringify(consumerInfo)}`,
+                );
                 throw new Error('Failed to parse consumer response');
             }
 
@@ -1031,11 +1045,14 @@ export class GatewayGateway
             );
 
             if (missingFields.length > 0) {
-                console.error('[Gateway] Missing fields in consumer payload:', {
-                    missingFields,
-                    consumerPayload,
-                    originalData: consumerData,
-                });
+                logger.error(
+                    'gateway.gateway.ts',
+                    `Missing fields in consumer payload: ${JSON.stringify({
+                        missingFields,
+                        consumerPayload,
+                        originalData: consumerData,
+                    })}`,
+                );
                 throw new Error(
                     `Missing required consumer fields: ${missingFields.join(', ')}`,
                 );
@@ -1045,7 +1062,7 @@ export class GatewayGateway
 
             return { success: true };
         } catch (error) {
-            console.error('[Gateway] Error in handleConsume:', error);
+            logger.error('gateway.gateway.ts', 'Error in handleConsume', error);
             client.emit('sfu:error', { message: error.message });
             return { success: false, error: error.message };
         }
@@ -1066,8 +1083,9 @@ export class GatewayGateway
                 (await this.helperService.getRoomIdBySocketId(client.id));
 
             if (!peerId || !roomId) {
-                console.error(
-                    '[Gateway] Missing peerId or roomId for resumeConsumer',
+                logger.error(
+                    'gateway.gateway.ts',
+                    'Missing peerId or roomId for resumeConsumer',
                 );
                 client.emit('sfu:error', {
                     message: 'Missing peerId or roomId',
@@ -1116,11 +1134,10 @@ export class GatewayGateway
                         }
                     }
                 } catch (metadataError) {
-                    console.error(
-                        `[Gateway] Failed to parse metadata in getStreams for stream ${stream.stream_id || stream.streamId}:`,
+                    logger.error(
+                        'gateway.gateway.ts',
+                        `Failed to parse metadata in getStreams for stream ${stream.stream_id || stream.streamId}, Raw metadata: ${stream.metadata}`,
                         metadataError,
-                        'Raw metadata:',
-                        stream.metadata,
                     );
                     // Default metadata if parsing fails
                     parsedMetadata = {
@@ -1151,8 +1168,9 @@ export class GatewayGateway
                         }
                     }
                 } catch (rtpError) {
-                    console.error(
-                        `[Gateway] Failed to parse rtp_parameters in getStreams for stream ${stream.stream_id || stream.streamId}:`,
+                    logger.error(
+                        'gateway.gateway.ts',
+                        `Failed to parse rtp_parameters in getStreams for stream ${stream.stream_id || stream.streamId}`,
                         rtpError,
                     );
                     parsedRtpParameters = {};
@@ -1173,7 +1191,7 @@ export class GatewayGateway
             client.emit('sfu:streams', transformedStreams);
             return { success: true };
         } catch (error) {
-            console.error('[API Gateway] Error getting streams:', error);
+            logger.error('gateway.gateway.ts', 'Error getting streams', error);
             client.emit('sfu:error', { message: error.message });
             return { success: false, error: error.message };
         }
@@ -1186,8 +1204,6 @@ export class GatewayGateway
         @MessageBody()
         data: { roomId: string; peerId: string; bufferedAudio?: any },
     ) {
-        console.log(`[Gateway] handleMySpeaking called with data:`, data);
-
         const roomId = data.roomId;
         const peerId = data.peerId;
 
@@ -1197,8 +1213,9 @@ export class GatewayGateway
             peerId,
         );
         if (!participant) {
-            console.error(
-                `[Gateway] Participant ${peerId} not found in room ${roomId}`,
+            logger.error(
+                'gateway.gateway.ts',
+                `Participant ${peerId} not found in room ${roomId} (handleMySpeaking)`,
             );
             return;
         }
@@ -1208,8 +1225,9 @@ export class GatewayGateway
             client.id,
         );
         if (!socketRoomId || socketRoomId !== roomId) {
-            console.error(
-                `[Gateway] Socket room mismatch. Expected: ${roomId}, Got: ${socketRoomId}`,
+            logger.error(
+                'gateway.gateway.ts',
+                `Socket room mismatch (handleMySpeaking). Expected: ${roomId}, Got: ${socketRoomId}`,
             );
             return;
         }
@@ -1223,8 +1241,6 @@ export class GatewayGateway
                     peerId,
                     0, // port not used for priority logic
                 );
-                console.log(`[Gateway] SFU speaking result:`, speakingResult);
-
                 // ENHANCED: Check if speaking user needs to be prioritized for consumption
                 // This triggers dynamic stream consumption based on voice activity
                 if (
@@ -1234,35 +1250,32 @@ export class GatewayGateway
                     await this.handleSpeakingUserPriority(roomId, peerId);
                 }
             } catch (sfuError) {
-                console.error(`[Gateway] SFU speaking error:`, sfuError);
-                // Continue with basic emit if SFU fails
+                logger.error(
+                    'gateway.gateway.ts',
+                    'SFU speaking error',
+                    sfuError,
+                );
             }
 
             // Step 5: Emit to all clients in the room (excluding sender) - KEPT ORIGINAL LOGIC
             client.to(roomId).emit('sfu:user-speaking', { peerId });
-
-            console.log(
-                `[Gateway] User ${peerId} speaking handled with priority check`,
-            );
         } catch (error) {
-            console.error('[Gateway] Error handling speaking event:', error);
+            // Check if this is a service unavailability error
+            const handled = this.helperService.handleServiceError(
+                client,
+                error,
+                'SFU Service',
+                'sfu:my-speaking',
+            );
 
-            // Check if it's a gRPC connection error (audio service down)
-            if (
-                error.message &&
-                (error.message.includes('UNAVAILABLE') ||
-                    error.message.includes('ECONNREFUSED') ||
-                    error.message.includes('14 UNAVAILABLE'))
-            ) {
-                console.error('[Gateway] Audio service appears to be down');
-                client.emit('sfu:audio-service-unavailable', {
-                    peerId,
-                    roomId,
-                    message:
-                        'Audio transcription service is currently unavailable',
-                });
-            } else {
-                // Generic audio error
+            if (!handled) {
+                // Log other errors
+                logger.error(
+                    'gateway.gateway.ts',
+                    'Error handling speaking event',
+                    error,
+                );
+                // Generic audio error for non-service issues
                 client.emit('sfu:audio-pipeline-failed', {
                     peerId,
                     roomId,
@@ -1279,7 +1292,10 @@ export class GatewayGateway
         @MessageBody()
         data: { roomId: string; peerId: string },
     ) {
-        console.log(`[Gateway] handleMyStopSpeaking called with data:`, data);
+        logger.debug(
+            'gateway.gateway.ts',
+            `handleMyStopSpeaking called with data: ${JSON.stringify(data)}`,
+        );
 
         const roomId = data.roomId;
         const peerId = data.peerId;
@@ -1290,8 +1306,9 @@ export class GatewayGateway
             peerId,
         );
         if (!participant) {
-            console.error(
-                `[Gateway] Participant ${peerId} not found in room ${roomId}`,
+            logger.error(
+                'gateway.gateway.ts',
+                `Participant ${peerId} not found in room ${roomId} (handleMyStopSpeaking)`,
             );
             return;
         }
@@ -1301,25 +1318,20 @@ export class GatewayGateway
             client.id,
         );
         if (!socketRoomId || socketRoomId !== roomId) {
-            console.error(
-                `[Gateway] Socket room mismatch. Expected: ${roomId}, Got: ${socketRoomId}`,
+            logger.error(
+                'gateway.gateway.ts',
+                `Socket room mismatch (handleMyStopSpeaking). Expected: ${roomId}, Got: ${socketRoomId}`,
             );
             return;
         }
 
         try {
-            // Notify SFU service that user stopped speaking
-            // await this.sfuClient.handleStopSpeaking(roomId, peerId);
-
             // Notify all clients in the room (excluding sender) that user stopped speaking
             client.to(roomId).emit('sfu:user-stopped-speaking', { peerId });
-
-            console.log(
-                `[Gateway] User ${peerId} stopped speaking in room ${roomId}`,
-            );
         } catch (error) {
-            console.error(
-                '[Gateway] Error handling stop speaking event:',
+            logger.error(
+                'gateway.gateway.ts',
+                'Error handling stop speaking event',
                 error,
             );
         }
@@ -1340,13 +1352,15 @@ export class GatewayGateway
             channels: number;
             isFinal?: boolean; // Indicates if this is the final chunk or periodic chunk
             organizationId?: string; // Organization ID for multi-tenant isolation
+            roomKey?: string; // NEW: Room key for semantic context isolation
         },
     ) {
         const isFinal = data.isFinal !== false; // Default to true for backward compatibility
         const chunkType = isFinal ? 'final' : 'periodic';
 
-        console.log(
-            `[Gateway] Received ${chunkType} audio buffer from ${data.userId} - ${data.duration}ms, ${data.buffer.length} bytes`,
+        logger.info(
+            'gateway.gateway.ts',
+            `Received ${chunkType} audio buffer from ${data.userId} - ${data.duration}ms, ${data.buffer.length} bytes`,
         );
 
         // Validate data
@@ -1356,12 +1370,15 @@ export class GatewayGateway
             !data.buffer ||
             data.buffer.length === 0
         ) {
-            console.error('[Gateway] Invalid audio buffer data:', {
-                hasUserId: !!data.userId,
-                hasRoomId: !!data.roomId,
-                hasBuffer: !!data.buffer,
-                bufferLength: data.buffer?.length || 0,
-            });
+            logger.error(
+                'gateway.gateway.ts',
+                `Invalid audio buffer data: ${JSON.stringify({
+                    hasUserId: !!data.userId,
+                    hasRoomId: !!data.roomId,
+                    hasBuffer: !!data.buffer,
+                    bufferLength: data.buffer?.length || 0,
+                })}`,
+            );
             return;
         }
 
@@ -1369,8 +1386,9 @@ export class GatewayGateway
         // 16kHz * 2 bytes/sample * 15 seconds = 480,000 bytes max
         const MAX_BUFFER_SIZE = 480000; // ~15 seconds at 16kHz (match client limit)
         if (data.buffer.length > MAX_BUFFER_SIZE) {
-            console.error(
-                `[Gateway] Audio buffer too large: ${data.buffer.length} bytes (max: ${MAX_BUFFER_SIZE})`,
+            logger.error(
+                'gateway.gateway.ts',
+                `Audio buffer too large: ${data.buffer.length} bytes (max: ${MAX_BUFFER_SIZE})`,
             );
             client.emit('audio:error', {
                 userId: data.userId,
@@ -1382,8 +1400,9 @@ export class GatewayGateway
             return;
         }
 
-        console.log(
-            `[Gateway] Validating participant ${data.userId} in room ${data.roomId}`,
+        logger.debug(
+            'gateway.gateway.ts',
+            `Validating participant ${data.userId} in room ${data.roomId}`,
         );
 
         // Verify participant exists in room
@@ -1394,13 +1413,15 @@ export class GatewayGateway
 
         // If room service fails, try to validate using local mappings
         if (!participant) {
-            console.error(
-                `[Gateway] Participant ${data.userId} not found in room ${data.roomId}`,
+            logger.error(
+                'gateway.gateway.ts',
+                `Participant ${data.userId} not found in room ${data.roomId}`,
             );
             return;
         } else {
-            console.log(
-                `[Gateway] Participant ${data.userId} found in room ${data.roomId} via room service`,
+            logger.debug(
+                'gateway.gateway.ts',
+                `Participant ${data.userId} found in room ${data.roomId} via room service`,
             );
         }
 
@@ -1410,8 +1431,9 @@ export class GatewayGateway
             try {
                 audioBuffer = new Uint8Array(data.buffer);
             } catch (conversionError) {
-                console.error(
-                    '[Gateway] Failed to convert buffer to Uint8Array:',
+                logger.error(
+                    'gateway.gateway.ts',
+                    'Failed to convert buffer to Uint8Array',
                     conversionError,
                 );
                 client.emit('audio:error', {
@@ -1423,8 +1445,9 @@ export class GatewayGateway
                 return;
             }
 
-            console.log(
-                `[Gateway] Calling audio service processAudioBuffer for ${data.userId}`,
+            logger.debug(
+                'gateway.gateway.ts',
+                `Calling audio service processAudioBuffer for ${data.userId}`,
             );
 
             // Send to Audio Service for processing
@@ -1437,22 +1460,38 @@ export class GatewayGateway
                 sampleRate: data.sampleRate || 16000,
                 channels: data.channels || 1,
                 organizationId: data.organizationId, // Forward organization ID
+                roomKey: data.roomKey, // NEW: Forward room_key
             });
 
-            console.log(
-                `[Gateway] Audio buffer processed for ${data.userId}`,
-                result,
+            logger.info(
+                'gateway.gateway.ts',
+                `Audio buffer processed for ${data.userId}: ${JSON.stringify(result)}`,
             );
         } catch (error) {
-            console.error('[Gateway] Error processing audio buffer:', error);
+            // Check if this is a service unavailability error
+            const handled = this.helperService.handleServiceError(
+                client,
+                error,
+                'Audio Service',
+                'audio:buffer',
+            );
 
-            // Notify client about the error
-            client.emit('audio:error', {
-                userId: data.userId,
-                roomId: data.roomId,
-                message: 'Failed to process audio buffer',
-                error: error.message,
-            });
+            if (!handled) {
+                // Log other errors
+                logger.error(
+                    'gateway.gateway.ts',
+                    'Error processing audio buffer',
+                    error,
+                );
+
+                // Notify client about the error
+                client.emit('audio:error', {
+                    userId: data.userId,
+                    roomId: data.roomId,
+                    message: 'Failed to process audio buffer',
+                    error: error.message,
+                });
+            }
         }
     }
 
@@ -1473,8 +1512,9 @@ export class GatewayGateway
 
             // Validate audio chunk data
             if (!this.validateAudioChunk(data)) {
-                console.error(
-                    `[Gateway] Invalid audio chunk from ${client.id}`,
+                logger.error(
+                    'gateway.gateway.ts',
+                    `Invalid audio chunk from ${client.id}`,
                 );
                 client.emit('audio:error', {
                     message: 'Invalid audio chunk data',
@@ -1489,8 +1529,9 @@ export class GatewayGateway
                 roomId,
             );
             if (!isAuthorized) {
-                console.error(
-                    `[Gateway] Unauthorized audio chunk from ${userId} in room ${roomId}`,
+                logger.error(
+                    'gateway.gateway.ts',
+                    `Unauthorized audio chunk from ${userId} in room ${roomId}`,
                 );
                 client.emit('audio:error', {
                     message: 'Unauthorized audio access',
@@ -1498,8 +1539,9 @@ export class GatewayGateway
                 return;
             }
 
-            console.log(
-                `[Gateway] Processing audio chunk: ${Array.isArray(buffer) ? buffer.length : buffer.byteLength} bytes from ${userId}`,
+            logger.debug(
+                'gateway.gateway.ts',
+                `Processing audio chunk: ${Array.isArray(buffer) ? buffer.length : buffer.byteLength} bytes from ${userId}`,
             );
 
             // Convert array to Uint8Array for gRPC if needed
@@ -1527,19 +1569,38 @@ export class GatewayGateway
                     message: response.message,
                 });
 
-                console.log(`[Gateway] Audio chunk processed for ${userId}`);
-            } catch (error) {
-                console.error(
-                    `[Gateway] Failed to forward audio chunk to service:`,
-                    error,
+                logger.debug(
+                    'gateway.gateway.ts',
+                    `Audio chunk processed for ${userId}`,
                 );
-                client.emit('audio:error', {
-                    message: 'Failed to process audio chunk',
-                    timestamp: timestamp,
-                });
+            } catch (error) {
+                // Check if this is a service unavailability error
+                const handled = this.helperService.handleServiceError(
+                    client,
+                    error,
+                    'Audio Service',
+                    'audio:chunk',
+                );
+
+                if (!handled) {
+                    // Log other errors
+                    logger.error(
+                        'gateway.gateway.ts',
+                        `Failed to forward audio chunk to service`,
+                        error,
+                    );
+                    client.emit('audio:error', {
+                        message: 'Failed to process audio chunk',
+                        timestamp: timestamp,
+                    });
+                }
             }
         } catch (error) {
-            console.error(`[Gateway] Error in handleAudioChunk:`, error);
+            logger.error(
+                'gateway.gateway.ts',
+                'Error in handleAudioChunk',
+                error,
+            );
             client.emit('audio:error', {
                 message: 'Internal server error',
                 timestamp: data.timestamp,
@@ -1556,17 +1617,20 @@ export class GatewayGateway
         duration: number;
     }): boolean {
         if (!data.userId || typeof data.userId !== 'string') {
-            console.warn('[Gateway] Invalid userId in audio chunk');
+            logger.warn('gateway.gateway.ts', 'Invalid userId in audio chunk');
             return false;
         }
 
         if (!data.roomId || typeof data.roomId !== 'string') {
-            console.warn('[Gateway] Invalid roomId in audio chunk');
+            logger.warn('gateway.gateway.ts', 'Invalid roomId in audio chunk');
             return false;
         }
 
         if (!data.timestamp || typeof data.timestamp !== 'number') {
-            console.warn('[Gateway] Invalid timestamp in audio chunk');
+            logger.warn(
+                'gateway.gateway.ts',
+                'Invalid timestamp in audio chunk',
+            );
             return false;
         }
 
@@ -1577,7 +1641,10 @@ export class GatewayGateway
         } else if (data.buffer instanceof ArrayBuffer) {
             bufferSize = data.buffer.byteLength;
         } else {
-            console.warn('[Gateway] Invalid buffer format in audio chunk');
+            logger.warn(
+                'gateway.gateway.ts',
+                'Invalid buffer format in audio chunk',
+            );
             return false;
         }
 
@@ -1586,7 +1653,10 @@ export class GatewayGateway
             typeof data.duration !== 'number' ||
             data.duration <= 0
         ) {
-            console.warn('[Gateway] Invalid duration in audio chunk');
+            logger.warn(
+                'gateway.gateway.ts',
+                'Invalid duration in audio chunk',
+            );
             return false;
         }
 
@@ -1595,8 +1665,9 @@ export class GatewayGateway
         const maxSize = 16000 * 2 * 3; // 3s = 96,000 bytes
 
         if (bufferSize < minSize || bufferSize > maxSize) {
-            console.warn(
-                `[Gateway] Audio buffer size out of range: ${bufferSize} bytes (min: ${minSize}, max: ${maxSize})`,
+            logger.warn(
+                'gateway.gateway.ts',
+                `Audio buffer size out of range: ${bufferSize} bytes (min: ${minSize}, max: ${maxSize})`,
             );
             return false;
         }
@@ -1627,8 +1698,9 @@ export class GatewayGateway
         speakingPeerId: string,
     ) {
         try {
-            console.log(
-                `[Gateway] Handling speaking priority for ${speakingPeerId} in room ${roomId}`,
+            logger.debug(
+                'gateway.gateway.ts',
+                `Handling speaking priority for ${speakingPeerId} in room ${roomId}`,
             );
 
             // Step 1: Get all participants in the room (except the speaking user)
@@ -1645,8 +1717,9 @@ export class GatewayGateway
             );
 
             if (speakingUserStreams.length === 0) {
-                console.log(
-                    `[Gateway] No streams found for speaking user ${speakingPeerId}`,
+                logger.debug(
+                    'gateway.gateway.ts',
+                    `No streams found for speaking user ${speakingPeerId}`,
                 );
                 return;
             }
@@ -1663,30 +1736,41 @@ export class GatewayGateway
 
                 // Step 4: Trigger stream consumption for speaking user
                 for (const stream of speakingUserStreams) {
+                    // Handle both snake_case and camelCase from gRPC/TypeScript
+                    const streamId = stream.streamId || stream.stream_id;
+                    const publisherId =
+                        stream.publisherId || stream.publisher_id;
+
+                    // FIX: Validate streamId before emitting
+                    if (!streamId || !publisherId) {
+                        logger.warn(
+                            'gateway.gateway.ts',
+                            `Skipping invalid stream for speaking user ${speakingPeerId}: streamId=${streamId}, publisherId=${publisherId}`,
+                        );
+                        continue;
+                    }
+
                     // Emit stream-added event to trigger consumption
                     socket.emit('sfu:stream-added', {
-                        streamId: stream.streamId,
-                        stream_id: stream.streamId,
-                        publisherId: speakingPeerId,
-                        publisher_id: speakingPeerId,
+                        streamId: streamId,
+                        stream_id: streamId, // For backward compatibility
+                        publisherId: publisherId,
+                        publisher_id: publisherId, // For backward compatibility
                         metadata: stream.metadata || {
                             isFromSpeaking: true, // Mark as priority from speaking
                             priority: true,
                         },
-                        rtpParameters: stream.rtpParameters,
+                        rtpParameters:
+                            stream.rtpParameters || stream.rtp_parameters,
                     });
-
-                    console.log(
-                        `[Gateway] Sent priority stream ${stream.streamId} to ${participant.peer_id}`,
-                    );
                 }
             }
-
-            console.log(
-                `[Gateway] Successfully handled speaking priority for ${speakingPeerId}`,
-            );
         } catch (error) {
-            console.error(`[Gateway] Error handling speaking priority:`, error);
+            logger.error(
+                'gateway.gateway.ts',
+                'Error handling speaking priority',
+                error,
+            );
         }
     }
 
@@ -1713,8 +1797,9 @@ export class GatewayGateway
             }
             return [];
         } catch (error) {
-            console.error(
-                `[Gateway] Error getting participants for room ${roomId}:`,
+            logger.error(
+                'gateway.gateway.ts',
+                `Error getting participants for room ${roomId}`,
                 error,
             );
             return [];
@@ -1734,6 +1819,10 @@ export class GatewayGateway
             const allStreams = await this.sfuClient.getStreams(roomId);
 
             if (!allStreams) {
+                logger.debug(
+                    'gateway.gateway.ts',
+                    `No streams returned from SFU for room ${roomId}`,
+                );
                 return [];
             }
 
@@ -1743,24 +1832,42 @@ export class GatewayGateway
 
             // Filter streams from the speaking user (audio/video, not screen share)
             const userStreams = streams.filter((stream: any) => {
+                // Handle both snake_case (from gRPC) and camelCase (from TypeScript)
                 const streamId = stream.streamId || stream.stream_id;
                 const publisherId = stream.publisherId || stream.publisher_id;
+
+                // Validate stream data
+                if (!streamId || !publisherId) {
+                    logger.warn(
+                        'gateway.gateway.ts',
+                        `Invalid stream data: streamId=${streamId}, publisherId=${publisherId}`,
+                    );
+                    return false;
+                }
 
                 // Must be from speaking user
                 if (publisherId !== speakingPeerId) return false;
 
                 // Parse stream ID to determine type
                 const parts = streamId.split('_');
+                if (parts.length < 2) {
+                    logger.warn(
+                        'gateway.gateway.ts',
+                        `Invalid streamId format: ${streamId}`,
+                    );
+                    return false;
+                }
+
                 const mediaType = parts[1]; // video, audio, screen, screen_audio
 
                 // Only prioritize regular audio/video streams, not screen shares
                 return mediaType === 'video' || mediaType === 'audio';
             });
-
             return userStreams;
         } catch (error) {
-            console.error(
-                `[Gateway] Error getting speaking user streams:`,
+            logger.error(
+                'gateway.gateway.ts',
+                'Error getting speaking user streams',
                 error,
             );
             return [];
@@ -1792,10 +1899,6 @@ export class GatewayGateway
                 };
             }
 
-            console.log(
-                `[Gateway] Handling unpublish for stream ${data.streamId} from ${peerId} in room ${roomId}`,
-            );
-
             // Verify stream ownership for security
             const isOwner = await this.streamService.verifyStreamOwnership(
                 data.streamId,
@@ -1804,8 +1907,9 @@ export class GatewayGateway
             );
 
             if (!isOwner) {
-                console.warn(
-                    `[Gateway] Unauthorized unpublish attempt: ${peerId} trying to unpublish ${data.streamId}`,
+                logger.warn(
+                    'gateway.gateway.ts',
+                    `Unauthorized unpublish attempt: ${peerId} trying to unpublish ${data.streamId}`,
                 );
                 client.emit('sfu:error', {
                     message: 'You can only unpublish your own streams',
@@ -1827,25 +1931,21 @@ export class GatewayGateway
                     streamId: data.streamId,
                     message: result.message,
                 });
-
-                console.log(
-                    `[Gateway] Successfully unpublished stream ${data.streamId} for ${peerId}`,
-                );
             } else {
                 // Send error to the requesting client
                 client.emit('sfu:error', {
                     message: result.message,
                     code: 'UNPUBLISH_FAILED',
                 });
-
-                console.error(
-                    `[Gateway] Failed to unpublish stream ${data.streamId}: ${result.message}`,
-                );
             }
 
             return result;
         } catch (error) {
-            console.error('[Gateway] Error in handleUnpublish:', error);
+            logger.error(
+                'gateway.gateway.ts',
+                'Error in handleUnpublish',
+                error,
+            );
             client.emit('sfu:error', {
                 message: 'Internal server error during unpublish',
                 code: 'INTERNAL_ERROR',
@@ -1912,7 +2012,11 @@ export class GatewayGateway
                 message: 'Stream metadata updated successfully',
             };
         } catch (error) {
-            console.error('[Gateway] Error updating stream metadata:', error);
+            logger.error(
+                'gateway.gateway.ts',
+                'Error updating stream metadata',
+                error,
+            );
             client.emit('sfu:error', {
                 message: error.message || 'Failed to update stream metadata',
                 code: 'UPDATE_STREAM_METADATA_FAILED',
@@ -1959,6 +2063,7 @@ export class GatewayGateway
                     isFile?: boolean;
                 };
             };
+            organizationId?: string;
         },
     ) {
         return this.chatHandler.handleSendMessage(client, data);
@@ -1986,6 +2091,7 @@ export class GatewayGateway
                     isFile?: boolean;
                 };
             };
+            organizationId?: string;
         },
     ) {
         return this.chatHandler.handleSendFileMessage(client, data);
@@ -2061,16 +2167,11 @@ export class GatewayGateway
                 client.id,
             );
             if (!peerId) {
-                client.emit('sfu:pin-user-response', {
+                return {
                     success: false,
                     message: 'User not authenticated',
-                });
-                return;
+                };
             }
-
-            console.log(
-                `[Gateway] Pin user request from ${peerId} to pin ${data.pinnedPeerId}`,
-            );
 
             // Get participant data for RTP capabilities
             const participant = this.helperService
@@ -2091,15 +2192,6 @@ export class GatewayGateway
                     ? JSON.parse(result.pin_data)
                     : result.pin_data;
 
-            // Emit response to pinner
-            client.emit('sfu:pin-user-response', {
-                success: parsedResult.success,
-                message: parsedResult.message,
-                consumersCreated: parsedResult.consumersCreated || [],
-                alreadyPriority: parsedResult.alreadyPriority,
-                existingConsumer: parsedResult.existingConsumer,
-            });
-
             // Broadcast pin event to room (for UI updates)
             client.to(data.roomId).emit('sfu:user-pinned', {
                 pinnerPeerId: peerId,
@@ -2107,15 +2199,20 @@ export class GatewayGateway
                 roomId: data.roomId,
             });
 
-            console.log(
-                `[Gateway] Pin user successful: ${peerId} pinned ${data.pinnedPeerId}`,
-            );
+            // Return response (will be sent as callback to client)
+            return {
+                success: parsedResult.success,
+                message: parsedResult.message,
+                consumersCreated: parsedResult.consumersCreated || [],
+                alreadyPriority: parsedResult.alreadyPriority,
+                existingConsumer: parsedResult.existingConsumer,
+            };
         } catch (error) {
-            console.error(`[Gateway] Error pinning user:`, error);
-            client.emit('sfu:pin-user-response', {
+            logger.error('gateway.gateway.ts', 'Error pinning user', error);
+            return {
                 success: false,
                 message: error.message || 'Failed to pin user',
-            });
+            };
         }
     }
 
@@ -2133,35 +2230,25 @@ export class GatewayGateway
                 client.id,
             );
             if (!peerId) {
-                client.emit('sfu:unpin-user-response', {
+                logger.warn(
+                    'gateway.gateway.ts',
+                    'Unpin user - User not authenticated',
+                );
+                return {
                     success: false,
                     message: 'User not authenticated',
-                });
-                return;
+                };
             }
-
-            console.log(
-                `[Gateway] Unpin user request from ${peerId} to unpin ${data.unpinnedPeerId}`,
-            );
-
             const result = (await this.sfuClient.unpinUser(
                 data.roomId,
-                peerId, // unpinnerPeerId
-                data.unpinnedPeerId, // unpinnedPeerId
+                peerId,
+                data.unpinnedPeerId,
             )) as any;
 
             const parsedResult =
                 typeof result.unpin_data === 'string'
                     ? JSON.parse(result.unpin_data)
                     : result.unpin_data;
-
-            // Emit response to unpinner
-            client.emit('sfu:unpin-user-response', {
-                success: parsedResult.success,
-                message: parsedResult.message,
-                consumersRemoved: parsedResult.consumersRemoved || [],
-                stillInPriority: parsedResult.stillInPriority,
-            });
 
             // Broadcast unpin event to room (for UI updates)
             client.to(data.roomId).emit('sfu:user-unpinned', {
@@ -2170,15 +2257,155 @@ export class GatewayGateway
                 roomId: data.roomId,
             });
 
-            console.log(
-                `[Gateway] Unpin user successful: ${peerId} unpinned ${data.unpinnedPeerId}`,
-            );
+            // Return response (will be sent as callback to client)
+            return {
+                success: parsedResult.success,
+                message: parsedResult.message,
+                consumersRemoved: parsedResult.consumersRemoved || [],
+                stillInPriority: parsedResult.stillInPriority,
+            };
         } catch (error) {
-            console.error(`[Gateway] Error unpinning user:`, error);
-            client.emit('sfu:unpin-user-response', {
+            logger.error('gateway.gateway.ts', 'Error unpinning user', error);
+            return {
                 success: false,
                 message: error.message || 'Failed to unpin user',
-            });
+            };
+        }
+    }
+
+    // ==================== ROOM LOCK HANDLERS ====================
+
+    @SubscribeMessage('sfu:lock-room')
+    async handleLockRoom(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            password: string;
+            creatorId: string;
+        },
+    ) {
+        try {
+            // Verify the user is authenticated
+            const peerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
+            if (!peerId) {
+                return {
+                    success: false,
+                    message: 'User not authenticated',
+                };
+            }
+
+            // Verify the user is the creator
+            if (peerId !== data.creatorId) {
+                return {
+                    success: false,
+                    message: 'Only room creator can lock the room',
+                };
+            }
+
+            // Call room service to lock the room
+            const response = (await this.roomClient.lockRoom(
+                data.roomId,
+                data.password,
+                data.creatorId,
+            )) as any;
+
+            if (response.status === 'success') {
+                // Broadcast lock event to all participants in the room
+                this.eventService.broadcastToRoom(
+                    client,
+                    data.roomId,
+                    'sfu:room-locked',
+                    {
+                        roomId: data.roomId,
+                        lockedBy: data.creatorId,
+                    },
+                );
+
+                return {
+                    success: true,
+                    message: response.message || 'Room locked successfully',
+                };
+            } else {
+                return {
+                    success: false,
+                    message: response.message || 'Failed to lock room',
+                };
+            }
+        } catch (error) {
+            logger.error('gateway.gateway.ts', 'Error locking room', error);
+            return {
+                success: false,
+                message: error.message || 'Failed to lock room',
+            };
+        }
+    }
+
+    @SubscribeMessage('sfu:unlock-room')
+    async handleUnlockRoom(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            creatorId: string;
+        },
+    ) {
+        try {
+            // Verify the user is authenticated
+            const peerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
+            if (!peerId) {
+                return {
+                    success: false,
+                    message: 'User not authenticated',
+                };
+            }
+
+            // Verify the user is the creator
+            if (peerId !== data.creatorId) {
+                return {
+                    success: false,
+                    message: 'Only room creator can unlock the room',
+                };
+            }
+
+            // Call room service to unlock the room
+            const response = (await this.roomClient.unlockRoom(
+                data.roomId,
+                data.creatorId,
+            )) as any;
+
+            if (response.status === 'success') {
+                // Broadcast unlock event to all participants in the room
+                this.eventService.broadcastToRoom(
+                    client,
+                    data.roomId,
+                    'sfu:room-unlocked',
+                    {
+                        roomId: data.roomId,
+                        unlockedBy: data.creatorId,
+                    },
+                );
+
+                return {
+                    success: true,
+                    message: response.message || 'Room unlocked successfully',
+                };
+            } else {
+                return {
+                    success: false,
+                    message: response.message || 'Failed to unlock room',
+                };
+            }
+        } catch (error) {
+            logger.error('gateway.gateway.ts', 'Error unlocking room', error);
+            return {
+                success: false,
+                message: error.message || 'Failed to unlock room',
+            };
         }
     }
 
@@ -2324,10 +2551,6 @@ export class GatewayGateway
         },
     ) {
         try {
-            console.log(
-                `[Gateway] Received behavior logs from ${data.peerId} in room ${data.roomId}`,
-            );
-
             // Validate input
             if (
                 !data.peerId ||
@@ -2352,12 +2575,12 @@ export class GatewayGateway
                 success: true,
                 logsCount: data.behaviorLogs.length,
             });
-
-            console.log(
-                `[Gateway] Stored ${data.behaviorLogs.length} behavior logs for ${data.peerId}`,
-            );
         } catch (error) {
-            console.error('[Gateway] Error handling behavior logs:', error);
+            logger.error(
+                'gateway.gateway.ts',
+                'Error handling behavior logs',
+                error,
+            );
             client.emit('sfu:behavior-logs-error', {
                 message: error.message || 'Failed to store behavior logs',
             });
@@ -2375,10 +2598,6 @@ export class GatewayGateway
         },
     ) {
         try {
-            console.log(
-                `[Gateway] Toggling behavior monitor for room ${data.roomId}: ${data.isActive}`,
-            );
-
             // Validate room creator permission
             const participant = await this.roomClient.getParticipantByPeerId(
                 data.roomId,
@@ -2402,12 +2621,12 @@ export class GatewayGateway
                 data.roomId,
                 data.isActive,
             );
-
-            console.log(
-                `[Gateway] Behavior monitoring ${data.isActive ? 'started' : 'stopped'} for room ${data.roomId}`,
-            );
         } catch (error) {
-            console.error('[Gateway] Error toggling behavior monitor:', error);
+            logger.error(
+                'gateway.gateway.ts',
+                'Error toggling behavior monitor',
+                error,
+            );
             client.emit('sfu:behavior-monitor-error', {
                 message: error.message || 'Failed to toggle behavior monitor',
             });
@@ -2425,10 +2644,6 @@ export class GatewayGateway
         },
     ) {
         try {
-            console.log(
-                `[Gateway] Requesting logs from ${data.targetPeerId} for room ${data.roomId}`,
-            );
-
             // Validate room creator permission
             const participant = await this.roomClient.getParticipantByPeerId(
                 data.roomId,
@@ -2446,10 +2661,12 @@ export class GatewayGateway
                 peerId: data.targetPeerId,
                 requestedBy: data.peerId,
             });
-
-            console.log(`[Gateway] Log request sent to ${data.targetPeerId}`);
         } catch (error) {
-            console.error('[Gateway] Error requesting user log:', error);
+            logger.error(
+                'gateway.gateway.ts',
+                'Error requesting user log',
+                error,
+            );
             client.emit('sfu:request-user-log-error', {
                 message: error.message || 'Failed to request user log',
             });
@@ -2467,8 +2684,6 @@ export class GatewayGateway
         callback?: (response: any) => void,
     ) {
         try {
-            console.log(`[Gateway] Downloading room logs for ${data.roomId}`);
-
             // Validate room creator permission
             const participant = await this.roomClient.getParticipantByPeerId(
                 data.roomId,
@@ -2501,10 +2716,12 @@ export class GatewayGateway
             } else {
                 client.emit('sfu:download-room-log-success', response);
             }
-
-            console.log(`[Gateway] Room logs generated for ${data.roomId}`);
         } catch (error) {
-            console.error('[Gateway] Error downloading room log:', error);
+            logger.error(
+                'gateway.gateway.ts',
+                'Error downloading room log',
+                error,
+            );
             const errorResponse = {
                 success: false,
                 error: error.message || 'Failed to download room log',
@@ -2523,7 +2740,11 @@ export class GatewayGateway
             }
             return metadata;
         } catch (error) {
-            console.error('Failed to parse stream metadata:', error);
+            logger.error(
+                'gateway.gateway.ts',
+                'Failed to parse stream metadata',
+                error,
+            );
             return { video: true, audio: true, type: 'webcam' };
         }
     }
@@ -2548,15 +2769,9 @@ export class GatewayGateway
                 });
                 return;
             }
-
-            console.log('=== Kick User WebSocket ===');
-            console.log('Room ID:', data.roomId);
-            console.log('Participant ID to kick:', data.participantId);
-            console.log('Requester:', requesterPeerId);
-
             // Check if requester is the creator (has permission to kick)
             const roomResponse = await this.roomClient.getRoom(data.roomId);
-            const roomData = roomResponse?.data;
+            // const roomData = roomResponse?.data;
 
             // Find requester participant to check if they are creator
             const participants = await this.roomClient.getParticipants(
@@ -2602,26 +2817,12 @@ export class GatewayGateway
                 },
             );
 
-            // If this was the creator and there's a new creator, send the creator-changed event
-            if (leaveRoomResponse?.data?.newCreator) {
-                this.eventService.broadcastToRoom(
-                    client,
-                    data.roomId,
-                    'sfu:creator-changed',
-                    {
-                        peerId: leaveRoomResponse.data.newCreator,
-                        isCreator: true,
-                    },
-                );
-            }
-
-            console.log('User kicked successfully:', data.participantId);
             client.emit('sfu:kick-user-response', {
                 success: true,
                 message: 'User kicked successfully',
             });
         } catch (error) {
-            console.error('Error kicking user:', error);
+            logger.error('gateway.gateway.ts', 'Error kicking user', error);
             client.emit('sfu:kick-user-response', {
                 success: false,
                 message: error.message || 'Failed to kick user',
@@ -2638,108 +2839,26 @@ export class GatewayGateway
         data: {
             id: string;
             roomId: string;
+            roomKey?: string; // Room key for semantic context isolation
             text: string;
             organizationId?: string;
         },
     ) {
-        try {
-            console.log(`[Chatbot] Request from ${client.id}:`, {
-                requestId: data.id,
-                roomId: data.roomId,
-                question: data.text?.substring(0, 100) + '...',
-            });
+        return this.chatbotHandler.handleAskChatBot(client, data);
+    }
 
-            // Security: Validate user is in the room
-            const socketRooms = Array.from(client.rooms);
-            if (!socketRooms.includes(data.roomId)) {
-                console.warn(
-                    `[Chatbot] Access denied - client ${client.id} not in room ${data.roomId}`,
-                );
-                client.emit('chatbot:error', {
-                    requestId: data.id,
-                    message: 'Access denied: You are not in this room',
-                });
-                return;
-            }
-
-            // Validate input
-            if (!data.text || data.text.trim().length === 0) {
-                client.emit('chatbot:error', {
-                    requestId: data.id,
-                    message: 'Question cannot be empty',
-                });
-                return;
-            }
-
-            if (data.text.length > 2000) {
-                client.emit('chatbot:error', {
-                    requestId: data.id,
-                    message: 'Question too long (max 2000 characters)',
-                });
-                return;
-            }
-
-            // Get peerId from socket data (set during join)
-            const peerId = this.helperService.getParticipantBySocketId(
-                client.id,
-            );
-            if (!peerId) {
-                client.emit('chatbot:error', {
-                    requestId: data.id,
-                    message: 'User not authenticated',
-                });
-                return;
-            }
-
-            // Rate limiting check (optional - can implement later)
-            // const canProceed = await this.rateLimitCheck(peerId);
-            // if (!canProceed) { ... }
-
-            // Call chatbot service
-            console.log(
-                `[Chatbot] Processing request for user ${peerId} in room ${data.roomId}`,
-            );
-
-            const response = await this.chatbotClient.askChatBot({
-                question: data.text.trim(),
-                room_id: data.roomId,
-                organization_id: data.organizationId,
-            });
-
-            // Send final response (for now, no streaming)
-            client.emit('chatbot:final', {
-                requestId: data.id,
-                text:
-                    response.answer ||
-                    'I apologize, but I could not generate a response.',
-            });
-
-            console.log(`[Chatbot] Response sent for request ${data.id}`);
-        } catch (error) {
-            console.error(
-                `[Chatbot] Error processing request ${data.id}:`,
-                error,
-            );
-
-            let errorMessage =
-                'Sorry, I encountered an error while processing your request.';
-
-            // Handle specific error types
-            if (error.message?.includes('timeout')) {
-                errorMessage = 'Request timed out. Please try again.';
-            } else if (error.message?.includes('rate limit')) {
-                errorMessage =
-                    'Too many requests. Please wait a moment before asking again.';
-            } else if (error.message?.includes('service unavailable')) {
-                errorMessage =
-                    'AI service is temporarily unavailable. Please try again later.';
-            }
-
-            client.emit('chatbot:error', {
-                requestId: data.id,
-                message: errorMessage,
-            });
-        }
+    // ==================== INTERACTION HANDLERS ====================
+    @SubscribeMessage('interaction:toggle-raise-hand')
+    async handleToggleRaiseHand(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            userId: string;
+            isRaised: boolean;
+        },
+    ) {
+        return this.raiseHandHandler.handleToggleRaiseHand(client, data);
     }
 
     // Whiteboard Events
@@ -2807,7 +2926,11 @@ export class GatewayGateway
             }
             return rtpParameters;
         } catch (error) {
-            console.error('Failed to parse stream RTP parameters:', error);
+            logger.error(
+                'gateway.gateway.ts',
+                'Failed to parse stream RTP parameters',
+                error,
+            );
             return {};
         }
     }

@@ -1,19 +1,37 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import { ClientGrpc } from '@nestjs/microservices';
+import { firstValueFrom } from 'rxjs';
+import { generateRoomKey } from './common/generate';
 import {
-    Participant,
-    RoomPassword,
-    OrganizationRoom,
     CreateOrgRoomRequest,
+    OrganizationRoom,
+    Participant,
+    RoomMetadata,
+    RoomPassword,
     VerifyRoomAccessRequest,
     VerifyRoomAccessResponse,
 } from './interface';
+import { generateShortRoomId } from './utils/helper';
+import { logger } from './utils/log-manager';
+
+interface ChatService {
+    removeRoomMessages(data: { room_id: string }): any;
+}
 
 @Injectable()
-export class RoomService {
+export class RoomService implements OnModuleInit {
     private rooms = new Map<string, Map<string, Participant>>();
     private roomPasswords = new Map<string, RoomPassword>();
     private orgRooms = new Map<string, OrganizationRoom>(); // NEW: Organization rooms
-    private orgAccess = new Map<string, any[]>(); // NEW: Organization access cache
+    private roomMetadata = new Map<string, RoomMetadata>(); // NEW: Store room_key mapping
+    private chatService: ChatService;
+
+    constructor(@Inject('CHAT_SERVICE') private chatClient: ClientGrpc) {}
+
+    onModuleInit() {
+        this.chatService =
+            this.chatClient.getService<ChatService>('ChatService');
+    }
 
     /**
      * Checks if a room exists by its ID.
@@ -66,14 +84,36 @@ export class RoomService {
     }
 
     /**
-     * Creates a new room with the specified ID and user ID.
-     * @param userId - The ID of the user creating the room.
-     * @param password - Optional password for the room.
-     * @returns An object indicating the success of the operation and whether the user is the creator.
+     * Creates a new room with server-generated unique ID.
+     * @returns An object containing the generated room_id and room_key.
      */
-    async createRoom(roomId: string) {
+    async createRoom(): Promise<{ roomId: string; roomKey: string }> {
+        // Generate unique room ID
+        let roomId: string;
+        let attempts = 0;
+        const maxAttempts = 10;
+
+        do {
+            roomId = generateShortRoomId();
+
+            attempts++;
+            if (attempts >= maxAttempts) {
+                throw new Error('Failed to generate unique room ID');
+            }
+        } while (this.rooms.has(roomId)); // Check for collision
+
+        // Create room
         this.rooms.set(roomId, new Map());
-        return roomId;
+
+        // Generate and store room_key
+        const roomKey = generateRoomKey();
+        this.roomMetadata.set(roomId, {
+            room_id: roomId,
+            room_key: roomKey,
+            created_at: new Date(),
+        });
+
+        return { roomId, roomKey };
     }
 
     /**
@@ -85,16 +125,37 @@ export class RoomService {
         success: boolean;
         message: string;
         room_id: string;
+        room_key: string;
     }> {
         try {
-            // Generate unique room ID with nanoid (will use crypto.randomUUID() for now)
-            const randomId =
-                Math.random().toString(36).substring(2, 15) +
-                Math.random().toString(36).substring(2, 15);
-            const roomId = `org_${randomId}`;
+            // Generate unique room ID with crypto.randomUUID
+            let roomId: string;
+            let attempts = 0;
+            const maxAttempts = 10;
+
+            do {
+                const randomId = crypto
+                    .randomUUID()
+                    .replace(/-/g, '')
+                    .substring(0, 10);
+                roomId = `org_${randomId}`;
+
+                attempts++;
+                if (attempts >= maxAttempts) {
+                    throw new Error('Failed to generate unique org room ID');
+                }
+            } while (this.rooms.has(roomId) || this.orgRooms.has(roomId));
 
             // Create regular room structure
             this.rooms.set(roomId, new Map());
+
+            // Generate and store room_key
+            const roomKey = generateRoomKey();
+            this.roomMetadata.set(roomId, {
+                room_id: roomId,
+                room_key: roomKey,
+                created_at: new Date(),
+            });
 
             // Create organization room metadata
             const orgRoom: OrganizationRoom = {
@@ -123,9 +184,10 @@ export class RoomService {
                 success: true,
                 message: 'Organization room created successfully',
                 room_id: roomId,
+                room_key: roomKey,
             };
         } catch (error) {
-            console.error('Error creating org room:', error);
+            logger.error('room.service.ts', 'Error creating org room', error);
             throw error;
         }
     }
@@ -190,7 +252,11 @@ export class RoomService {
 
             return { can_join: false, reason: 'UNKNOWN_ROOM_TYPE' };
         } catch (error) {
-            console.error('Error verifying room access:', error);
+            logger.error(
+                'room.service.ts',
+                'Error verifying room access',
+                error,
+            );
             return { can_join: false, reason: 'VERIFICATION_FAILED' };
         }
     }
@@ -238,9 +304,10 @@ export class RoomService {
             this.orgRooms.delete(roomId);
             this.rooms.delete(roomId);
             this.roomPasswords.delete(roomId);
+            this.roomMetadata.delete(roomId); // Clean up room_key
             return true;
         } catch (error) {
-            console.error('Error removing org room:', error);
+            logger.error('room.service.ts', 'Error removing org room', error);
             return false;
         }
     }
@@ -251,7 +318,8 @@ export class RoomService {
      * @param peerId - The ID of the participant.
      * @param participant - The participant object to set.
      * @returns An object indicating the success of the operation.
-     */ async getRoom(roomId: string) {
+     */
+    async getRoom(roomId: string) {
         const room = this.rooms.get(roomId);
         if (!room) {
             return null;
@@ -305,9 +373,9 @@ export class RoomService {
                     );
                 }
             } catch (error) {
-                console.warn(
-                    'Failed to parse RTP capabilities, setting to undefined:',
-                    error,
+                logger.warn(
+                    'room.service.ts',
+                    `Failed to parse RTP capabilities, setting to undefined: ${error.message}`,
                 );
                 participant.rtp_capabilities = undefined;
             }
@@ -514,6 +582,24 @@ export class RoomService {
             if (this.roomPasswords.has(roomId)) {
                 this.roomPasswords.delete(roomId);
             }
+
+            // Clean up room_key metadata
+            if (this.roomMetadata.has(roomId)) {
+                this.roomMetadata.delete(roomId);
+            }
+
+            // Delete chat messages for this room
+            try {
+                await firstValueFrom(
+                    this.chatService.removeRoomMessages({ room_id: roomId }),
+                );
+            } catch (error) {
+                logger.error(
+                    'room.service.ts',
+                    `Error deleting chat messages for room ${roomId}`,
+                    error,
+                );
+            }
         }
         return {
             success: true,
@@ -555,8 +641,9 @@ export class RoomService {
                 error: 'Participant not found in any room',
             };
         } catch (error) {
-            console.error(
-                'Error updating participant RTP capabilities:',
+            logger.error(
+                'room.service.ts',
+                'Error updating participant RTP capabilities',
                 error,
             );
             return {
@@ -636,6 +723,7 @@ export class RoomService {
             // Clean up all room data
             this.rooms.delete(roomId);
             this.cleanupRoomPassword(roomId);
+            this.roomMetadata.delete(roomId); // Clean up room_key
 
             // Clean up organization room metadata if it exists
             if (this.orgRooms.has(roomId)) {
@@ -643,8 +731,22 @@ export class RoomService {
             }
             return true;
         } catch (error) {
-            console.error(`Failed to remove room ${roomId}:`, error);
+            logger.error(
+                'room.service.ts',
+                `Failed to remove room ${roomId}`,
+                error,
+            );
             return false;
         }
+    }
+
+    /**
+     * Get room_key for a given room_id
+     * @param roomId - Room ID
+     * @returns room_key or null if not found
+     */
+    getRoomKey(roomId: string): string | null {
+        const metadata = this.roomMetadata.get(roomId);
+        return metadata ? metadata.room_key : null;
     }
 }

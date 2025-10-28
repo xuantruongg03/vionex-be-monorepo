@@ -77,7 +77,7 @@ check_pm2() {
         return 0
     else
         print_warning "PM2 is not installed. Installing PM2..."
-        npm install -g pm2
+        sudo npm install -g pm2
         print_success "PM2 installed successfully"
         return 0
     fi
@@ -237,7 +237,7 @@ setup_qdrant() {
     print_header "Setting up Qdrant Vector Database"
     
     # Check if Qdrant container is already running
-    if docker ps --format "table {{.Names}}" | grep -q "qdrant"; then
+    if sudo docker ps --format "table {{.Names}}" | grep -q "qdrant"; then
         print_success "Qdrant container is already running"
         
         # Test Qdrant connection
@@ -250,9 +250,9 @@ setup_qdrant() {
     fi
     
     # Check if Qdrant container exists but stopped
-    if docker ps -a --format "table {{.Names}}" | grep -q "qdrant"; then
+    if sudo docker ps -a --format "table {{.Names}}" | grep -q "qdrant"; then
         print_info "Found existing Qdrant container. Starting it..."
-        docker start qdrant
+        sudo docker start qdrant
         sleep 5
         
         # Test connection after starting
@@ -266,7 +266,7 @@ setup_qdrant() {
     
     # Create and start new Qdrant container
     print_info "No existing Qdrant container found. Creating new one..."
-    docker run -d \
+    sudo docker run -d \
         --name qdrant \
         -p 6333:6333 \
         -p 6334:6334 \
@@ -379,7 +379,8 @@ EOF
         
         cat > vionex-room-service/.env << EOF
 ROOM_GRPC_PORT=30001
-
+CHAT_SERVICE_HOST=localhost
+CHAT_SERVICE_GRPC_PORT=30002
 # Other configurations
 NODE_ENV=$MODE
 EOF
@@ -402,8 +403,8 @@ MEDIASOUP_ANNOUNCED_IP=103.179.189.253
 MEDIASOUP_PORT=55555
 MEDIASOUP_RTC_MIN_PORT=10000
 MEDIASOUP_RTC_MAX_PORT=25999
-STUN_SERVER_URL=stun:103.179.173.128:3478
-TURN_SERVER_URL=turn:103.179.173.128:3478
+STUN_SERVER_URL=stun:20.70.128.1:3478
+TURN_SERVER_URL=turn:20.70.128.1:3478
 TURN_SERVER_USERNAME=guest
 TURN_SERVER_PASSWORD=videomeet
 AUDIO_SERVICE_HOST=103.78.3.29
@@ -446,6 +447,8 @@ EOF
         cat > vionex-chat-service/.env << EOF
 CHAT_GRPC_PORT=30002
 CHAT_GRPC_HOST=localhost
+SEMANTIC_PORT=30006
+SEMANTIC_HOST=localhost
 NODE_ENV=$MODE
 EOF
         print_success "Created/Updated environment file for vionex-chat-service"
@@ -500,7 +503,7 @@ install_dependencies() {
     if [ -d "vionex-semantic-service" ]; then
         print_info "Installing Python dependencies for vionex-semantic-service..."
         cd "vionex-semantic-service"
-        apt install python3.12-venv
+        sudo apt install -y python3.12-venv
         
         # Check if virtual environment exists
         if [ ! -d "venv" ]; then
@@ -508,7 +511,7 @@ install_dependencies() {
         fi
         
         source venv/bin/activate
-        
+        sudo apt-get install -y python3-dev python3-pip build-essential g++
         pip install -r requirements.txt
         deactivate
         cd ..

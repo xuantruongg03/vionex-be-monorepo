@@ -19,6 +19,7 @@ export class ChatBotClientService implements OnModuleInit {
     async askChatBot(data: {
         question: string;
         room_id: string;
+        room_key?: string; // NEW: Room key for semantic context isolation
         organization_id?: string;
     }) {
         try {
