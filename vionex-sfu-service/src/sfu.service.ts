@@ -970,6 +970,24 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             mediaRoom.producers.set(streamId, producer);
 
             // Create and store the stream object with enhanced metadata
+            // FIXED: Validate metadata against actual producer state
+            // If metadata indicates media is off (audio/video: false) or isDummy: true,
+            // the producer should be paused immediately
+            const isDummyTrack = data.metadata?.isDummy === true;
+            const isMediaOff = data.kind === 'video' 
+                ? data.metadata?.video === false 
+                : data.metadata?.audio === false;
+
+            // Auto-pause producer if it's a dummy track or media is off
+            if (isDummyTrack || isMediaOff) {
+                await producer.pause();
+                logger.info(
+                    'sfu.service.ts',
+                    `[SFU] Auto-paused ${data.kind} producer for ${originalPeerId} - isDummy: ${isDummyTrack}, isMediaOff: ${isMediaOff}`,
+                );
+            }
+
+            // Enhanced metadata with actual state validation
             const enhancedMetadata = {
                 ...data.metadata,
                 isScreenShare: isScreenShare,
@@ -977,6 +995,15 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     ? streamType
                     : data.metadata?.type || 'webcam',
                 streamType: streamType,
+                // FIX: Ensure metadata reflects actual media state
+                // If producer is paused, media should be false
+                video: data.kind === 'video' 
+                    ? (producer.paused ? false : (data.metadata?.video ?? true))
+                    : (data.metadata?.video ?? false),
+                audio: data.kind === 'audio' 
+                    ? (producer.paused ? false : (data.metadata?.audio ?? true))
+                    : (data.metadata?.audio ?? false),
+                paused: producer.paused, // Track producer paused state
             };
 
             const stream = this.createStream(
@@ -1019,6 +1046,48 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         const stream = this.streams.get(streamId);
         if (!stream) {
             throw new Error(`Stream ${streamId} not found`);
+        }
+
+        // Get the media room and producer to sync state
+        const mediaRoom = this.mediaRooms.get(roomId);
+        const producer = mediaRoom?.producers.get(streamId);
+
+        // FIXED: Validate and sync metadata with producer state
+        if (producer) {
+            // If metadata indicates media is toggled off, pause the producer
+            const isVideoStream = producer.kind === 'video';
+            const isAudioStream = producer.kind === 'audio';
+            
+            if (isVideoStream && metadata.video === false && !producer.paused) {
+                await producer.pause();
+                logger.info(
+                    'sfu.service.ts',
+                    `[SFU] Paused video producer ${streamId} due to metadata update`,
+                );
+            } else if (isVideoStream && metadata.video === true && producer.paused) {
+                await producer.resume();
+                logger.info(
+                    'sfu.service.ts',
+                    `[SFU] Resumed video producer ${streamId} due to metadata update`,
+                );
+            }
+
+            if (isAudioStream && metadata.audio === false && !producer.paused) {
+                await producer.pause();
+                logger.info(
+                    'sfu.service.ts',
+                    `[SFU] Paused audio producer ${streamId} due to metadata update`,
+                );
+            } else if (isAudioStream && metadata.audio === true && producer.paused) {
+                await producer.resume();
+                logger.info(
+                    'sfu.service.ts',
+                    `[SFU] Resumed audio producer ${streamId} due to metadata update`,
+                );
+            }
+
+            // Update metadata with actual producer state
+            metadata.paused = producer.paused;
         }
 
         // Update stream metadata
