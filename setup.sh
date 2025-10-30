@@ -53,10 +53,41 @@ echo "========================================"
 ################################################################################
 log_info "Step 1: Preparing system..."
 
-# Disable unattended upgrades to prevent conflicts
-log_info "Disabling unattended-upgrades..."
+# Kill and disable unattended upgrades to prevent conflicts
+log_info "Stopping all unattended-upgrades processes..."
 systemctl stop unattended-upgrades 2>/dev/null || true
 systemctl disable unattended-upgrades 2>/dev/null || true
+systemctl mask unattended-upgrades 2>/dev/null || true
+
+# Kill any running unattended-upgrades processes
+pkill -9 unattended-upgr 2>/dev/null || true
+pkill -9 apt.systemd.dai 2>/dev/null || true
+pkill -9 apt-get 2>/dev/null || true
+
+# Wait for dpkg lock to be released
+log_info "Waiting for dpkg lock to be released..."
+max_wait=60
+wait_count=0
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+    if [ $wait_count -ge $max_wait ]; then
+        log_error "Timeout waiting for dpkg lock. Please run: sudo kill -9 \$(lsof -t /var/lib/dpkg/lock-frontend)"
+        exit 1
+    fi
+    echo -n "."
+    sleep 2
+    wait_count=$((wait_count + 2))
+done
+echo ""
+
+# Remove stale locks if they exist
+log_info "Removing stale locks..."
+rm -f /var/lib/dpkg/lock-frontend 2>/dev/null || true
+rm -f /var/lib/dpkg/lock 2>/dev/null || true
+rm -f /var/cache/apt/archives/lock 2>/dev/null || true
+
+# Reconfigure dpkg
+log_info "Reconfiguring dpkg..."
+dpkg --configure -a
 
 # Update system
 log_info "Updating package lists..."
@@ -64,7 +95,7 @@ apt-get update
 
 # Install basic dependencies
 log_info "Installing basic dependencies..."
-apt-get install -y \
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
     wget \
     curl \
     git \
@@ -91,7 +122,7 @@ else
     
     log_info "Installing CUDA runtime and compatibility..."
     apt-get update
-    apt-get install -y cuda-cudart-12-8 cuda-compat-12-8
+    DEBIAN_FRONTEND=noninteractive apt-get install -y cuda-cudart-12-8 cuda-compat-12-8
     
     log_success "CUDA 12.8 installed"
 fi
@@ -105,7 +136,7 @@ if dpkg -l | grep -q libcudnn9-cuda-12; then
     log_warning "cuDNN 9 already installed, skipping..."
 else
     log_info "Installing cuDNN 9 for CUDA 12..."
-    apt-get install -y libcudnn9-cuda-12 libcudnn9-dev-cuda-12
+    DEBIAN_FRONTEND=noninteractive apt-get install -y libcudnn9-cuda-12 libcudnn9-dev-cuda-12
     log_success "cuDNN 9 installed"
 fi
 
@@ -139,7 +170,7 @@ export PATH=$CUDA_HOME/bin:$PATH
 ################################################################################
 log_info "Step 5: Installing Python 3 and pip..."
 
-apt-get install -y python3 python3-pip python3-venv python3-dev
+DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-pip python3-venv python3-dev
 
 log_success "Python 3 installed"
 
@@ -150,15 +181,15 @@ log_info "Step 6: Installing audio processing dependencies..."
 
 # Install Opus codec library
 log_info "Installing Opus codec..."
-apt-get install -y libopus0 libopus-dev
+DEBIAN_FRONTEND=noninteractive apt-get install -y libopus0 libopus-dev
 
 # Install FFmpeg
 log_info "Installing FFmpeg..."
-apt-get install -y ffmpeg
+DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg
 
 # Install PortAudio (for audio I/O)
 log_info "Installing PortAudio..."
-apt-get install -y portaudio19-dev
+DEBIAN_FRONTEND=noninteractive apt-get install -y portaudio19-dev
 
 log_success "Audio dependencies installed"
 
@@ -251,7 +282,7 @@ log_info "Step 9: Installing Node.js and PM2..."
 if ! command -v node &> /dev/null; then
     log_info "Installing Node.js 20.x..."
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-    apt-get install -y nodejs
+    DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
     log_success "Node.js installed: $(node --version)"
 else
     log_warning "Node.js already installed: $(node --version)"
