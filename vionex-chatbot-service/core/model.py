@@ -108,14 +108,25 @@ class SimpleModel:
             with torch.no_grad():
                 outputs = self.model.generate(
                     inputs, 
-                    max_length=512, 
+                    max_new_tokens=100,  # Limit to 100 new tokens (~2-3 sentences)
                     temperature=0.7,
                     do_sample=True,
-                    pad_token_id=self.tokenizer.eos_token_id
+                    top_p=0.9,  # Nucleus sampling for better quality
+                    repetition_penalty=1.2,  # Prevent repetition
+                    pad_token_id=self.tokenizer.eos_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id
                 )
             
             response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            return response.replace(prompt, "").strip()
+            # Extract only the answer part (remove prompt)
+            answer = response.replace(prompt, "").strip()
+            
+            # Additional safety: truncate at first newline after answer starts
+            # to prevent generating fake transcripts
+            if "\n\n" in answer:
+                answer = answer.split("\n\n")[0].strip()
+            
+            return answer
             
         except Exception as e:
             logger.error(f"Error generating: {e}")

@@ -27,7 +27,7 @@ export const SMALL_ROOM_MAX_USERS = 11;
  * - Special users (screen share, translation): unlimited (always get priority)
  * - Regular users: limited to this number (FIFO based on join order)
  */
-export const MAX_PRIORITY_USERS = 3;
+export const MAX_PRIORITY_USERS = 11;
 
 /**
  * @deprecated Use MAX_PRIORITY_USERS instead
