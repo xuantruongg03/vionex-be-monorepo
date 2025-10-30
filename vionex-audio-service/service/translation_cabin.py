@@ -498,7 +498,13 @@ class TranslationCabinManager:
                 # Initialize audio recorder for debugging
                 cabin.audio_recorder = AudioRecorder(cabin_id)
                 
+                # ============================================================================
                 # Step 4: Setup SSRC and register with SharedSocketManager
+                # ============================================================================
+                # IMPORTANT: All cabins share single socket (port from config.SHARED_SOCKET_PORT)
+                #            Routing is based on SSRC extracted from RTP header
+                #            NO need for individual port per cabin
+                
                 # Generate unique SSRC from cabin ID for RTP identification
                 cabin_ssrc = hash(cabin_id) & 0xFFFFFFFF
                 cabin.ssrc = cabin_ssrc
@@ -508,7 +514,12 @@ class TranslationCabinManager:
                     """Route RTP packets from shared socket to cabin processor"""
                     self._process_rtp_packet(cabin, rtp_data)
                 
+                # ============================================================================
                 # Register cabin with SharedSocketManager for SSRC-based routing
+                # ============================================================================
+                # NOTE: receive_port and send_port returned here are VIRTUAL only
+                #       They are allocated for tracking/logging purposes but NOT used for RTP
+                #       Actual RTP communication uses SHARED_SOCKET_PORT with SSRC routing
                 ports = self.socket_manager.register_cabin_for_routing(
                     cabin_id, cabin_ssrc, audio_callback
                 )
@@ -516,11 +527,17 @@ class TranslationCabinManager:
                     logger.error(f"[CABIN-MANAGER] Failed to register cabin {cabin_id} for routing")
                     return None
                 
-                # Step 5: Configure port allocation and SFU integration
+                # ============================================================================
+                # Step 5: Configure VIRTUAL port allocation (for compatibility only)
+                # ============================================================================
+                # DEPRECATED: These ports are allocated but NOT used for actual RTP
+                #             - receive_port: Virtual (tracking only)
+                #             - send_port: Virtual (tracking only)
+                #             - Actual RTP uses: SharedSocketManager.rx_sock (SHARED_SOCKET_PORT)
                 receive_port, send_port = ports
-                cabin.receive_port = receive_port
-                cabin.send_port = send_port
-                cabin.sfu_send_port = sfu_send_port  # Real SFU destination port
+                cabin.receive_port = receive_port      # VIRTUAL - not used for RTP
+                cabin.send_port = send_port            # VIRTUAL - not used for RTP
+                cabin.sfu_send_port = sfu_send_port    # Real SFU destination port (for TX)
                 
                 # Step 6: Start cabin processing
                 cabin.running = True

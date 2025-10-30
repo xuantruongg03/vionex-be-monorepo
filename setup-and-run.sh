@@ -411,6 +411,7 @@ AUDIO_SERVICE_HOST=103.78.3.29
 AUDIO_SERVICE_PORT=30005
 AUDIO_SERVICE_RX_PORT=35000
 USE_ICE_SERVERS=true
+AUDIO_LIVE_PORT=35000
 NODE_ENV=$MODE
 EOF
         print_success "Created/Updated environment file for vionex-sfu-service"

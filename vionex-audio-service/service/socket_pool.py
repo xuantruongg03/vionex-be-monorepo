@@ -68,17 +68,22 @@ class SharedSocketManager:
         self.running = False
         self._rx_thread: Optional[threading.Thread] = None
         
-    def initialize_shared_sockets(self, audio_rx_port=35000, tx_source_port=0):
+    def initialize_shared_sockets(self, audio_rx_port=None, tx_source_port=0):
         """
         Initialize shared RX/TX sockets for RTP packet routing
         
         Args:
-            audio_rx_port: Port to receive RTP packets from SFU (default: 35000)
+            audio_rx_port: Port to receive RTP packets from SFU (default: from config.SHARED_SOCKET_PORT)
             tx_source_port: TX socket source port (0 = ephemeral)
             
         Returns:
             bool: True if initialization successful
         """
+        # Use config value if not specified
+        if audio_rx_port is None:
+            from core.config import SHARED_SOCKET_PORT
+            audio_rx_port = SHARED_SOCKET_PORT
+        
         try:
             # RX socket: Receive all RTP Packets from SFU on a single port
             self.rx_sock = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_DGRAM)
@@ -113,14 +118,23 @@ class SharedSocketManager:
             callback: Function called when packets received for this cabin
             
         Returns:
-            tuple: (rx_port, tx_port) for compatibility, None if failed
+            tuple: (rx_port, tx_port) - VIRTUAL ports for compatibility only, None if failed
+            
+        IMPORTANT: Returned ports are VIRTUAL (tracking only), NOT used for actual RTP
+                   All RTP communication uses SHARED_SOCKET_PORT with SSRC-based routing
         """
+        # ============================================================================
+        # DEPRECATED: Port allocation for backward compatibility
+        # ============================================================================
+        # These ports are allocated for tracking/logging but NOT used for RTP
+        # Actual RTP uses: self.rx_sock (SHARED_SOCKET_PORT) with SSRC routing
         from .port_manager import port_manager
         
         with self._lock:
             if cabin_id in self.cabin_to_ssrc:
                 return self.cabin_to_ports.get(cabin_id)
 
+            # Allocate VIRTUAL ports (not used for actual RTP)
             allocated_rx_port = port_manager.allocate_port()
             allocated_tx_port = port_manager.allocate_port()
 
@@ -129,16 +143,26 @@ class SharedSocketManager:
                 for port in [allocated_rx_port, allocated_tx_port]:
                     if port != 0:
                         port_manager.release_port(port)
-                logger.error(f"[SHARED-SOCKET] Failed to allocate ports for cabin {cabin_id}")
+                logger.error(f"[SHARED-SOCKET] Failed to allocate VIRTUAL ports for cabin {cabin_id}")
                 return None
             
-            # Register SSRC-based routing
+            # ============================================================================
+            # CORE ROUTING: Register SSRC-based routing (THIS IS WHAT MATTERS)
+            # ============================================================================
             self.ssrc_to_cabin[ssrc] = cabin_id
             self.cabin_to_ssrc[cabin_id] = ssrc
             self.cabin_callbacks[cabin_id] = callback
+            
+            # Store VIRTUAL ports for compatibility (not used for RTP)
             self.cabin_to_ports[cabin_id] = (allocated_rx_port, allocated_tx_port)
             
-            logger.info(f"[SHARED-SOCKET] Registered cabin {cabin_id}: SSRC={ssrc}, allocated_ports=({allocated_rx_port}, {allocated_tx_port}), test_mode={self.test_mode}")
+            logger.info(
+                f"[SHARED-SOCKET] Registered cabin {cabin_id}: "
+                f"SSRC={ssrc} (routing key), "
+                f"virtual_ports=({allocated_rx_port}, {allocated_tx_port}) [NOT USED], "
+                f"actual_rx_port={self.rx_sock.getsockname()[1] if self.rx_sock else 'N/A'}, "
+                f"test_mode={self.test_mode}"
+            )
             return (allocated_rx_port, allocated_tx_port)
     
     def unregister_cabin(self, cabin_id: str) -> bool:
@@ -151,6 +175,10 @@ class SharedSocketManager:
         Returns:
             bool: True if successfully unregistered
         """
+        # ============================================================================
+        # DEPRECATED: Port cleanup for backward compatibility
+        # ============================================================================
+        # Release VIRTUAL ports (they were never used for RTP anyway)
         from .port_manager import port_manager
         
         with self._lock:
@@ -162,6 +190,7 @@ class SharedSocketManager:
             if ssrc is not None:
                 self.ssrc_to_cabin.pop(ssrc, None)
             
+            # Release VIRTUAL ports (not used for RTP)
             if ports:
                 allocated_rx_port, allocated_tx_port = ports
                 port_manager.release_port(allocated_rx_port)

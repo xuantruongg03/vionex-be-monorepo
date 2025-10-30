@@ -2082,10 +2082,11 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             });
 
             // Connect to Audio Service's SharedSocketManager fixed port (35000)
-            const audioServiceRxPort = 35000; // Fixed port where Audio Service receives RTP
             await sendTransport.connect({
                 ip: this.configService.get('AUDIO_SERVICE_HOST') || 'localhost',
-                port: audioServiceRxPort,
+                port: this.configService.get(
+                        'AUDIO_LIVE_PORT',
+                    ),
             });
 
             // Step 3: Create consumer on receive transport
