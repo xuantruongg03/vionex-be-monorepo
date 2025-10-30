@@ -27,6 +27,27 @@ class SemanticProcessor:
         else:
             logger.info("Vector model loaded successfully")
 
+    def _format_bilingual_text(self, speaker: str, original_text: str, english_text: str) -> str:
+        """
+        Format text with both original and English translation for chatbot context.
+        
+        Format: "Speaker: Original text | EN: English translation"
+        If no English translation available yet (background translation pending), only show original.
+        
+        Args:
+            speaker: Speaker name
+            original_text: Original text in source language
+            english_text: English translation (may be empty if not yet translated)
+            
+        Returns:
+            Formatted bilingual string
+        """
+        if english_text and english_text.strip() and english_text != original_text:
+            return f"{speaker}: {original_text} | EN: {english_text}"
+        else:
+            # No English translation yet or same as original (already English)
+            return f"{speaker}: {original_text}"
+
     def _translate_and_update_in_background(self, point_id: str, original_text: str):
         """
         A background function to translate text and update the vector point.
@@ -221,21 +242,29 @@ class SemanticProcessor:
             # Sort by score descending
             merged_results = sorted(results_dict.values(), key=lambda x: x.score, reverse=True)[:limit]
 
-            score_threshold = 0.60  # Lowered threshold for better recall (original was 0.8)
+            score_threshold = 0.40  # Lowered threshold for better recall (original was 0.8)
             filtered_results = [r for r in merged_results if r.score >= score_threshold]
+            
+            # If no results after filtering, use all merged results (fallback)
+            if not filtered_results and merged_results:
+                logger.warning(f"No results passed threshold {score_threshold}, returning all {len(merged_results)} merged results")
+                filtered_results = merged_results
             
             # Log search results for debugging
             logger.info(f"Original query results: {len(results_original)}, English query results: {len(results_english)}")
             logger.info(f"Merged: {len(merged_results)} total, {len(filtered_results)} after filtering (threshold: {score_threshold})")
             if merged_results:
                 logger.info(f"Top result score: {merged_results[0].score:.4f}")
-                if not filtered_results:
-                    logger.warning(f"All results filtered out. Top score was {merged_results[0].score:.4f}. Consider lowering threshold.")
 
-            # Process and return results with safe null handling
+            # Process and return results with BOTH original and English text (Option C)
+            # This provides maximum context for multilingual chatbot (OpenChat 3.5)
             return [
                 {
-                    "text": f"{hit.payload.get('speaker', 'Unknown')}: {hit.payload.get('original_text', '')}", # Safe formatting
+                    "text": self._format_bilingual_text(
+                        hit.payload.get('speaker', 'Unknown'),
+                        hit.payload.get('original_text', ''),
+                        hit.payload.get('english_text', '')
+                    ),
                     "room_id": hit.payload.get("room_id"),
                     "timestamp": hit.payload.get("timestamp"),
                     "score": hit.score

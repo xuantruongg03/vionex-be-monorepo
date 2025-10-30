@@ -108,6 +108,7 @@ class VionexSemanticService(semantic_pb2_grpc.SemanticServiceServicer):
                 )
             else:
                 # Process the search query using the semantic processor
+                # Default limit = 10 for bilingual context (OpenChat 3.5 8K context)
                 search_results = self.semantic_processor.search(
                     request.query, 
                     request.room_id, 

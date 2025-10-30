@@ -35,21 +35,20 @@ logger.info("[DETECT MODEL] FastText model loaded successfully")
 
 logger.info("[TRANSLATION] Loading MarianMT models (Helsinki-NLP)")
 
-from transformers import MarianMTModel, MarianTokenizer
-import torch
-
 # Load MarianMT models for each language pair
 translation_models = {}
 translation_tokenizers = {}
 
-# Vietnamese to English
-logger.info("[TRANSLATION] Loading vi-en model...")
-vi_en_model_name = "Helsinki-NLP/opus-mt-vi-en"
-translation_tokenizers["vi-en"] = MarianTokenizer.from_pretrained(vi_en_model_name)
-translation_models["vi-en"] = MarianMTModel.from_pretrained(vi_en_model_name)
+# Vietnamese to English - Using VinAI model (better quality than MarianMT)
+logger.info("[TRANSLATION] Loading vi-en model (VinAI)...")
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+
+vi_en_model_name = "vinai/vinai-translate-vi2en-v2"
+translation_tokenizers["vi-en"] = AutoTokenizer.from_pretrained(vi_en_model_name, src_lang="vi_VN")
+translation_models["vi-en"] = AutoModelForSeq2SeqLM.from_pretrained(vi_en_model_name)
 if TYPE_ENGINE == "cuda":
     translation_models["vi-en"] = translation_models["vi-en"].to("cuda")
-logger.info("[TRANSLATION] vi-en model loaded successfully")
+logger.info("[TRANSLATION] vi-en model (VinAI) loaded successfully")
 
 # Lao to English - URL will be provided later
 logger.info("[TRANSLATION] Loading lo-en model...")
@@ -66,25 +65,3 @@ translation_tokenizers["en-en"] = None
 logger.info("[TRANSLATION] en-en - no translation needed")
 
 logger.info(f"[TRANSLATION] MarianMT models loaded successfully: {list(translation_models.keys())}")
-
-# # Comment out NLLB model
-# logger.info("[TRANSLATION] Loading NLLB-Distilled (facebook/nllb-200-distilled-600M)")
-# from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-# import torch
-
-# # Suppress the torch_dtype warning
-# nllb_model = AutoModelForSeq2SeqLM.from_pretrained(
-#     "facebook/nllb-200-distilled-600M",
-#     dtype=torch.float16 if TYPE_ENGINE == "cuda" else torch.float32
-# )
-
-# nllb_tokenizer = AutoTokenizer.from_pretrained("facebook/nllb-200-distilled-600M")
-
-# if TYPE_ENGINE == "cuda":
-#     nllb_model = nllb_model.to("cuda")
-
-# # Create unified interface
-# translation_models = {"nllb": nllb_model}
-# translation_tokenizers = {"nllb": nllb_tokenizer}
-
-# logger.info("[TRANSLATION] NLLB-Distilled loaded successfully (supports 200+ languages)")
