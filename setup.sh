@@ -284,6 +284,12 @@ ENABLE_TEXT_CORRECTOR=false
 # base:  580MB, better quality (0.15s CPU)
 TEXT_CORRECTOR_MODEL_SIZE=small
 SHARED_SOCKET_PORT=35000
+
+# Coqui TTS License Agreement (set to 1 to auto-accept non-commercial license)
+COQUI_TOS_AGREED=1
+
+# Translation models (set to false to disable and avoid warnings)
+ENABLE_TRANSLATION=false
 ENVEOF
         log_success ".env file created for Audio Service"
         log_warning "Please update MEDIASOUP_ANNOUNCED_IP, SEMANTIC_SERVICE_HOST and SFU_SERVICE_HOST in vionex-audio-service/.env"
@@ -436,7 +442,8 @@ module.exports = {
         CUDA_HOME: '/usr/local/cuda-12.8',
         LD_LIBRARY_PATH: '/usr/local/cuda-12.8/lib64:/usr/lib/x86_64-linux-gnu',
         PATH: '/usr/local/cuda-12.8/bin:' + process.env.PATH,
-        PYTHONUNBUFFERED: '1'
+        PYTHONUNBUFFERED: '1',
+        COQUI_TOS_AGREED: '1'
       },
       error_file: './logs/audio-service-error.log',
       out_file: './logs/audio-service-out.log',
