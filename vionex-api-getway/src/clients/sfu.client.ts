@@ -356,7 +356,12 @@ export class SfuClientService implements OnModuleInit {
         audioPort: number,
         sendPort: number,
         ssrc: number,
-    ): Promise<{ success: boolean; message?: string; streamId?: string; sfuListenPort?: number }> {
+    ): Promise<{
+        success: boolean;
+        message?: string;
+        streamId?: string;
+        sfuListenPort?: number;
+    }> {
         try {
             const response = await firstValueFrom(
                 this.sfuService.allocatePort({

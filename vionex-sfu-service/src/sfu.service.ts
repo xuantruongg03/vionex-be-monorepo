@@ -54,8 +54,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     constructor(
         private configService: ConfigService,
         private readonly workerPool: WorkerPoolService,
-    ) {
-    }
+    ) {}
     async onModuleInit() {
         try {
             await this.initializeMediasoup();
@@ -974,9 +973,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             // If metadata indicates media is off (audio/video: false) or isDummy: true,
             // the producer should be paused immediately
             const isDummyTrack = data.metadata?.isDummy === true;
-            const isMediaOff = data.kind === 'video' 
-                ? data.metadata?.video === false 
-                : data.metadata?.audio === false;
+            const isMediaOff =
+                data.kind === 'video'
+                    ? data.metadata?.video === false
+                    : data.metadata?.audio === false;
 
             // Auto-pause producer if it's a dummy track or media is off
             if (isDummyTrack || isMediaOff) {
@@ -997,12 +997,18 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 streamType: streamType,
                 // FIX: Ensure metadata reflects actual media state
                 // If producer is paused, media should be false
-                video: data.kind === 'video' 
-                    ? (producer.paused ? false : (data.metadata?.video ?? true))
-                    : (data.metadata?.video ?? false),
-                audio: data.kind === 'audio' 
-                    ? (producer.paused ? false : (data.metadata?.audio ?? true))
-                    : (data.metadata?.audio ?? false),
+                video:
+                    data.kind === 'video'
+                        ? producer.paused
+                            ? false
+                            : (data.metadata?.video ?? true)
+                        : (data.metadata?.video ?? false),
+                audio:
+                    data.kind === 'audio'
+                        ? producer.paused
+                            ? false
+                            : (data.metadata?.audio ?? true)
+                        : (data.metadata?.audio ?? false),
                 paused: producer.paused, // Track producer paused state
             };
 
@@ -1057,14 +1063,18 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             // If metadata indicates media is toggled off, pause the producer
             const isVideoStream = producer.kind === 'video';
             const isAudioStream = producer.kind === 'audio';
-            
+
             if (isVideoStream && metadata.video === false && !producer.paused) {
                 await producer.pause();
                 logger.info(
                     'sfu.service.ts',
                     `[SFU] Paused video producer ${streamId} due to metadata update`,
                 );
-            } else if (isVideoStream && metadata.video === true && producer.paused) {
+            } else if (
+                isVideoStream &&
+                metadata.video === true &&
+                producer.paused
+            ) {
                 await producer.resume();
                 logger.info(
                     'sfu.service.ts',
@@ -1078,7 +1088,11 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     'sfu.service.ts',
                     `[SFU] Paused audio producer ${streamId} due to metadata update`,
                 );
-            } else if (isAudioStream && metadata.audio === true && producer.paused) {
+            } else if (
+                isAudioStream &&
+                metadata.audio === true &&
+                producer.paused
+            ) {
                 await producer.resume();
                 logger.info(
                     'sfu.service.ts',
@@ -1918,7 +1932,11 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 }
             }
         } catch (error) {
-            logger.error('sfu.service.ts', '[SFU] Error rebalancing stream priorities', error);
+            logger.error(
+                'sfu.service.ts',
+                '[SFU] Error rebalancing stream priorities',
+                error,
+            );
         }
     }
 
@@ -2208,7 +2226,8 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
             return {
                 success: true,
-                message: 'Bidirectional translation system created successfully',
+                message:
+                    'Bidirectional translation system created successfully',
                 streamId: translatedStreamId,
                 sfuListenPort, // Return port for Audio Service to send RTP to
             };
@@ -2548,7 +2567,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
      */
     clearPinsForRoom(roomId: string): void {
         this.pinnedUsers.delete(roomId);
-        logger.info('sfu.service.ts', `[SFU] Cleared all pins for room ${roomId}`);
+        logger.info(
+            'sfu.service.ts',
+            `[SFU] Cleared all pins for room ${roomId}`,
+        );
     }
 
     /**

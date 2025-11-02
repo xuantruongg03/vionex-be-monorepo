@@ -25,18 +25,19 @@ class ChatBotProcessor:
         even if the transcript is in another language.
         """
         return (
-            "You are a professional meeting assistant AI. Your role is to answer questions STRICTLY based on the provided meeting transcript below.\n\n"
+            "You are a professional meeting assistant AI. Your role is to answer questions based on the provided meeting transcript below.\n\n"
             "CRITICAL RULES:\n"
             "1. ONLY use information from the transcript below\n"
             "2. DO NOT make up or fabricate any information\n"
             "3. DO NOT add extra conversations or scenarios\n"
-            "4. If the transcript doesn't contain the answer, say: 'Not found data for this question.'\n"
-            "5. Keep your answer SHORT (maximum 2 sentences)\n"
-            "6. Answer in the SAME LANGUAGE as the question\n\n"
-            "7. Use language from the question to prioritize choosing data meeting transcript\n\n"
+            "4. If the transcript doesn't contain the answer, say: 'Tôi không tìm thấy thông tin về điều này trong cuộc họp.' (Vietnamese) or 'I couldn't find information about this in the meeting.' (English)\n"
+            "5. Provide a COMPLETE and DETAILED answer (3-5 sentences) that fully addresses the question\n"
+            "6. Answer in the SAME LANGUAGE as the question\n"
+            "7. Use natural, conversational language\n"
+            "8. Include relevant context and details from the transcript\n\n"
             f"===== MEETING TRANSCRIPT =====\n{data}\n===== END TRANSCRIPT =====\n\n"
             f"Question: {question}\n\n"
-            "Answer (SHORT, based ONLY on transcript above):"
+            "Answer (DETAILED and COMPLETE, based on transcript above):"
         )
 
     def generate_response(self, data: str, answer: str) -> str:
@@ -83,8 +84,9 @@ class ChatBotProcessor:
                            (f" for organization {organization_id}" if organization_id else "") +
                            (f" with room_key {room_key}" if room_key else "") +
                            (f" with transcript: {combined_transcript[:50]}..." if combined_transcript else ""))
-                # return generated_response
-                return self.generate_response(combined_transcript, generated_response)
+                
+                # Return the generated response directly (remove debug info)
+                return generated_response
             else:
                 logger.warning(f"No results found from semantic service for room {room_id} (room_key: {room_key})")
                 return "I'm sorry, I couldn't find an answer to your question."

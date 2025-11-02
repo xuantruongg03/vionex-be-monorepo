@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { WebSocketEventService } from '../services/websocket-event.service';
 import { AudioClientService } from '../clients/audio.client';
 import { SfuClientService } from '../clients/sfu.client';
+import { logger } from '../utils/log-manager';
 
 @Injectable()
 export class TranslationHandler {
@@ -11,8 +12,9 @@ export class TranslationHandler {
         private readonly sfuClient: SfuClientService,
         private readonly eventService: WebSocketEventService,
     ) {
-        console.log(
-            '[TranslationHandler] TranslationHandler initialized as service',
+        logger.log(
+            'TranslationHandler',
+            'TranslationHandler initialized as service',
         );
     }
 
@@ -68,7 +70,7 @@ export class TranslationHandler {
                         data.targetUserId,
                     );
             } catch (error) {
-                console.error(
+                logger.error(
                     '[TranslationHandler] Error calling Audio Service:',
                     error,
                 );
@@ -123,12 +125,14 @@ export class TranslationHandler {
                         data.targetUserId,
                         sfuPortResponse.sfuListenPort,
                     );
-                    console.log(
-                        `[TranslationHandler] Updated Audio Service with SFU port: ${sfuPortResponse.sfuListenPort}`,
+                    logger.log(
+                        'TranslationHandler',
+                        `Updated Audio Service with SFU port: ${sfuPortResponse.sfuListenPort}`,
                     );
                 } catch (error) {
-                    console.error(
-                        '[TranslationHandler] Error updating Audio Service port:',
+                    logger.error(
+                        'TranslationHandler',
+                        'Error updating Audio Service port:',
                         error,
                     );
                     // Non-critical error - continue
@@ -157,12 +161,6 @@ export class TranslationHandler {
                 };
             }
 
-            console.log('=== Create Translation Cabin Success ===');
-            console.log('Translation Cabin Response:', {
-                streamId: sfuPortResponse.streamId,
-                success: true,
-            });
-
             // Emit success event to client
             client.emit('translation:created', {
                 success: true,
@@ -184,8 +182,9 @@ export class TranslationHandler {
 
             return { success: true };
         } catch (error) {
-            console.error(
-                '[TranslationHandler] Error creating translation cabin:',
+            logger.error(
+                'TranslationHandler',
+                'Error creating translation cabin:',
                 error,
             );
             this.eventService.emitError(
@@ -296,8 +295,9 @@ export class TranslationHandler {
 
             return { success: true };
         } catch (error) {
-            console.error(
-                '[TranslationHandler] Error destroying translation cabin:',
+            logger.error(
+                'TranslationHandler',
+                'Error destroying translation cabin:',
                 error,
             );
             if (client) {
@@ -358,8 +358,9 @@ export class TranslationHandler {
 
             return { success: true };
         } catch (error) {
-            console.error(
-                '[TranslationHandler] Error listing translation cabins:',
+            logger.error(
+                'TranslationHandler',
+                'Error listing translation cabins:',
                 error,
             );
             this.eventService.emitError(

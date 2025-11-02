@@ -1485,6 +1485,7 @@ class TranslationCabinManager:
             "rtp_port": cabin.receive_port,
             "send_port": cabin.send_port,
             "sfu_send_port": cabin.sfu_send_port,
+            "ssrc": cabin.ssrc,  # FIX: Add missing SSRC field
             "source_language": cabin.source_language,
             "target_language": cabin.target_language,
             "status": cabin.status.value,
