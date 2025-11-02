@@ -6,6 +6,9 @@ service AudioService {
   // Translation Cabin methods for B1-B4 flow
   rpc AllocateTranslationPort (PortRequest) returns (PortReply);
 
+  // Update translation port with SFU listen port (NAT fix)
+  rpc UpdateTranslationPort (UpdatePortRequest) returns (UpdatePortReply);
+
   // Establish a plain RTP connection for audio streaming
   rpc CreateTranslationProduce (CreateTranslationCabinRequest) returns (CreateTranslationCabinResponse);
   
@@ -30,6 +33,7 @@ service AudioService {
 message PortRequest {
   string roomId = 1;
   string userId = 2; // Target user ID for translation
+  int32 sfu_port = 3; // SFU receiveTransport listen port (for Audio to send RTP to)
 }
 
 /**
@@ -42,6 +46,24 @@ message PortReply {
   int32 send_port = 3; // RTP port allocated for sending translated audio back to SFU
   bool ready = 4;
   uint32 ssrc = 5;    // SSRC for the producer in the translation cabin
+}
+
+/**
+ * UpdatePortRequest message for updating SFU port.
+ * Contains room ID, user ID, and SFU listen port.
+ */
+message UpdatePortRequest {
+  string roomId = 1;
+  string userId = 2;
+  int32 sfu_port = 3; // Actual SFU receiveTransport listen port
+}
+
+/**
+ * UpdatePortReply message for port update result.
+ */
+message UpdatePortReply {
+  bool success = 1;
+  string message = 2;
 }
 
 /**

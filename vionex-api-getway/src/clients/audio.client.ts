@@ -34,6 +34,23 @@ export class AudioClientService implements OnModuleInit {
         return rs;
     }
 
+    async updateTranslationPort(
+        roomId: string,
+        userId: string,
+        sfuPort: number,
+    ) {
+        const data = {
+            roomId,
+            userId,
+            sfu_port: sfuPort,
+        };
+
+        const rs = await firstValueFrom(
+            this.audioService.updateTranslationPort(data),
+        );
+        return rs;
+    }
+
     async releasePort(roomId: string, userId: string) {
         const data = { roomId, userId };
         return await firstValueFrom(this.audioService.releasePort(data));

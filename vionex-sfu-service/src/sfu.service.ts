@@ -1963,12 +1963,13 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         sourceLanguage: string,
         targetLanguage: string,
         receivePort: number,
-        sendPort: number, // Optional for backward compatibility
-        ssrc: number, // Optional SSRC for translation cabin
+        sendPort: number, // Deprecated - no longer needed
+        ssrc: number,
     ): Promise<{
         success: boolean;
         message?: string;
         streamId?: string;
+        sfuListenPort?: number; // Return SFU listen port
     }> {
         try {
             // New bidirectional translation system
@@ -2011,6 +2012,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         success: boolean;
         message?: string;
         streamId?: string;
+        sfuListenPort?: number; // Return SFU listen port for Audio Service
     }> {
         try {
             const router = await this.getMediaRouter(roomId);
@@ -2068,36 +2070,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 };
             }
 
-            const sendTransport = await router.createPlainTransport({
-                listenIp: {
-                    ip:
-                        this.configService.get('MEDIASOUP_LISTEN_IP') ||
-                        '0.0.0.0',
-                    announcedIp: this.configService.get(
-                        'MEDIASOUP_ANNOUNCED_IP',
-                    ),
-                },
-                rtcpMux: true,
-                comedia: false,
-            });
-
-            // Connect to Audio Service's SharedSocketManager fixed port (35000)
-            await sendTransport.connect({
-                ip: this.configService.get('AUDIO_SERVICE_HOST') || 'localhost',
-                port: this.configService.get(
-                        'AUDIO_LIVE_PORT',
-                    ),
-            });
-
-            // Step 3: Create consumer on receive transport
-            const consumer = await sendTransport.consume({
-                producerId: audioProducer.id,
-                rtpCapabilities: router.rtpCapabilities,
-            });
-
-            await consumer.resume();
-
-            // Step 4: Create SEND transport (Audio Service → SFU)
+            // ============================================================================
+            // NAT FIX: Create receiveTransport FIRST to get dynamic port
+            // ============================================================================
+            // Step 1: Create RECEIVE transport (Audio Service → SFU) FIRST
             const receiveTransport = await router.createPlainTransport({
                 listenIp: {
                     ip:
@@ -2108,14 +2084,49 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     ),
                 },
                 rtcpMux: true,
-                comedia: true, // Enable comedia for receiveTransport to handle Audio Service's dynamic TX port
-                port: sendPort, // This is the port Audio Service will send RTP to
+                comedia: true, // Enable comedia for NAT traversal
+                // No port specified → MediaSoup allocates dynamic port
             });
+
+            // Get the actual port MediaSoup allocated
+            const sfuListenPort = receiveTransport.tuple.localPort;
+            logger.info(
+                'sfu.service.ts',
+                `[SFU Service] receiveTransport created on port ${sfuListenPort}`,
+            );
 
             // Connect receiveTransport
             await receiveTransport.connect({});
 
-            // Step 5: Create producer on send transport for translated audio
+            // Step 2: Create SEND transport (SFU → Audio Service)
+            const sendTransport = await router.createPlainTransport({
+                listenIp: {
+                    ip:
+                        this.configService.get('MEDIASOUP_LISTEN_IP') ||
+                        '0.0.0.0',
+                    announcedIp: this.configService.get(
+                        'MEDIASOUP_ANNOUNCED_IP',
+                    ),
+                },
+                rtcpMux: true,
+                comedia: false, // Active connect to Audio Service
+            });
+
+            // Connect to Audio Service's SharedSocketManager fixed port (35000)
+            await sendTransport.connect({
+                ip: this.configService.get('AUDIO_SERVICE_HOST') || 'localhost',
+                port: this.configService.get('AUDIO_LIVE_PORT'),
+            });
+
+            // Step 3: Create consumer on send transport
+            const consumer = await sendTransport.consume({
+                producerId: audioProducer.id,
+                rtpCapabilities: router.rtpCapabilities,
+            });
+
+            await consumer.resume();
+
+            // Step 4: Create producer on receiveTransport for translated audio
             const translatedProducer = await receiveTransport.produce({
                 kind: 'audio',
                 rtpParameters: {
@@ -2136,15 +2147,14 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 },
             });
 
-            // Step 6: Generate unique streamId for translated audio - keep original names for storage but use safe for MediaSoup
-            // Since translation streams use metadata for client parsing, streamId can be safe
+            // Step 5: Generate unique streamId for translated audio
             const translatedStreamId = createSafeTranslatedStreamId(
                 roomId,
                 sourceLanguage,
                 targetLanguage,
             );
 
-            // Step 7: Register translated audio as new stream
+            // Step 6: Register translated audio as new stream
             const translatedStream: T.Stream = {
                 streamId: translatedStreamId,
                 publisherId: targetUserId,
@@ -2191,11 +2201,16 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 createdAt: new Date(),
             });
 
+            logger.info(
+                'sfu.service.ts',
+                `[SFU Service] ✅ Translation cabin created: ${cabinId}, SFU listen port: ${sfuListenPort}`,
+            );
+
             return {
                 success: true,
-                message:
-                    'Bidirectional translation system created successfully',
+                message: 'Bidirectional translation system created successfully',
                 streamId: translatedStreamId,
+                sfuListenPort, // Return port for Audio Service to send RTP to
             };
         } catch (error) {
             logger.error(

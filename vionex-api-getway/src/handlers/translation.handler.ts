@@ -115,6 +115,26 @@ export class TranslationHandler {
                 return { success: false, error: sfuPortResponse.message };
             }
 
+            // B2.5. Update Audio Service with SFU listen port (NAT FIX)
+            if (sfuPortResponse.sfuListenPort) {
+                try {
+                    await this.audioClient.updateTranslationPort(
+                        data.roomId,
+                        data.targetUserId,
+                        sfuPortResponse.sfuListenPort,
+                    );
+                    console.log(
+                        `[TranslationHandler] Updated Audio Service with SFU port: ${sfuPortResponse.sfuListenPort}`,
+                    );
+                } catch (error) {
+                    console.error(
+                        '[TranslationHandler] Error updating Audio Service port:',
+                        error,
+                    );
+                    // Non-critical error - continue
+                }
+            }
+
             // B3. Start translation cabin processing
             const translationProduceResponse =
                 await this.audioClient.createTranslationProduce(

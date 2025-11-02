@@ -121,6 +121,7 @@ export default interface SfuGrpcService {
         success: boolean;
         stream_id?: string; // Proto field name
         message?: string;
+        sfu_listen_port?: number; // NAT FIX: Return SFU listen port
     }>;
 
     // createBidirectionalTranslation(data: {

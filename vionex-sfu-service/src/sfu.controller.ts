@@ -728,9 +728,9 @@ export class SfuController {
         source_language: string;
         target_language: string;
         audio_port: number;
-        send_port: number; // Added for bidirectional support
+        send_port: number; // Deprecated - kept for backward compatibility
         ssrc: number;
-    }): Promise<{ success: boolean; stream_id?: string; message?: string }> {
+    }): Promise<{ success: boolean; stream_id?: string; message?: string; sfu_listen_port?: number }> {
         try {
             const result = await this.sfuService.allocatePort(
                 data.room_id,
@@ -747,6 +747,7 @@ export class SfuController {
                 success: result.success,
                 stream_id: result.streamId,
                 message: result.message,
+                sfu_listen_port: result.sfuListenPort, // Return SFU listen port
             };
         } catch (error) {
             throw new RpcException({

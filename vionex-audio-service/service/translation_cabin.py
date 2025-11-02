@@ -13,7 +13,7 @@ from typing import Dict, Optional, Any, TYPE_CHECKING, List
 
 from service.pipline_processor.VAD import VoiceActivityDetector
 from core.config import SFU_SERVICE_HOST
-from service.utils.audio_logger import AudioLogger
+from utils.audio_logger import AudioLogger
 
 if TYPE_CHECKING:
     from service.pipline_processor.translation_pipeline import TranslationPipeline
@@ -1079,7 +1079,14 @@ class TranslationCabinManager:
 
         try:
             sfu_host = SFU_SERVICE_HOST  # Load from config instead of hardcoded
-            sfu_port = cabin.send_port  # Use real SFU port if available
+            # NAT FIX: Use actual SFU port (from receiveTransport), fallback to virtual port
+            sfu_port = cabin.sfu_send_port if cabin.sfu_send_port else cabin.send_port
+            
+            if not cabin.sfu_send_port:
+                logger.warning(
+                    f"[RTP-CHUNKS] Cabin {cabin.cabin_id} using fallback virtual port {cabin.send_port}. "
+                    "SFU port not updated - may cause NAT issues!"
+                )
             
             # --- 0) Normalize input: WAV -> PCM16 mono + sample_rate ---
             # If WAV (starts with "RIFF"), extract PCM and get sample_rate
@@ -1255,21 +1262,6 @@ class TranslationCabinManager:
             logger.error(f"[CABIN-MANAGER] Error starting cabin {cabin_id}: {e}")
             return False
 
-    def find_cabin_by_user(self, room_id: str, user_id: str) -> Optional[str]:
-        """
-        Find cabin ID by room and user (regardless of languages)
-        This is needed because B1 creates cabin with default languages,
-        but B3 may have different languages
-        """
-        try:
-            for cabin_id, cabin in self.cabins.items():
-                if cabin.room_id == room_id and cabin.user_id == user_id:
-                    return cabin_id
-            return None
-        except Exception as e:
-            logger.error(f"[CABIN-MANAGER] Error finding cabin: {e}")
-            return None
-
     def update_cabin_languages(self, cabin_id: str, source_language: str, target_language: str) -> bool:
         """
         Update translation cabin language configuration during runtime.
@@ -1405,6 +1397,44 @@ class TranslationCabinManager:
         except Exception as e:
             logger.error(f"[CABIN-MANAGER] Error destroying cabin {cabin_id}: {e}")
             return False
+
+    def find_cabin_by_user(self, room_id: str, user_id: str) -> Optional[str]:
+        """
+        Find cabin ID by room and user (regardless of languages)
+        
+        Args:
+            room_id: Room identifier
+            user_id: User identifier
+            
+        Returns:
+            cabin_id if found, None otherwise
+        """
+        with self._lock:
+            for cabin_id, cabin in self.cabins.items():
+                if cabin.room_id == room_id and cabin.user_id == user_id:
+                    return cabin_id
+        return None
+    
+    def update_sfu_port(self, cabin_id: str, sfu_port: int) -> bool:
+        """
+        Update SFU send port for a cabin (NAT FIX)
+        
+        Args:
+            cabin_id: Cabin identifier
+            sfu_port: Actual SFU receiveTransport listen port
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        with self._lock:
+            cabin = self.cabins.get(cabin_id)
+            if not cabin:
+                logger.error(f"[CABIN-MANAGER] Cabin {cabin_id} not found for port update")
+                return False
+            
+            cabin.sfu_send_port = sfu_port
+            logger.info(f"[CABIN-MANAGER] ✅ Updated cabin {cabin_id} SFU port: {sfu_port}")
+            return True
 
     def get_cabin_info(self, cabin_id: str) -> Optional[Dict[str, Any]]:
         """

@@ -26,6 +26,22 @@ export default interface AudioGRPCService {
     }>;
 
     /**
+     * Update translation port with SFU listen port
+     * NAT traversal fix - inform Audio Service of actual SFU port
+     *
+     * @param data - Room, user ID and SFU port
+     * @returns Observable with operation status
+     */
+    updateTranslationPort(data: {
+        roomId: string;
+        userId: string;
+        sfu_port: number;
+    }): Observable<{
+        success: boolean;
+        message?: string;
+    }>;
+
+    /**
      * Release previously allocated translation ports
      * Cleanup method for port-based resources
      *

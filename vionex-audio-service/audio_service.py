@@ -232,6 +232,52 @@ class AudioService(audio_pb2_grpc.AudioServiceServicer):
                 ssrc=0
             )
 
+    def UpdateTranslationPort(self, request, context):
+        """
+        Update translation cabin with actual SFU listen port (NAT FIX)
+        This is called after SFU creates receiveTransport and knows its dynamic port
+        
+        Args:
+            request: UpdatePortRequest with roomId, userId, sfu_port
+            
+        Returns:
+            UpdatePortReply with success status
+        """
+        try:
+            # Find existing cabin
+            existing_cabin_id = cabin_manager.find_cabin_by_user(request.roomId, request.userId)
+            if not existing_cabin_id:
+                logger.error(f"No cabin found for room={request.roomId}, user={request.userId}")
+                return audio_pb2.UpdatePortReply(
+                    success=False,
+                    message="No cabin found for this user"
+                )
+            
+            # Update SFU send port in cabin
+            success = cabin_manager.update_sfu_port(existing_cabin_id, request.sfu_port)
+            
+            if success:
+                logger.info(f"✅ Updated cabin {existing_cabin_id} with SFU port: {request.sfu_port}")
+                return audio_pb2.UpdatePortReply(
+                    success=True,
+                    message=f"SFU port updated to {request.sfu_port}"
+                )
+            else:
+                logger.error(f"Failed to update SFU port for cabin {existing_cabin_id}")
+                return audio_pb2.UpdatePortReply(
+                    success=False,
+                    message="Failed to update SFU port"
+                )
+                
+        except Exception as e:
+            logger.error(f"UpdateTranslationPort error: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return audio_pb2.UpdatePortReply(
+                success=False,
+                message=str(e)
+            )
+
     def CreateTranslationProduce(self, request, context):
         """
         Create a translation producer for client consumption
