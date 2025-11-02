@@ -451,7 +451,7 @@ module.exports = {
     {
       name: 'chatbot-service',
       script: 'venv/bin/python',
-      args: 'chatbot_service.py',
+      args: 'main.py',
       cwd: './vionex-chatbot-service',
       interpreter: 'none',
       env: {
