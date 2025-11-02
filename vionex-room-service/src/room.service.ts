@@ -31,6 +31,36 @@ export class RoomService implements OnModuleInit {
     onModuleInit() {
         this.chatService =
             this.chatClient.getService<ChatService>('ChatService');
+        
+        // Initialize default room KTPM44
+        this.initializeDefaultRoom();
+    }
+
+    /**
+     * Initialize default room with ID "KTPM44" and password "123456"
+     */
+    private initializeDefaultRoom() {
+        const roomId = 'KTPM44';
+        const password = '123456';
+        
+        // Create the room
+        this.rooms.set(roomId, new Map());
+        
+        // Generate and store room_key
+        const roomKey = generateRoomKey();
+        this.roomMetadata.set(roomId, {
+            room_id: roomId,
+            room_key: roomKey,
+            created_at: new Date(),
+        });
+        
+        // Set password for the room
+        this.roomPasswords.set(roomId, {
+            password: password,
+            creator_id: 'system', // System-created room
+        });
+        
+        logger.info('room.service.ts', `Default room created: ${roomId} with password: ${password}`);
     }
 
     /**
