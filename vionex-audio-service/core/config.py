@@ -30,7 +30,14 @@ SAMPLE_RATE = 16000
 CHANNELS = 1
 MIN_AUDIO_DURATION = 1.0  # Minimum 1.0s - frontend padding ensures quality
 
-# Legacy port management (for backward compatibility)
+# ============================================================================
+# SHARED SOCKET CONFIGURATION (Translation Cabin)
+# ============================================================================
+# Single shared port for ALL translation cabins
+# Audio Service receives RTP from SFU on this port
+# Routing is based on SSRC extracted from RTP header
+SHARED_SOCKET_PORT = int(os.getenv("SHARED_SOCKET_PORT", 35000))
+
 PORT_MIN = int(os.getenv("AUDIO_PORT_MIN", 35000))
 PORT_MAX = int(os.getenv("AUDIO_PORT_MAX", 35400))
 

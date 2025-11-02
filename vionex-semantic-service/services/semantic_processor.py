@@ -27,6 +27,27 @@ class SemanticProcessor:
         else:
             logger.info("Vector model loaded successfully")
 
+    def _format_bilingual_text(self, speaker: str, original_text: str, english_text: str) -> str:
+        """
+        Format text with both original and English translation for chatbot context.
+        
+        Format: "Speaker: Original text | EN: English translation"
+        If no English translation available yet (background translation pending), only show original.
+        
+        Args:
+            speaker: Speaker name
+            original_text: Original text in source language
+            english_text: English translation (may be empty if not yet translated)
+            
+        Returns:
+            Formatted bilingual string
+        """
+        if english_text and english_text.strip() and english_text != original_text:
+            return f"{speaker}: {original_text} | EN: {english_text}"
+        else:
+            # No English translation yet or same as original (already English)
+            return f"{speaker}: {original_text}"
+
     def _translate_and_update_in_background(self, point_id: str, original_text: str):
         """
         A background function to translate text and update the vector point.
@@ -152,7 +173,7 @@ class SemanticProcessor:
 
     def search(self, query: str, room_id: str, limit: int = 10, organization_id: str = None, room_key: str = None) -> List[dict]:
         """
-        Translates the search query to English and searches based on the English vector.
+        Multi-language semantic search: searches using both original query and English translation.
         
         Args:
             query: Search query text
@@ -176,17 +197,11 @@ class SemanticProcessor:
                 logger.error(error_msg)
                 raise ValueError(error_msg)
             
-            # Translate the search query to English
-            english_query = self.translation_service.translate(query)
-
-            # Vectorize the English query
-            vector = self.model.encode(english_query).tolist()
-
             # Build filter conditions - ONLY use room_key (no fallback)
             filter_conditions = [
                 FieldCondition(key="room_key", match=MatchValue(value=room_key))
             ]
-            logger.info(f"Searching with room_key: {room_key}")
+            logger.info(f"Searching with room_key: {room_key}, query: '{query}'")
             
             if organization_id:
                 filter_conditions.append(
@@ -194,27 +209,68 @@ class SemanticProcessor:
 
             query_filter = Filter(must=filter_conditions)
 
-            # Perform search in Qdrant
-            results = self.qdrant_client.search(
+            # STRATEGY 1: Search with original query (better for same-language matches)
+            original_vector = self.model.encode(query).tolist()
+            results_original = self.qdrant_client.search(
                 collection_name=COLLECTION_NAME,
-                query_vector=vector,
+                query_vector=original_vector,
                 query_filter=query_filter,
                 with_payload=True,
                 limit=limit
             )
+            
+            # STRATEGY 2: Translate and search with English query (better for cross-language)
+            english_query = self.translation_service.translate(query)
+            logger.info(f"Translated query: '{query}' → '{english_query}'")
+            
+            english_vector = self.model.encode(english_query).tolist()
+            results_english = self.qdrant_client.search(
+                collection_name=COLLECTION_NAME,
+                query_vector=english_vector,
+                query_filter=query_filter,
+                with_payload=True,
+                limit=limit
+            )
+            
+            # Merge and deduplicate results (keep highest score for each document)
+            results_dict = {}
+            for hit in results_original + results_english:
+                doc_id = hit.id
+                if doc_id not in results_dict or hit.score > results_dict[doc_id].score:
+                    results_dict[doc_id] = hit
+            
+            # Sort by score descending
+            merged_results = sorted(results_dict.values(), key=lambda x: x.score, reverse=True)[:limit]
 
-            score_threshold = 0.8  # Score threshold for filtering results
-            filtered_results = [r for r in results if r.score >= score_threshold]
+            score_threshold = 0.40  # Lowered threshold for better recall (original was 0.8)
+            filtered_results = [r for r in merged_results if r.score >= score_threshold]
+            
+            # If no results after filtering, use all merged results (fallback)
+            if not filtered_results and merged_results:
+                logger.warning(f"No results passed threshold {score_threshold}, returning all {len(merged_results)} merged results")
+                filtered_results = merged_results
+            
+            # Log search results for debugging
+            logger.info(f"Original query results: {len(results_original)}, English query results: {len(results_english)}")
+            logger.info(f"Merged: {len(merged_results)} total, {len(filtered_results)} after filtering (threshold: {score_threshold})")
+            if merged_results:
+                logger.info(f"Top result score: {merged_results[0].score:.4f}")
 
-            # Process and return results
+            # Process and return results with BOTH original and English text (Option C)
+            # This provides maximum context for multilingual chatbot (OpenChat 3.5)
             return [
                 {
-                    "text": hit.payload.get("speaker") + ": " + hit.payload.get("text"), # Format: "Speaker: Text"
+                    "text": self._format_bilingual_text(
+                        hit.payload.get('speaker', 'Unknown'),
+                        hit.payload.get('original_text', ''),
+                        hit.payload.get('english_text', '')
+                    ),
                     "room_id": hit.payload.get("room_id"),
                     "timestamp": hit.payload.get("timestamp"),
                     "score": hit.score
                 }
                 for hit in filtered_results
+                if hit.payload.get("original_text")  # Only include if text exists
             ]
         except Exception as e:
             logger.error(f"Error during search: {e}")

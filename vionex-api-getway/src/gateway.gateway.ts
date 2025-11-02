@@ -879,21 +879,16 @@ export class GatewayGateway
                 appData: safeMetadata,
             });
 
-            // FIXED: Only broadcast stream-added for non-dummy producers
-            // Dummy producers (video: false or audio: false) should not be consumed
-            const isDummyProducer =
-                (data.kind === 'video' && safeMetadata.video === false) ||
-                (data.kind === 'audio' && safeMetadata.audio === false);
-
-            if (!isDummyProducer) {
-                // Emit stream-added to all users in room (including sender)
-                this.io.to(roomId).emit('sfu:stream-added', {
-                    streamId: streamId,
-                    publisherId: peerId,
-                    metadata: safeMetadata,
-                    rtpParameters: data.rtpParameters,
-                });
-            }
+            // FIXED: Always broadcast stream-added (even for dummy producers)
+            // This ensures other users know this participant has joined
+            // Consumers will be created based on priority system in SFU service
+            // which checks metadata.audio/video to determine if stream should be consumed
+            this.io.to(roomId).emit('sfu:stream-added', {
+                streamId: streamId,
+                publisherId: peerId,
+                metadata: safeMetadata,
+                rtpParameters: data.rtpParameters,
+            });
 
             // If this is a screen share, emit special screen share event
             if (isScreenShare && data.kind === 'video') {

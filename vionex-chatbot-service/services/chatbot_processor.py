@@ -25,13 +25,18 @@ class ChatBotProcessor:
         even if the transcript is in another language.
         """
         return (
-            "You are a smart meeting secretary. "
-            "Your task is to answer the participant's question strictly based on the provided transcript. "
-            "If the transcript does not contain relevant information, reply with: 'No relevant information found in the meeting.' "
-            "Always respond in the same language as the question, even if the transcript is written in another language.\n\n"
-            f"Transcript:\n{data}\n\n"
-            f"Question: {question}\n"
-            "Answer concisely and accurately:"
+            "You are a professional meeting assistant AI. Your role is to answer questions STRICTLY based on the provided meeting transcript below.\n\n"
+            "CRITICAL RULES:\n"
+            "1. ONLY use information from the transcript below\n"
+            "2. DO NOT make up or fabricate any information\n"
+            "3. DO NOT add extra conversations or scenarios\n"
+            "4. If the transcript doesn't contain the answer, say: 'Not found data for this question.'\n"
+            "5. Keep your answer SHORT (maximum 2 sentences)\n"
+            "6. Answer in the SAME LANGUAGE as the question\n\n"
+            "7. Use language from the question to prioritize choosing data meeting transcript\n\n"
+            f"===== MEETING TRANSCRIPT =====\n{data}\n===== END TRANSCRIPT =====\n\n"
+            f"Question: {question}\n\n"
+            "Answer (SHORT, based ONLY on transcript above):"
         )
 
     def generate_response(self, data: str, answer: str) -> str:
