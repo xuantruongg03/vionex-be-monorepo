@@ -232,6 +232,65 @@ if [ -d "$AUDIO_SERVICE_DIR" ]; then
     python3 -c "import opuslib; print('OpusLib version:', opuslib.__version__)" || log_warning "OpusLib not installed properly"
     
     deactivate
+    
+    # Create .env file if it doesn't exist
+    if [ ! -f ".env" ]; then
+        log_info "Creating .env file for Audio Service..."
+        cat > .env << 'ENVEOF'
+MIN_PORT=35000
+MAX_PORT=35400
+GRPC_PORT=30005
+TRANSCRIPT_DIR=./transcripts
+MODEL_WHISPER=large-v2
+TYPE_ENGINE=cuda
+
+# Whisper optimization - RTX A4000 Ampere with Tensor Cores Gen 3
+WHISPER_COMPUTE_TYPE=float16
+
+# TTS optimization parameters - Balanced for A4000 production stability
+TTS_TEMPERATURE=0.6
+TTS_LENGTH_PENALTY=0.9
+TTS_REPETITION_PENALTY=2.8
+
+# GPU optimization - A4000 Ampere architecture
+ENABLE_MIXED_PRECISION=true
+ENABLE_TENSOR_CORES=true
+BATCH_SIZE=3
+
+# A4000 specific - Professional workstation optimizations
+ENABLE_ECC_MONITORING=true
+POWER_LIMIT=140
+THERMAL_THROTTLE_TEMP=83
+
+SEMANTIC_SERVICE_HOST=localhost
+SEMANTIC_SERVICE_PORT=30006
+
+SFU_SERVICE_HOST=localhost
+
+MEDIASOUP_ANNOUNCED_IP=your_server_ip_here
+
+ENABLE_TEST_MODE=false
+
+# Logging configuration
+LOG_LEVEL=INFO
+LOG_TO_FILE=true
+LOG_DIR=logs
+LOG_FILE_PREFIX=audio_service
+
+ENABLE_TEXT_CORRECTOR=false
+
+# Model size: "small" or "base" (default: small)
+# small: 300MB, faster (0.08s CPU)
+# base:  580MB, better quality (0.15s CPU)
+TEXT_CORRECTOR_MODEL_SIZE=small
+SHARED_SOCKET_PORT=35000
+ENVEOF
+        log_success ".env file created for Audio Service"
+        log_warning "Please update MEDIASOUP_ANNOUNCED_IP, SEMANTIC_SERVICE_HOST and SFU_SERVICE_HOST in vionex-audio-service/.env"
+    else
+        log_warning ".env file already exists for Audio Service"
+    fi
+    
     cd ..
 else
     log_error "Audio Service directory not found: $AUDIO_SERVICE_DIR"
@@ -268,6 +327,35 @@ if [ -d "$CHATBOT_SERVICE_DIR" ]; then
     fi
     
     deactivate
+    
+    # Create .env file if it doesn't exist
+    if [ ! -f ".env" ]; then
+        log_info "Creating .env file for Chatbot Service..."
+        cat > .env << 'ENVEOF'
+CHATBOT_GRPC_PORT=30007
+SEMANTIC_SERVICE_HOST=localhost
+SEMANTIC_SERVICE_PORT=30006
+
+# Hugging Face Configuration
+HUGGINGFACE_TOKEN=your_huggingface_token_here
+BASE_MODEL_REPO=xuantruongg003/openchat-3.5-0106
+LORA_MODEL_REPO=xuantruongg003/openchat-lora-only
+
+# Model Cache Configuration
+MODEL_CACHE_DIR=/app/models/.cache
+TRANSFORMERS_CACHE=/app/models/.cache
+HF_HOME=/app/models/.cache
+
+# GPU Configuration
+CUDA_VISIBLE_DEVICES=0
+PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+ENVEOF
+        log_success ".env file created for Chatbot Service"
+        log_warning "Please update HUGGINGFACE_TOKEN and SEMANTIC_SERVICE_HOST in vionex-chatbot-service/.env"
+    else
+        log_warning ".env file already exists for Chatbot Service"
+    fi
+    
     cd ..
 else
     log_error "Chatbot Service directory not found: $CHATBOT_SERVICE_DIR"
@@ -469,9 +557,13 @@ log_success "Setup completed successfully!"
 echo "========================================"
 echo ""
 echo "Next steps:"
-echo "1. Configure .env files for both services:"
+echo "1. Review and configure .env files for both services:"
 echo "   - vionex-audio-service/.env"
+echo "     * Update MEDIASOUP_ANNOUNCED_IP with your server IP"
+echo "     * Update SEMANTIC_SERVICE_HOST and SFU_SERVICE_HOST if needed"
 echo "   - vionex-chatbot-service/.env"
+echo "     * Update HUGGINGFACE_TOKEN with your Hugging Face token"
+echo "     * Update SEMANTIC_SERVICE_HOST if needed"
 echo ""
 echo "2. Start services:"
 echo "   ./start-services.sh"

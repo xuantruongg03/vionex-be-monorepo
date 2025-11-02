@@ -99,8 +99,10 @@ class VionexSemanticService(semantic_pb2_grpc.SemanticServiceServicer):
             room_key = request.room_key if request.HasField('room_key') else None  # NEW
 
             search_results = []
+            key_question = ["summary", "tóm tắt", "nội dung", "tóm lược", "content"]
             # Process when ask "summary" or "tóm tắt"
-            if "summary" in request.query.lower() or "tóm tắt" in request.query.lower():
+            # if "summary" in request.query.lower() or "tóm tắt" in request.query.lower():
+            if any(kq in request.query.lower() for kq in key_question):
                 search_results = self.semantic_processor.get_text_by_room_id(
                     request.room_id, 
                     organization_id,

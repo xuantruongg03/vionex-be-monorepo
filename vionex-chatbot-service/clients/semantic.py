@@ -2,6 +2,7 @@
 import grpc
 from proto import semantic_pb2_grpc, semantic_pb2
 from core.config import SEMANTIC_SERVICE_HOST, SEMANTIC_SERVICE_PORT
+from utils import logger
 
 class SemanticClient:
     """Client for interacting with the Semantic Service"""
@@ -13,7 +14,7 @@ class SemanticClient:
         self.stub = None
         self.service_host = SEMANTIC_SERVICE_HOST
         self.service_port = SEMANTIC_SERVICE_PORT
-        print("Semantic Client initialized")
+        logger.info("Semantic Client initialized")
 
     def _ensure_connection(self):
         """Ensure gRPC channel and stub are created (lazy initialization)"""
@@ -50,21 +51,21 @@ class SemanticClient:
                 request_params['room_key'] = room_key
             
             request = semantic_pb2.SearchTranscriptsRequest(**request_params)
-            
-            print(f"Calling semantic service with room_id={room_id}, room_key={room_key}, query={text}, org={organization_id}")
-            
+
+            logger.info(f"Calling semantic service with room_id={room_id}, room_key={room_key}, query={text}, org={organization_id}")
+
             # Await the async gRPC call
             response = await self.stub.SearchTranscripts(request)
-            
-            print(f"Semantic service response: {response}")
-            print(f"Results count: {len(response.results)}")
+
+            logger.info(f"Semantic service response: {response}")
+            logger.info(f"Results count: {len(response.results)}")
             if response.results:
-                print(f"First result: {response.results[0]}")
-            
+                logger.info(f"First result: {response.results[0]}")
+
             return response.results
             
         except Exception as e:
-            print(f"Error calling semantic service: {e}")
+            logger.error(f"Error calling semantic service: {e}")
             import traceback
             traceback.print_exc()
             return []

@@ -30,7 +30,7 @@ class ChatBotProcessor:
             "1. ONLY use information from the transcript below\n"
             "2. DO NOT make up or fabricate any information\n"
             "3. DO NOT add extra conversations or scenarios\n"
-            "4. If the transcript doesn't contain the answer, say: 'Không tìm thấy thông tin trong cuộc họp'\n"
+            "4. If the transcript doesn't contain the answer, say: 'Not found data for this question.'\n"
             "5. Keep your answer SHORT (maximum 2 sentences)\n"
             "6. Answer in the SAME LANGUAGE as the question\n\n"
             "7. Use language from the question to prioritize choosing data meeting transcript\n\n"
