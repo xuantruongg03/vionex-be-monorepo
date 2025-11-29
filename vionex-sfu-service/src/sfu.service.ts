@@ -2110,11 +2110,12 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             const sfuListenPort = receiveTransport.tuple.localPort;
             logger.info(
                 'sfu.service.ts',
-                `[SFU Service] receiveTransport created on port ${sfuListenPort}`,
+                `[SFU Service] receiveTransport created on port ${sfuListenPort} (comedia mode - will learn address from first RTP)`,
             );
 
-            // Connect receiveTransport
-            await receiveTransport.connect({});
+            // DO NOT connect receiveTransport when comedia=true
+            // MediaSoup will automatically learn the remote address from the first RTP packet
+            // await receiveTransport.connect({}); // REMOVED - causes "missing port" error
 
             // Step 2: Create SEND transport (SFU → Audio Service)
             const sendTransport = await router.createPlainTransport({
@@ -2131,9 +2132,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             });
 
             // Connect to Audio Service's SharedSocketManager fixed port (35000)
+            // Use receivePort from Audio Service (should be SHARED_SOCKET_PORT = 35000)
             await sendTransport.connect({
                 ip: this.configService.get('AUDIO_SERVICE_HOST') || 'localhost',
-                port: this.configService.get('AUDIO_LIVE_PORT'),
+                port: receivePort, // Use the port from Audio Service allocation
             });
 
             // Step 3: Create consumer on send transport

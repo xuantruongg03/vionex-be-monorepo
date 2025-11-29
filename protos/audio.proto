@@ -17,7 +17,7 @@ service AudioService {
   
   // Legacy audio chunk processing
   // This is for compatibility with existing clients that send audio in chunks
-  rpc ProcessAudioChunk (ProcessAudioRequest) returns (ProcessAudioResponse);
+  // rpc ProcessAudioChunk (ProcessAudioRequest) returns (ProcessAudioResponse);
   
   // Service statistics
   rpc GetServiceStats (Empty) returns (ServiceStatsResponse);
@@ -105,23 +105,23 @@ message ProcessAudioBufferResponse {
  * ProcessAudioRequest message for processing audio chunks.
  * Contains room ID, user ID, timestamp, audio buffer, and duration.
  */
-message ProcessAudioRequest {
-  string roomId = 1;
-  string userId = 2;
-  int64 timestamp = 3;
-  bytes audioBuffer = 4;
-  double duration = 5;
-  optional string roomKey = 6; // NEW: Room key for semantic context isolation
-}
+// message ProcessAudioRequest {
+//   string roomId = 1;
+//   string userId = 2;
+//   int64 timestamp = 3;
+//   bytes audioBuffer = 4;
+//   double duration = 5;
+//   optional string roomKey = 6; // NEW: Room key for semantic context isolation
+// }
 
 /**
  * ProcessAudioResponse message for the result of audio chunk processing.
  * Contains success status and additional message.
  */
-message ProcessAudioResponse {
-  bool success = 1;
-  string message = 2;
-}
+// message ProcessAudioResponse {
+//   bool success = 1;
+//   string message = 2;
+// }
 
 message ServiceStatsResponse {
   bool success = 1;

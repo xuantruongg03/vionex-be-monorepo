@@ -2842,6 +2842,19 @@ export class GatewayGateway
         return this.chatbotHandler.handleAskChatBot(client, data);
     }
 
+    @SubscribeMessage('chatbot:extract-summary')
+    async handleExtractMeetingSummary(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            roomKey?: string;
+            organizationId?: string;
+        },
+    ) {
+        return this.chatbotHandler.handleExtractMeetingSummary(client, data);
+    }
+
     // ==================== INTERACTION HANDLERS ====================
     @SubscribeMessage('interaction:toggle-raise-hand')
     async handleToggleRaiseHand(

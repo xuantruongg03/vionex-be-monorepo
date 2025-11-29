@@ -54,11 +54,6 @@ class AudioServiceStub(object):
                 request_serializer=audio__pb2.ProcessAudioBufferRequest.SerializeToString,
                 response_deserializer=audio__pb2.ProcessAudioBufferResponse.FromString,
                 _registered_method=True)
-        self.ProcessAudioChunk = channel.unary_unary(
-                '/audio.AudioService/ProcessAudioChunk',
-                request_serializer=audio__pb2.ProcessAudioRequest.SerializeToString,
-                response_deserializer=audio__pb2.ProcessAudioResponse.FromString,
-                _registered_method=True)
         self.GetServiceStats = channel.unary_unary(
                 '/audio.AudioService/GetServiceStats',
                 request_serializer=audio__pb2.Empty.SerializeToString,
@@ -102,16 +97,12 @@ class AudioServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def ProcessAudioChunk(self, request, context):
+    def GetServiceStats(self, request, context):
         """Legacy audio chunk processing
         This is for compatibility with existing clients that send audio in chunks
-        """
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        rpc ProcessAudioChunk (ProcessAudioRequest) returns (ProcessAudioResponse);
 
-    def GetServiceStats(self, request, context):
-        """Service statistics
+        Service statistics
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -146,11 +137,6 @@ def add_AudioServiceServicer_to_server(servicer, server):
                     servicer.ProcessAudioBuffer,
                     request_deserializer=audio__pb2.ProcessAudioBufferRequest.FromString,
                     response_serializer=audio__pb2.ProcessAudioBufferResponse.SerializeToString,
-            ),
-            'ProcessAudioChunk': grpc.unary_unary_rpc_method_handler(
-                    servicer.ProcessAudioChunk,
-                    request_deserializer=audio__pb2.ProcessAudioRequest.FromString,
-                    response_serializer=audio__pb2.ProcessAudioResponse.SerializeToString,
             ),
             'GetServiceStats': grpc.unary_unary_rpc_method_handler(
                     servicer.GetServiceStats,
@@ -271,33 +257,6 @@ class AudioService(object):
             '/audio.AudioService/ProcessAudioBuffer',
             audio__pb2.ProcessAudioBufferRequest.SerializeToString,
             audio__pb2.ProcessAudioBufferResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def ProcessAudioChunk(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/audio.AudioService/ProcessAudioChunk',
-            audio__pb2.ProcessAudioRequest.SerializeToString,
-            audio__pb2.ProcessAudioResponse.FromString,
             options,
             channel_credentials,
             insecure,
