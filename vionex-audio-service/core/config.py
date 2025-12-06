@@ -38,16 +38,20 @@ MIN_AUDIO_DURATION = 1.0  # Minimum 1.0s - frontend padding ensures quality
 # Routing is based on SSRC extracted from RTP header
 SHARED_SOCKET_PORT = int(os.getenv("SHARED_SOCKET_PORT", 35000))
 
-PORT_MIN = int(os.getenv("AUDIO_PORT_MIN", 35000))
-PORT_MAX = int(os.getenv("AUDIO_PORT_MAX", 35400))
+# DEPRECATED: Port range no longer used - all cabins share SHARED_SOCKET_PORT
+# PORT_MIN = int(os.getenv("AUDIO_PORT_MIN", 35000))
+# PORT_MAX = int(os.getenv("AUDIO_PORT_MAX", 35400))
+PORT_MIN = SHARED_SOCKET_PORT  # Kept for backward compatibility
+PORT_MAX = SHARED_SOCKET_PORT  # Kept for backward compatibility
 
 # Semantic service configuration
 SEMANTIC_SERVICE_HOST = os.getenv("SEMANTIC_SERVICE_HOST", "localhost")
 SEMANTIC_SERVICE_PORT = int(os.getenv("SEMANTIC_SERVICE_PORT", 30006))
 
-# RTP Configuration for Translation Cabin
-RTP_PORT_RANGE_START = int(os.getenv("RTP_PORT_RANGE_START", 40000))
-RTP_PORT_RANGE_END = int(os.getenv("RTP_PORT_RANGE_END", 40400))
+# DEPRECATED: RTP Configuration for Translation Cabin - no longer used
+# All cabins now share SHARED_SOCKET_PORT with SSRC-based routing
+# RTP_PORT_RANGE_START = int(os.getenv("RTP_PORT_RANGE_START", 40000))
+# RTP_PORT_RANGE_END = int(os.getenv("RTP_PORT_RANGE_END", 40400))
 
 # Mediasoup Integration
 MEDIASOUP_WORKER_HOST = os.getenv("MEDIASOUP_WORKER_HOST", "localhost")

@@ -117,17 +117,18 @@ export class TranslationHandler {
                 return { success: false, error: sfuPortResponse.message };
             }
 
-            // B2.5. Update Audio Service with SFU listen port (NAT FIX)
+            // B2.5. Update Audio Service with SFU listen port and consumer SSRC (NAT FIX + SSRC FIX)
             if (sfuPortResponse.sfuListenPort) {
                 try {
                     await this.audioClient.updateTranslationPort(
                         data.roomId,
                         data.targetUserId,
                         sfuPortResponse.sfuListenPort,
+                        sfuPortResponse.consumerSsrc, // Pass actual consumer SSRC for RTP routing
                     );
                     logger.log(
                         'TranslationHandler',
-                        `Updated Audio Service with SFU port: ${sfuPortResponse.sfuListenPort}`,
+                        `Updated Audio Service with SFU port: ${sfuPortResponse.sfuListenPort}, consumer SSRC: ${sfuPortResponse.consumerSsrc}`,
                     );
                 } catch (error) {
                     logger.error(

@@ -234,11 +234,11 @@ class AudioService(audio_pb2_grpc.AudioServiceServicer):
 
     def UpdateTranslationPort(self, request, context):
         """
-        Update translation cabin with actual SFU listen port (NAT FIX)
-        This is called after SFU creates receiveTransport and knows its dynamic port
+        Update translation cabin with actual SFU listen port and consumer SSRC (NAT FIX + SSRC FIX)
+        This is called after SFU creates receiveTransport and knows its dynamic port and consumer SSRC
         
         Args:
-            request: UpdatePortRequest with roomId, userId, sfu_port
+            request: UpdatePortRequest with roomId, userId, sfu_port, consumer_ssrc
             
         Returns:
             UpdatePortReply with success status
@@ -253,14 +253,20 @@ class AudioService(audio_pb2_grpc.AudioServiceServicer):
                     message="No cabin found for this user"
                 )
             
-            # Update SFU send port in cabin
-            success = cabin_manager.update_sfu_port(existing_cabin_id, request.sfu_port)
+            # Get consumer SSRC if provided (for SSRC-based routing fix)
+            consumer_ssrc = None
+            if request.HasField('consumer_ssrc'):
+                consumer_ssrc = request.consumer_ssrc
+                logger.info(f"Received consumer SSRC from SFU: {consumer_ssrc}")
+            
+            # Update SFU send port and consumer SSRC in cabin
+            success = cabin_manager.update_sfu_port(existing_cabin_id, request.sfu_port, consumer_ssrc)
             
             if success:
-                logger.info(f"✅ Updated cabin {existing_cabin_id} with SFU port: {request.sfu_port}")
+                logger.info(f"✅ Updated cabin {existing_cabin_id} with SFU port: {request.sfu_port}, consumer SSRC: {consumer_ssrc}")
                 return audio_pb2.UpdatePortReply(
                     success=True,
-                    message=f"SFU port updated to {request.sfu_port}"
+                    message=f"SFU port updated to {request.sfu_port}, consumer SSRC: {consumer_ssrc}"
                 )
             else:
                 logger.error(f"Failed to update SFU port for cabin {existing_cabin_id}")

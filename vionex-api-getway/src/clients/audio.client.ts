@@ -38,11 +38,13 @@ export class AudioClientService implements OnModuleInit {
         roomId: string,
         userId: string,
         sfuPort: number,
+        consumerSsrc?: number, // Actual consumer SSRC for RTP routing
     ) {
         const data = {
             roomId,
             userId,
             sfu_port: sfuPort,
+            consumer_ssrc: consumerSsrc,
         };
 
         const rs = await firstValueFrom(

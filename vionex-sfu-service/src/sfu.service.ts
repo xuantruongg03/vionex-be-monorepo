@@ -1988,6 +1988,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         message?: string;
         streamId?: string;
         sfuListenPort?: number; // Return SFU listen port
+        consumerSsrc?: number; // Return actual consumer SSRC for Audio routing
     }> {
         try {
             // New bidirectional translation system
@@ -2031,6 +2032,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         message?: string;
         streamId?: string;
         sfuListenPort?: number; // Return SFU listen port for Audio Service
+        consumerSsrc?: number; // Return actual consumer SSRC for Audio routing
     }> {
         try {
             const router = await this.getMediaRouter(roomId);
@@ -2113,6 +2115,30 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 `[SFU Service] receiveTransport created on port ${sfuListenPort} (comedia mode - will learn address from first RTP)`,
             );
 
+            // Log when receiveTransport learns remote address from first RTP packet
+            receiveTransport.on('tuple', (tuple) => {
+                logger.info(
+                    'sfu.service.ts',
+                    `[RTP-RX] ========== SFU ← AUDIO RTP RECEIVE ==========`,
+                );
+                logger.info(
+                    'sfu.service.ts',
+                    `[RTP-RX] Remote (Audio): ${tuple.remoteIp}:${tuple.remotePort}`,
+                );
+                logger.info(
+                    'sfu.service.ts',
+                    `[RTP-RX] Local (SFU):    ${tuple.localIp}:${tuple.localPort}`,
+                );
+                logger.info(
+                    'sfu.service.ts',
+                    `[RTP-RX] Protocol:       ${tuple.protocol}`,
+                );
+                logger.info(
+                    'sfu.service.ts',
+                    `[RTP-RX] ==============================================`,
+                );
+            });
+
             // DO NOT connect receiveTransport when comedia=true
             // MediaSoup will automatically learn the remote address from the first RTP packet
             // await receiveTransport.connect({}); // REMOVED - causes "missing port" error
@@ -2146,7 +2172,18 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
             await consumer.resume();
 
+            // Get consumer SSRC - this is the SSRC that Audio Service will use to send RTP back
+            const consumerSsrc =
+                consumer.rtpParameters.encodings?.[0]?.ssrc || ssrc;
+
+            logger.info(
+                'sfu.service.ts',
+                `[SFU Service] Consumer created with SSRC: ${consumerSsrc} (original ssrc: ${ssrc})`,
+            );
+
             // Step 4: Create producer on receiveTransport for translated audio
+            // IMPORTANT: Use consumerSsrc, not the original ssrc from Audio Service
+            // Audio Service will send RTP packets with consumerSsrc after receiving it
             const translatedProducer = await receiveTransport.produce({
                 kind: 'audio',
                 rtpParameters: {
@@ -2160,12 +2197,17 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                         },
                     ],
                     headerExtensions: [],
-                    encodings: [{ ssrc: ssrc }], // Use SSRC from Audio Service
+                    encodings: [{ ssrc: consumerSsrc }], // Use consumerSsrc - this matches what Audio Service sends
                     rtcp: {
                         cname: `translated_${safeTargetUserId}_${safeSourceLanguage}_${safeTargetLanguage}`, // Use safe identifier
                     },
                 },
             });
+
+            logger.info(
+                'sfu.service.ts',
+                `[SFU Service] TranslatedProducer created with SSRC: ${consumerSsrc}`,
+            );
 
             // Step 5: Generate unique streamId for translated audio
             const translatedStreamId = createSafeTranslatedStreamId(
@@ -2223,7 +2265,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
             logger.info(
                 'sfu.service.ts',
-                `[SFU Service] ✅ Translation cabin created: ${cabinId}, SFU listen port: ${sfuListenPort}`,
+                `[SFU Service] ✅ Translation cabin created: ${cabinId}, SFU listen port: ${sfuListenPort}, consumer SSRC: ${consumerSsrc}`,
             );
 
             return {
@@ -2232,6 +2274,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     'Bidirectional translation system created successfully',
                 streamId: translatedStreamId,
                 sfuListenPort, // Return port for Audio Service to send RTP to
+                consumerSsrc, // Return actual consumer SSRC for Audio routing
             };
         } catch (error) {
             logger.error(

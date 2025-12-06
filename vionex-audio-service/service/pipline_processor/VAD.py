@@ -17,7 +17,7 @@ class VoiceActivityDetector:
     - Configurable silence tolerance
     """
     # energy_threshold: float = 25.0  # Lowered for better sensitivity to quiet speech
-    # silence_duration_ms: int = 800  # Reduced silence tolerance for faster response
+    silence_duration_ms: int = 800  # Reduced silence tolerance for faster response
     vad_aggressiveness: int = 1  # WebRTC VAD aggressiveness level (0-3)
     last_speech_time: float = field(default=0.0)
     _debug_counter: int = field(default=0, init=False)

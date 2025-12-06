@@ -10,7 +10,7 @@ export default interface SfuGrpcService {
     getMediaRouter(data: { room_id: string }): any;
 
     // Transport management
-    createTransport(data: { room_id: string, is_producer: boolean }): any;
+    createTransport(data: { room_id: string; is_producer: boolean }): any;
 
     connectTransport(data: {
         transport_id: string;
@@ -122,6 +122,7 @@ export default interface SfuGrpcService {
         stream_id?: string; // Proto field name
         message?: string;
         sfu_listen_port?: number; // NAT FIX: Return SFU listen port
+        consumer_ssrc?: number; // Actual consumer SSRC for Audio Service RTP routing
     }>;
 
     // createBidirectionalTranslation(data: {

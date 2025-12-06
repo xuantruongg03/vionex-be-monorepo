@@ -759,6 +759,7 @@ export class SfuController {
         stream_id?: string;
         message?: string;
         sfu_listen_port?: number;
+        consumer_ssrc?: number;
     }> {
         try {
             const result = await this.sfuService.allocatePort(
@@ -777,6 +778,7 @@ export class SfuController {
                 stream_id: result.streamId,
                 message: result.message,
                 sfu_listen_port: result.sfuListenPort, // Return SFU listen port
+                consumer_ssrc: result.consumerSsrc, // Return actual consumer SSRC
             };
         } catch (error) {
             throw new RpcException({

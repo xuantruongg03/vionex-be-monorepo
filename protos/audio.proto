@@ -50,12 +50,13 @@ message PortReply {
 
 /**
  * UpdatePortRequest message for updating SFU port.
- * Contains room ID, user ID, and SFU listen port.
+ * Contains room ID, user ID, SFU listen port, and consumer SSRC.
  */
 message UpdatePortRequest {
   string roomId = 1;
   string userId = 2;
   int32 sfu_port = 3; // Actual SFU receiveTransport listen port
+  optional uint32 consumer_ssrc = 4; // Actual SSRC of SFU consumer for RTP routing
 }
 
 /**
