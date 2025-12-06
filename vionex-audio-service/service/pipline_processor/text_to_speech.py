@@ -100,6 +100,9 @@ def _tts_cosyvoice(text, language, user_id, room_id, speaker_embedding, speaker_
             language=language
         )
         
+        # Debug: Check raw TTS output
+        logger.info(f"[XTTS-DEBUG] Raw wav type: {type(wav)}, len: {len(wav) if hasattr(wav, '__len__') else 'N/A'}")
+        
         # Convert to numpy array if needed
         if isinstance(wav, list):
             final_audio = np.array(wav, dtype=np.float32)
@@ -110,21 +113,41 @@ def _tts_cosyvoice(text, language, user_id, room_id, speaker_embedding, speaker_
         
         src_sr = 24000  # XTTS-v2 outputs at 24kHz
         
+        # Debug: Check audio stats
+        logger.info(f"[XTTS-DEBUG] Audio shape: {final_audio.shape}, min: {final_audio.min():.4f}, max: {final_audio.max():.4f}, mean: {final_audio.mean():.4f}")
+        
+        # Check if audio is silent (all zeros or very low amplitude)
+        if final_audio.size == 0:
+            logger.error("[XTTS-DEBUG] Audio is EMPTY!")
+            return None
+        
+        audio_rms = np.sqrt(np.mean(final_audio**2))
+        logger.info(f"[XTTS-DEBUG] Audio RMS: {audio_rms:.6f}")
+        
+        if audio_rms < 0.001:
+            logger.warning(f"[XTTS-DEBUG] Audio is nearly SILENT! RMS={audio_rms}")
+        
         # Amplification if needed
         peak = float(np.max(np.abs(final_audio))) if final_audio.size else 1.0
         if peak < 0.3 and peak > 0:
             final_audio = final_audio * min(0.7 / peak, 3.0)
+            logger.info(f"[XTTS-DEBUG] Amplified audio, new peak: {np.max(np.abs(final_audio)):.4f}")
         
         # Convert to PCM16
         final_audio = np.clip(final_audio, -1.0, 1.0)
         pcm16 = (final_audio * 32767.0).astype(np.int16)
+        
+        # Debug: Check PCM16 stats
+        logger.info(f"[XTTS-DEBUG] PCM16 min: {pcm16.min()}, max: {pcm16.max()}, non-zero samples: {np.count_nonzero(pcm16)}/{len(pcm16)}")
         
         if return_format.lower() == "pcm16":
             return pcm16.tobytes()
         
         buf = io.BytesIO()
         write_wav(buf, rate=src_sr, data=pcm16)
-        return buf.getvalue()
+        wav_bytes = buf.getvalue()
+        logger.info(f"[XTTS-DEBUG] Final WAV size: {len(wav_bytes)} bytes, duration: {len(pcm16)/src_sr:.2f}s")
+        return wav_bytes
         
     except Exception as e:
         logger.error(f"[XTTS] TTS Error: {type(e).__name__}: {str(e)}")

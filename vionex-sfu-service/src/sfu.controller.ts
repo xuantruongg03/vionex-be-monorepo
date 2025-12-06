@@ -73,7 +73,11 @@ export class SfuController {
                 data: JSON.stringify({ router: routerData }),
             };
         } catch (error) {
-            logger.error('sfu.controller.ts', 'Error creating media room', error);
+            logger.error(
+                'sfu.controller.ts',
+                'Error creating media room',
+                error,
+            );
             throw new RpcException('Failed to create media room');
         }
     }
@@ -140,7 +144,11 @@ export class SfuController {
                 transport: JSON.stringify(transport),
             };
         } catch (error) {
-            logger.error('sfu.controller.ts', 'Error connecting transport', error);
+            logger.error(
+                'sfu.controller.ts',
+                'Error connecting transport',
+                error,
+            );
             throw new RpcException('Failed to connect transport');
         }
     }
@@ -165,7 +173,11 @@ export class SfuController {
     async handleCreateTransport(data: {
         room_id: string;
         is_producer?: boolean;
-    }): Promise<{ status: string; transport_data: string; is_producer?: boolean }> {
+    }): Promise<{
+        status: string;
+        transport_data: string;
+        is_producer?: boolean;
+    }> {
         try {
             const result =
                 await this.sfuService.createWebRtcTransportWithIceServers(
@@ -394,7 +406,11 @@ export class SfuController {
                 router_data: JSON.stringify(router.rtpCapabilities),
             };
         } catch (error) {
-            logger.error('sfu.controller.ts', 'Error getting media router', error);
+            logger.error(
+                'sfu.controller.ts',
+                'Error getting media router',
+                error,
+            );
             throw new RpcException('Failed to get media router');
         }
     }
@@ -442,7 +458,11 @@ export class SfuController {
                 message: 'Stream unpublished successfully',
             };
         } catch (error) {
-            logger.error('sfu.controller.ts', 'Error unpublishing stream', error);
+            logger.error(
+                'sfu.controller.ts',
+                'Error unpublishing stream',
+                error,
+            );
             throw new RpcException(
                 error.message || 'Failed to unpublish stream',
             );
@@ -514,7 +534,11 @@ export class SfuController {
                 message: 'Media room closed successfully',
             };
         } catch (error) {
-            logger.error('sfu.controller.ts', 'Error closing media room', error);
+            logger.error(
+                'sfu.controller.ts',
+                'Error closing media room',
+                error,
+            );
             throw new RpcException(
                 error.message || 'Failed to close media room',
             );
@@ -728,9 +752,15 @@ export class SfuController {
         source_language: string;
         target_language: string;
         audio_port: number;
-        send_port: number; // Added for bidirectional support
+        send_port: number; // Deprecated - kept for backward compatibility
         ssrc: number;
-    }): Promise<{ success: boolean; stream_id?: string; message?: string }> {
+    }): Promise<{
+        success: boolean;
+        stream_id?: string;
+        message?: string;
+        sfu_listen_port?: number;
+        consumer_ssrc?: number;
+    }> {
         try {
             const result = await this.sfuService.allocatePort(
                 data.room_id,
@@ -747,6 +777,8 @@ export class SfuController {
                 success: result.success,
                 stream_id: result.streamId,
                 message: result.message,
+                sfu_listen_port: result.sfuListenPort, // Return SFU listen port
+                consumer_ssrc: result.consumerSsrc, // Return actual consumer SSRC
             };
         } catch (error) {
             throw new RpcException({

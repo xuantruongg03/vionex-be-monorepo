@@ -1,5 +1,5 @@
 import torch
-from core.model import translation_models, translation_tokenizers, detect_model
+from core.model import translation_models, translation_tokenizers, detect_model, vi_correction_model, vi_correction_tokenizer
 from utils.log_manager import logger
 
 class TranslateProcess:
@@ -8,12 +8,79 @@ class TranslateProcess:
         self.tokenizers = translation_tokenizers
         self.detect_model = detect_model
         
+        # Vietnamese text correction model
+        self.vi_correction_model = vi_correction_model
+        self.vi_correction_tokenizer = vi_correction_tokenizer
+        
         # Supported language pairs
         self.supported_pairs = {
             "vi": "vi-en",  # Vietnamese to English
             "lo": "lo-en",  # Lao to English
             "en": "en-en"   # English (no translation)
         }
+    
+    def correct_vietnamese_text(self, text: str) -> str:
+        """
+        Correct Vietnamese text using ProtonX model before translation.
+        Fixes: OCR errors, typos, missing diacritics, word segmentation issues.
+        
+        Args:
+            text: Vietnamese text to correct
+            
+        Returns:
+            Corrected Vietnamese text
+        """
+        if not self.vi_correction_model or not self.vi_correction_tokenizer:
+            logger.debug("[Text-Correction] Model not loaded, skipping correction")
+            return text
+        
+        if not text or not text.strip():
+            return text
+        
+        try:
+            text = text.strip()
+            
+            # Skip if text is too short (likely already correct)
+            if len(text) < 5:
+                return text
+            
+            # Tokenize input
+            inputs = self.vi_correction_tokenizer(
+                text,
+                return_tensors="pt",
+                truncation=True,
+                max_length=128
+            )
+            
+            # Move to device
+            device = next(self.vi_correction_model.parameters()).device
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+            
+            # Generate corrected text
+            with torch.no_grad():
+                outputs = self.vi_correction_model.generate(
+                    **inputs,
+                    num_beams=5,
+                    num_return_sequences=1,
+                    max_new_tokens=128,
+                    length_penalty=1.0,
+                    early_stopping=True,
+                    repetition_penalty=1.2,
+                    no_repeat_ngram_size=2
+                )
+            
+            # Decode result
+            corrected = self.vi_correction_tokenizer.decode(outputs[0], skip_special_tokens=True)
+            
+            # Log if correction was made
+            if corrected != text:
+                logger.info(f"[Text-Correction] '{text}' → '{corrected}'")
+            
+            return corrected if corrected else text
+            
+        except Exception as e:
+            logger.warning(f"[Text-Correction] Error correcting text: {e}")
+            return text
 
     def _translate_process(self, text: str, src_lang: str, tgt_lang: str = "en"):
         """
@@ -59,8 +126,12 @@ class TranslateProcess:
             
             # Special handling for VinAI vi-en model
             if pair_key == "vi-en":
+                # Step 1: Correct Vietnamese text before translation
+                # This fixes OCR errors, typos, missing diacritics, etc.
+                corrected_text = self.correct_vietnamese_text(text)
+                
                 # VinAI-specific tokenization and generation
-                input_ids = tokenizer(text, return_tensors="pt").input_ids
+                input_ids = tokenizer(corrected_text, return_tensors="pt").input_ids
                 
                 # Move to device
                 try:

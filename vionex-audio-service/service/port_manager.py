@@ -1,7 +1,12 @@
 """
 Port Manager
 
-Centralized port management for RTP transports:
+DEPRECATED: This module is no longer used for translation cabins.
+All translation cabins now share SHARED_SOCKET_PORT (35000) with SSRC-based routing.
+This file is kept for backward compatibility but may be removed in future versions.
+
+Original purpose:
+- Centralized port management for RTP transports
 - Smart port allocation with fallback strategies
 - Port usage tracking and statistics
 - Thread-safe port operations

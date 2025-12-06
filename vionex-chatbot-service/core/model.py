@@ -108,7 +108,7 @@ class SimpleModel:
             with torch.no_grad():
                 outputs = self.model.generate(
                     inputs, 
-                    max_new_tokens=100,  # Limit to 100 new tokens (~2-3 sentences)
+                    max_new_tokens=1024,  # Limit to 1024 new tokens (~2-3 sentences)
                     temperature=0.7,
                     do_sample=True,
                     top_p=0.9,  # Nucleus sampling for better quality

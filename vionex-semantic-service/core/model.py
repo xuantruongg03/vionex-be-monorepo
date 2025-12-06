@@ -65,3 +65,30 @@ translation_tokenizers["en-en"] = None
 logger.info("[TRANSLATION] en-en - no translation needed")
 
 logger.info(f"[TRANSLATION] MarianMT models loaded successfully: {list(translation_models.keys())}")
+
+# ============================================================================
+# VIETNAMESE TEXT CORRECTION MODEL
+# ============================================================================
+# Model for correcting Vietnamese text (OCR errors, typos, diacritics, etc.)
+# before sending to machine translation for better translation quality
+logger.info("[TEXT-CORRECTION] Loading Vietnamese text correction model (ProtonX)...")
+
+vi_correction_model = None
+vi_correction_tokenizer = None
+
+try:
+    import torch
+    
+    vi_correction_model_path = "protonx-models/protonx-legal-tc"
+    vi_correction_tokenizer = AutoTokenizer.from_pretrained(vi_correction_model_path)
+    vi_correction_model = AutoModelForSeq2SeqLM.from_pretrained(vi_correction_model_path)
+    
+    # Move to appropriate device
+    vi_correction_device = torch.device("cuda" if TYPE_ENGINE == "cuda" and torch.cuda.is_available() else "cpu")
+    vi_correction_model.to(vi_correction_device)
+    vi_correction_model.eval()
+    
+    logger.info(f"[TEXT-CORRECTION] Vietnamese correction model loaded on {vi_correction_device}")
+except Exception as e:
+    logger.warning(f"[TEXT-CORRECTION] Failed to load Vietnamese correction model: {e}")
+    logger.warning("[TEXT-CORRECTION] Vietnamese text correction will be disabled")

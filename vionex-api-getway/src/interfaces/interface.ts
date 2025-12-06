@@ -64,7 +64,14 @@ export interface ChatBotGrpcServiceInterface {
         question: string;
         room_id: string;
         organization_id?: string;
+        room_key?: string;
     }): Observable<{ answer: string }>;
+
+    extractMeetingSummary(data: {
+        room_id: string;
+        organization_id?: string;
+        room_key?: string;
+    }): Observable<{ summary_json: string }>;
 }
 
 export interface RoomGrpcService {
