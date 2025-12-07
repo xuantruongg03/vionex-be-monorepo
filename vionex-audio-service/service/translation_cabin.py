@@ -6,6 +6,7 @@ import queue
 import threading
 import time
 import wave
+import numpy as np
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
@@ -142,7 +143,30 @@ class PlaybackQueue:
             
     def is_ready(self) -> bool:
         """Check if queue is ready to start playback"""
-        return not self._buffering and self._playback_started
+        # If already started, return True
+        if not self._buffering and self._playback_started:
+            return True
+        
+        # Check if buffer conditions are met (even if not checked during enqueue)
+        if self._buffer_start_time is not None:
+            buffered_time = time.time() - self._buffer_start_time
+            queue_size = self._queue.qsize()
+            
+            # Ready if buffer time elapsed OR enough chunks
+            if buffered_time >= self.BUFFER_DURATION and queue_size > 0:
+                if self._buffering:
+                    self._buffering = False
+                    self._playback_started = True
+                    logger.info(f"[PLAYBACK-QUEUE] Buffer ready (timeout)! Queue size: {queue_size}, buffered: {buffered_time:.2f}s")
+                return True
+            elif queue_size >= self.MIN_QUEUE_SIZE:
+                if self._buffering:
+                    self._buffering = False
+                    self._playback_started = True
+                    logger.info(f"[PLAYBACK-QUEUE] Buffer ready (queue full)! Queue size: {queue_size}")
+                return True
+        
+        return False
         
     def get_stats(self) -> dict:
         """Get queue statistics"""
@@ -519,17 +543,6 @@ class TranslationCabinManager:
                     user_id=user_id
                 )
                 
-                # Initialize audio recorder for debugging
-                # DISABLED: Reduce CPU load during testing
-                # cabin.audio_recorder = AudioRecorder(cabin_id)
-                
-                # ============================================================================
-                # Step 4: Setup SSRC and register with SharedSocketManager
-                # ============================================================================
-                # IMPORTANT: All cabins share single socket (port from config.SHARED_SOCKET_PORT)
-                #            Routing is based on SSRC extracted from RTP header
-                #            NO need for individual port per cabin
-                
                 # Generate unique SSRC from cabin ID for RTP identification
                 cabin_ssrc = hash(cabin_id) & 0xFFFFFFFF
                 cabin.ssrc = cabin_ssrc
@@ -554,11 +567,6 @@ class TranslationCabinManager:
                 cabin._shared_socket_manager = self.socket_manager
                 cabin._shared_socket_id = cabin_id
                 
-                # ============================================================================
-                # Step 5: All cabins use SHARED_SOCKET_PORT (no virtual ports)
-                # ============================================================================
-                # All RTP communication uses SHARED_SOCKET_PORT with SSRC-based routing
-                # ports tuple now contains (SHARED_SOCKET_PORT, SHARED_SOCKET_PORT)
                 receive_port, send_port = ports
                 cabin.receive_port = receive_port      # SHARED_SOCKET_PORT
                 cabin.send_port = send_port            # SHARED_SOCKET_PORT
@@ -659,14 +667,6 @@ class TranslationCabinManager:
                     duration=chunk_duration
                 )
                 
-                # SAVE INDIVIDUAL CHUNK for debugging
-                # DISABLED: Reduce CPU load during testing
-                # if cabin.audio_recorder:
-                #     cabin.audio_recorder.write_audio(complete_chunk)
-                
-                # --- TUMBLING WINDOW LOGIC ---
-                # The buffer now only returns complete, non-overlapping chunks.
-                # We can process them directly.
                 logger.info(f"[TUMBLING-WINDOW] Processing chunk {context_chunk.chunk_id} ({context_chunk.duration:.2f}s)")
                 processing_task = {
                     'context_chunks': [context_chunk], # Still pass as a list for compatibility
@@ -754,10 +754,11 @@ class TranslationCabinManager:
                             continue
                         
                         # Send audio chunk to SFU
-                        logger.debug(
-                            f"[PLAYBACK-THREAD] Sending chunk {audio_chunk.chunk_id}, "
+                        logger.info(
+                            f"[PLAYBACK-THREAD] 📤 Sending chunk {audio_chunk.chunk_id}, "
                             f"duration: {audio_chunk.duration:.2f}s, "
-                            f"queue size: {cabin.playback_queue._queue.qsize()}"
+                            f"size: {len(audio_chunk.data)} bytes, "
+                            f"queue remaining: {cabin.playback_queue._queue.qsize()}"
                         )
                         
                         # SAVE OUTPUT AUDIO before sending to SFU
@@ -799,7 +800,7 @@ class TranslationCabinManager:
             if not success:
                 logger.error(f"[SEND-AUDIO-SYNC] Failed to send audio to SFU after {elapsed:.2f}s")
             else:
-                logger.info(f"[SEND-AUDIO-SYNC] ✅ Successfully sent audio to SFU in {elapsed:.2f}s")
+                logger.info(f"[SEND-AUDIO-SYNC] Successfully sent audio to SFU in {elapsed:.2f}s")
         except Exception as e:
             elapsed = time.time() - start_time
             logger.error(f"[SEND-AUDIO-SYNC] Error sending audio after {elapsed:.2f}s: {e}")
@@ -872,17 +873,23 @@ class TranslationCabinManager:
             concatenated_audio = b''.join([chunk.audio_data for chunk in context_chunks])
             total_duration = sum(chunk.duration for chunk in context_chunks)
             
+            # Calculate audio energy for logging
+            pcm_array = np.frombuffer(concatenated_audio, dtype=np.int16)
+            audio_energy = np.mean(np.abs(pcm_array))
+            audio_max = np.max(np.abs(pcm_array))
+            
             logger.info(
                 f"[TUMBLING-WINDOW-{latest_chunk_id}] Processing chunk: "
-                f"{len(context_chunks)} chunks, total {total_duration:.2f}s"
+                f"{len(context_chunks)} chunks, total {total_duration:.2f}s, "
+                f"energy={audio_energy:.1f}, max={audio_max}"
             )
             
             # Step 2: VAD Gate - Skip STT if no speech detected (prevents Whisper hallucinations)
             has_speech = cabin.vad.detect_speech(concatenated_audio)
             if not has_speech:
                 logger.info(
-                    f"[TUMBLING-WINDOW-{latest_chunk_id}] No speech detected (VAD filtered), "
-                    f"skipping STT to prevent hallucination. Duration: {total_duration:.2f}s"
+                    f"[TUMBLING-WINDOW-{latest_chunk_id}] VAD BLOCKED - No speech detected, "
+                    f"skipping STT to prevent hallucination. Duration: {total_duration:.2f}s, energy={audio_energy:.1f}"
                 )
                 # Reset status and return - do not process silence through STT
                 cabin.status = CabinStatus.LISTENING
@@ -890,7 +897,10 @@ class TranslationCabinManager:
             
             # Step 3: Process through translation pipeline (speech detected)
             cabin.status = CabinStatus.TRANSLATING
-            logger.info(f"[TUMBLING-WINDOW-{latest_chunk_id}] Speech detected, processing through STT...")
+            logger.info(
+                f"[TUMBLING-WINDOW-{latest_chunk_id}] VAD PASSED - Speech detected, "
+                f"energy={audio_energy:.1f}, processing through STT..."
+            )
             
             # Get cached pipeline to avoid recreation overhead
             pipeline = self.get_or_create_pipeline(cabin)
@@ -1370,13 +1380,13 @@ class TranslationCabinManager:
                 cabin.ssrc = consumer_ssrc
                 cabin._rtp_ssrc = consumer_ssrc  # Reset so next send uses new SSRC
                 
-                logger.info(f"[CABIN-MANAGER] ✅ Updated cabin {cabin_id} SSRC: {consumer_ssrc} (was: {old_ssrc})")
+                logger.info(f"[CABIN-MANAGER] Updated cabin {cabin_id} SSRC: {consumer_ssrc} (was: {old_ssrc})")
                 
                 # Also update SharedSocketManager's SSRC routing if cabin is using shared socket
                 if cabin._shared_socket_manager and cabin._shared_socket_id:
                     cabin._shared_socket_manager.update_cabin_ssrc(cabin._shared_socket_id, consumer_ssrc)
             
-            logger.info(f"[CABIN-MANAGER] ✅ Updated cabin {cabin_id} SFU port: {sfu_port}, consumer SSRC: {consumer_ssrc}")
+            logger.info(f"[CABIN-MANAGER] Updated cabin {cabin_id} SFU port: {sfu_port}, consumer SSRC: {consumer_ssrc}")
             return True
 
     def get_cabin_info(self, cabin_id: str) -> Optional[Dict[str, Any]]:

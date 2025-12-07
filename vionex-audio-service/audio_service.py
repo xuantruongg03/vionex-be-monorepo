@@ -209,7 +209,7 @@ class AudioService(audio_pb2_grpc.AudioServiceServicer):
                     ssrc=0
                 )
             
-            logger.info(f"✅ Cabin created: room={request.roomId}, user={request.userId}, "
+            logger.info(f"Cabin created: room={request.roomId}, user={request.userId}, "
                        f"ports=({cabin_info['rtp_port']}, {cabin_info['send_port']}), ssrc={cabin_info['ssrc']}")
             
             return audio_pb2.PortReply(
@@ -263,7 +263,7 @@ class AudioService(audio_pb2_grpc.AudioServiceServicer):
             success = cabin_manager.update_sfu_port(existing_cabin_id, request.sfu_port, consumer_ssrc)
             
             if success:
-                logger.info(f"✅ Updated cabin {existing_cabin_id} with SFU port: {request.sfu_port}, consumer SSRC: {consumer_ssrc}")
+                logger.info(f"Updated cabin {existing_cabin_id} with SFU port: {request.sfu_port}, consumer SSRC: {consumer_ssrc}")
                 return audio_pb2.UpdatePortReply(
                     success=True,
                     message=f"SFU port updated to {request.sfu_port}, consumer SSRC: {consumer_ssrc}"

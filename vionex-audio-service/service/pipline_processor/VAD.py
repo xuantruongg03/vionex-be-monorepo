@@ -16,11 +16,14 @@ class VoiceActivityDetector:
     - Configurable energy threshold and speech ratio
     - Hangover logic for smooth transitions
     - Higher thresholds to prevent Whisper hallucinations on silence
+    
+    CRITICAL: Both WebRTC VAD speech ratio AND energy threshold must be met
+    to prevent hallucinations on silence/noise.
     """
-    energy_threshold: float = 50.0  # Increased from 25 to reduce false positives
-    silence_duration_ms: int = 800  # Silence tolerance for hangover
-    vad_aggressiveness: int = 2  # Increased from 1 for stricter detection (0-3)
-    min_speech_ratio: float = 0.2  # At least 20% of frames must have speech
+    energy_threshold: float = 200.0  # Increased from 50 to prevent noise triggering
+    silence_duration_ms: int = 300   # Reduced from 800ms for faster silence detection
+    vad_aggressiveness: int = 3      # Maximum strictness (0-3)
+    min_speech_ratio: float = 0.3    # At least 30% of frames must have speech
     last_speech_time: float = field(default=0.0)
     _debug_counter: int = field(default=0, init=False)
     _vad: object = field(default=None, init=False)  # WebRTC VAD instance
@@ -97,21 +100,25 @@ class VoiceActivityDetector:
             # Calculate speech ratio
             speech_ratio = speech_frames / max(total_frames, 1)
             
-            # Decide based on BOTH speech ratio AND energy threshold
-            # Must meet minimum speech ratio OR have high energy
+            # CRITICAL: Must meet BOTH conditions to prevent hallucinations
+            # 1. WebRTC VAD detects speech in sufficient frames
+            # 2. Audio energy is above threshold (not just noise)
             has_sufficient_speech = (
-                (total_frames > 0 and speech_ratio >= self.min_speech_ratio) or
+                total_frames > 0 and 
+                speech_ratio >= self.min_speech_ratio and
                 energy > self.energy_threshold
             )
             
+            # Always log VAD decision for debugging Whisper hallucinations
+            if self._debug_counter % 10 == 0:
+                logger.info(
+                    f"[VAD] Check: frames={speech_frames}/{total_frames} "
+                    f"({speech_ratio:.1%}), energy={energy:.1f} (threshold={self.energy_threshold}), "
+                    f"decision={'SPEECH' if has_sufficient_speech else 'SILENCE'}"
+                )
+            
             if has_sufficient_speech:
                 self.last_speech_time = current_time
-                # Log periodically for debugging
-                if self._debug_counter % 50 == 0:
-                    logger.info(
-                        f"[VAD] Speech DETECTED: frames={speech_frames}/{total_frames} "
-                        f"({speech_ratio:.1%}), energy={energy:.1f}"
-                    )
                 return True
 
             # No sufficient speech in this batch - check hangover

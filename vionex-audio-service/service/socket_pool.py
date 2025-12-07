@@ -223,7 +223,7 @@ class SharedSocketManager:
             self.ssrc_to_cabin[new_ssrc] = cabin_id
             self.cabin_to_ssrc[cabin_id] = new_ssrc
             
-            logger.info(f"[SHARED-SOCKET] ✅ Updated SSRC routing for {cabin_id}: {old_ssrc} -> {new_ssrc}")
+            logger.info(f"[SHARED-SOCKET] Updated SSRC routing for {cabin_id}: {old_ssrc} -> {new_ssrc}")
             return True
     
     def _start_rtp_router(self):
@@ -252,7 +252,7 @@ class SharedSocketManager:
         while self.running:
             try:
                 if not self.rx_sock:
-                    logger.error("[RTP-ROUTER] ❌ RX socket is None!")
+                    logger.error("[RTP-ROUTER] RX socket is None!")
                     time.sleep(0.1)
                     continue
                 

@@ -2281,7 +2281,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
             logger.info(
                 'sfu.service.ts',
-                `[SFU Service] ✅ Translation cabin created: ${cabinId}, SFU listen port: ${sfuListenPort}, consumer SSRC: ${consumerSsrc}`,
+                `[SFU Service] Translation cabin created: ${cabinId}, SFU listen port: ${sfuListenPort}, consumer SSRC: ${consumerSsrc}`,
             );
 
             return {
