@@ -1,0 +1,302 @@
+================================================================================
+        HƯỚNG DẪN CÀI ĐẶT AUDIO SERVICE TRÊN UBUNTU 24.04 (CHẠY TAY)
+================================================================================
+
+Nếu không chạy được file audio_setup.sh, hãy chạy từng lệnh dưới đây theo thứ tự.
+Copy từng block lệnh và paste vào terminal.
+
+================================================================================
+BƯỚC 1: CẬP NHẬT HỆ THỐNG VÀ CÀI ĐẶT CƠ BẢN
+================================================================================
+
+# Cập nhật hệ thống
+sudo apt update && sudo apt upgrade -y
+
+# Cài đặt công cụ cơ bản
+sudo apt install -y wget curl git build-essential software-properties-common lsof htop unzip
+
+================================================================================
+BƯỚC 2: CÀI ĐẶT PYTHON 3
+================================================================================
+
+sudo apt install -y python3 python3-pip python3-venv python3-dev python3-full
+
+================================================================================
+BƯỚC 3: CÀI ĐẶT THƯ VIỆN AUDIO (RẤT QUAN TRỌNG - KHÔNG ĐƯỢC BỎ QUA)
+================================================================================
+
+# Opus codec (bắt buộc cho opuslib)
+sudo apt install -y libopus0 libopus-dev
+
+# FFmpeg (bắt buộc cho xử lý audio)
+sudo apt install -y ffmpeg
+
+# PortAudio (bắt buộc cho audio I/O)
+sudo apt install -y portaudio19-dev
+
+# Thư viện audio bổ sung
+sudo apt install -y libasound2-dev libsndfile1 libsndfile1-dev libffi-dev libssl-dev
+
+================================================================================
+BƯỚC 4: CÀI ĐẶT CUDA (CHỈ KHI CÓ GPU NVIDIA)
+================================================================================
+
+# Kiểm tra có GPU không
+lspci | grep -i nvidia
+
+# NẾU CÓ GPU, chạy các lệnh sau:
+
+# Tải CUDA keyring cho Ubuntu 24.04
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+
+# Cài đặt keyring
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+rm cuda-keyring_1.1-1_all.deb
+
+# Cài đặt CUDA
+sudo apt update
+sudo apt install -y cuda-cudart-12-8 cuda-compat-12-8
+
+# Cài đặt cuDNN
+sudo apt install -y libcudnn9-cuda-12 libcudnn9-dev-cuda-12
+
+# Tạo file environment CUDA
+sudo tee /etc/profile.d/cuda.sh > /dev/null << 'EOF'
+export CUDA_HOME=/usr/local/cuda-12.8
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+export PATH=$CUDA_HOME/bin:$PATH
+EOF
+
+# Áp dụng ngay
+source /etc/profile.d/cuda.sh
+
+================================================================================
+BƯỚC 5: THIẾT LẬP AUDIO SERVICE
+================================================================================
+
+# Di chuyển vào thư mục audio service
+cd /path/to/vionex-backend/vionex-audio-service
+
+# Tạo các thư mục cần thiết
+mkdir -p transcripts logs models voice_clones
+
+# Tạo virtual environment
+python3 -m venv venv
+
+# Kích hoạt virtual environment
+source venv/bin/activate
+
+# Nâng cấp pip
+pip install --upgrade pip setuptools wheel
+
+================================================================================
+BƯỚC 6: CÀI ĐẶT PYTORCH
+================================================================================
+
+# CHỌN 1 TRONG 2:
+
+# Nếu CÓ GPU NVIDIA:
+pip install torch>=2.6.0 torchaudio>=2.6.0 --index-url https://download.pytorch.org/whl/cu124
+
+# Nếu KHÔNG có GPU (CPU only):
+pip install torch>=2.6.0 torchaudio>=2.6.0 --index-url https://download.pytorch.org/whl/cpu
+
+================================================================================
+BƯỚC 7: CÀI ĐẶT CÁC PACKAGE PYTHON
+================================================================================
+
+# Cài đặt từ requirements.txt
+pip install -r requirements.txt
+
+# Nếu gặp lỗi opuslib, cài riêng:
+pip install opuslib
+
+# Nếu gặp lỗi TTS, cài riêng:
+pip install TTS
+
+================================================================================
+BƯỚC 8: KIỂM TRA CÀI ĐẶT
+================================================================================
+
+# Kiểm tra PyTorch (có GPU)
+python3 -c "import torch; print('PyTorch:', torch.__version__, '| CUDA:', torch.cuda.is_available())"
+
+# Kiểm tra OpusLib
+python3 -c "import opuslib; print('OpusLib: OK')"
+
+# Kiểm tra Faster-Whisper
+python3 -c "from faster_whisper import WhisperModel; print('Faster-Whisper: OK')"
+
+# Kiểm tra Coqui TTS
+python3 -c "from TTS.api import TTS; print('Coqui TTS: OK')"
+
+================================================================================
+BƯỚC 9: TẠO FILE .ENV
+================================================================================
+
+# Tạo file .env (thay YOUR_SERVER_IP bằng IP thực của server)
+cat > .env << 'EOF'
+MIN_PORT=35000
+MAX_PORT=35400
+GRPC_PORT=30005
+TRANSCRIPT_DIR=./transcripts
+MODEL_WHISPER=large-v2
+TYPE_ENGINE=cuda
+
+WHISPER_COMPUTE_TYPE=float16
+
+TTS_TEMPERATURE=0.6
+TTS_LENGTH_PENALTY=0.9
+TTS_REPETITION_PENALTY=2.8
+
+ENABLE_MIXED_PRECISION=true
+ENABLE_TENSOR_CORES=true
+BATCH_SIZE=3
+
+SEMANTIC_SERVICE_HOST=localhost
+SEMANTIC_SERVICE_PORT=30006
+
+SFU_SERVICE_HOST=localhost
+
+MEDIASOUP_ANNOUNCED_IP=YOUR_SERVER_IP
+
+ENABLE_TEST_MODE=false
+
+LOG_LEVEL=INFO
+LOG_TO_FILE=true
+LOG_DIR=logs
+LOG_FILE_PREFIX=audio_service
+
+ENABLE_TEXT_CORRECTOR=false
+TEXT_CORRECTOR_MODEL_SIZE=small
+SHARED_SOCKET_PORT=35000
+
+COQUI_TOS_AGREED=1
+ENABLE_TRANSLATION=false
+EOF
+
+# Sửa file .env với IP của bạn
+nano .env
+# -> Thay YOUR_SERVER_IP bằng IP thực
+
+# Nếu dùng CPU thay vì GPU, đổi TYPE_ENGINE=cpu
+
+================================================================================
+BƯỚC 10: CÀI ĐẶT NODE.JS VÀ PM2 (TÙY CHỌN - CHO PRODUCTION)
+================================================================================
+
+# Cài Node.js 20
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -
+sudo apt install -y nodejs
+
+# Cài PM2
+sudo npm install -g pm2
+
+# Cấu hình PM2 tự khởi động
+pm2 startup systemd
+
+================================================================================
+BƯỚC 11: CẤU HÌNH FIREWALL
+================================================================================
+
+sudo ufw allow ssh
+sudo ufw allow 30005/tcp comment 'Audio Service gRPC'
+sudo ufw allow 35000:35400/udp comment 'Audio RTP ports'
+sudo ufw enable
+
+================================================================================
+BƯỚC 12: CHẠY AUDIO SERVICE
+================================================================================
+
+# CÁCH 1: Chạy trực tiếp (cho development/debug)
+cd /path/to/vionex-backend/vionex-audio-service
+source venv/bin/activate
+export COQUI_TOS_AGREED=1
+python audio_service.py
+
+# CÁCH 2: Chạy với PM2 (cho production)
+cd /path/to/vionex-backend
+
+# Tạo file ecosystem.config.js
+cat > ecosystem.config.js << 'EOF'
+module.exports = {
+  apps: [
+    {
+      name: 'audio-service',
+      script: 'venv/bin/python',
+      args: 'audio_service.py',
+      cwd: './vionex-audio-service',
+      interpreter: 'none',
+      env: {
+        CUDA_HOME: '/usr/local/cuda-12.8',
+        LD_LIBRARY_PATH: '/usr/local/cuda-12.8/lib64:/usr/lib/x86_64-linux-gnu',
+        PYTHONUNBUFFERED: '1',
+        COQUI_TOS_AGREED: '1'
+      },
+      error_file: './logs/audio-service-error.log',
+      out_file: './logs/audio-service-out.log',
+      autorestart: true,
+      max_memory_restart: '4G'
+    }
+  ]
+};
+EOF
+
+# Tạo thư mục logs
+mkdir -p logs
+
+# Chạy với PM2
+pm2 start ecosystem.config.js
+pm2 save
+
+================================================================================
+CÁC LỆNH PM2 THƯỜNG DÙNG
+================================================================================
+
+pm2 status                    # Xem trạng thái service
+pm2 logs audio-service        # Xem logs
+pm2 restart audio-service     # Khởi động lại
+pm2 stop audio-service        # Dừng service
+pm2 delete audio-service      # Xóa service khỏi PM2
+pm2 monit                     # Monitor realtime
+
+================================================================================
+KHẮC PHỤC LỖI THƯỜNG GẶP
+================================================================================
+
+1. Lỗi "opuslib" không import được:
+   -> sudo apt install libopus-dev
+   -> pip install opuslib
+
+2. Lỗi CUDA not available:
+   -> Kiểm tra driver: nvidia-smi
+   -> Kiểm tra CUDA: nvcc --version
+
+3. Lỗi "No module named 'proto.audio_pb2'":
+   -> Chạy lại bước generate proto
+
+4. Lỗi permission denied:
+   -> sudo chown -R $USER:$USER vionex-audio-service
+
+5. Port 30005 đang bị chiếm:
+   -> sudo lsof -i :30005
+   -> sudo kill -9 <PID>
+
+6. Lỗi model download chậm/timeout:
+   -> Lần đầu chạy sẽ tải model Whisper (~3GB cho large-v2)
+   -> Đợi hoàn thành hoặc dùng model nhỏ hơn (base, small)
+
+================================================================================
+KIỂM TRA SAU KHI CHẠY
+================================================================================
+
+# Kiểm tra service đang chạy
+ps aux | grep audio_service
+
+# Kiểm tra port đang listen
+sudo netstat -tlnp | grep 30005
+
+# Test gRPC connection (nếu có grpcurl)
+grpcurl -plaintext localhost:30005 list
+
+================================================================================

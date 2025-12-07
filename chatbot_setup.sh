@@ -1,16 +1,43 @@
 #!/bin/bash
 
 ################################################################################
-# Vionex Backend Services Setup Script
+# Vionex Chatbot Service Setup Script for Ubuntu 24.04
 # 
 # This script installs and configures:
-# - CUDA 12.8 + cuDNN 9
-# - Python environment with GPU support
-# - Audio Service dependencies (Whisper, TTS, Opus, FFmpeg)
-# - Chatbot Service dependencies
+# - CUDA 12.8 + cuDNN 9 (for GPU support)
+# - Python environment with all dependencies
+# - Chatbot Service dependencies (Transformers, PEFT, bitsandbytes)
 # - PM2 for process management
 #
-# Usage: sudo bash setup.sh
+# Usage: sudo bash chatbot_setup.sh
+# 
+# NOTE: Run this script from the vionex-backend directory
+################################################################################
+
+################################################################################
+# ⚠️  CONFIGURATION - CHANGE THESE VALUES BEFORE RUNNING
+################################################################################
+
+# Hugging Face Token (REQUIRED - get from https://huggingface.co/settings/tokens)
+HUGGINGFACE_TOKEN="YOUR_HUGGINGFACE_TOKEN_HERE"
+
+# Model repositories
+BASE_MODEL_REPO="xuantruongg003/openchat-3.5-0106"
+LORA_MODEL_REPO="xuantruongg003/openchat-lora-only"
+
+# Semantic Service configuration
+SEMANTIC_SERVICE_HOST="localhost"
+SEMANTIC_SERVICE_PORT="30006"
+
+# Chatbot Service gRPC port
+CHATBOT_GRPC_PORT="30007"
+
+# GPU Configuration (which GPU to use, 0 = first GPU)
+CUDA_VISIBLE_DEVICES="0"
+
+# Model cache directory
+MODEL_CACHE_DIR="./models/.cache"
+
 ################################################################################
 
 set -e  # Exit on error
@@ -45,7 +72,12 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-log_info "Starting Vionex Backend Services Setup..."
+# Get the actual user who ran sudo
+ACTUAL_USER=${SUDO_USER:-$USER}
+ACTUAL_HOME=$(eval echo ~$ACTUAL_USER)
+
+log_info "Starting Vionex Chatbot Service Setup for Ubuntu 24.04..."
+log_info "Running as root, actual user: $ACTUAL_USER"
 echo "========================================"
 
 ################################################################################
@@ -100,21 +132,32 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     curl \
     git \
     build-essential \
-    software-properties-common
+    software-properties-common \
+    lsof \
+    htop \
+    unzip
 
 log_success "System preparation completed"
 
 ################################################################################
-# 2. CUDA 12.8 Installation
+# 2. CUDA 12.8 Installation (Ubuntu 24.04)
 ################################################################################
 log_info "Step 2: Installing CUDA 12.8..."
 
-# Check if CUDA is already installed
+# Check if NVIDIA GPU exists
+if ! lspci | grep -i nvidia > /dev/null 2>&1; then
+    log_error "No NVIDIA GPU detected. Chatbot service REQUIRES GPU!"
+    log_error "Please ensure you have an NVIDIA GPU installed."
+    exit 1
+fi
+
+USE_GPU=true
+
 if [ -d "/usr/local/cuda-12.8" ]; then
     log_warning "CUDA 12.8 already installed, skipping..."
 else
-    log_info "Downloading CUDA keyring..."
-    wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+    log_info "Downloading CUDA keyring for Ubuntu 24.04..."
+    wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
     
     log_info "Installing CUDA keyring..."
     dpkg -i cuda-keyring_1.1-1_all.deb
@@ -170,146 +213,27 @@ export PATH=$CUDA_HOME/bin:$PATH
 ################################################################################
 log_info "Step 5: Installing Python 3 and pip..."
 
-DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-pip python3-venv python3-dev
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-dev \
+    python3-full
 
 log_success "Python 3 installed"
 
 ################################################################################
-# 6. Audio Processing Dependencies
+# 6. Chatbot Service Setup
 ################################################################################
-log_info "Step 6: Installing audio processing dependencies..."
-
-# Install Opus codec library
-log_info "Installing Opus codec..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y libopus0 libopus-dev
-
-# Install FFmpeg
-log_info "Installing FFmpeg..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg
-
-# Install PortAudio (for audio I/O)
-log_info "Installing PortAudio..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y portaudio19-dev
-
-log_success "Audio dependencies installed"
-
-################################################################################
-# 7. Audio Service Setup
-################################################################################
-log_info "Step 7: Setting up Audio Service..."
-
-AUDIO_SERVICE_DIR="vionex-audio-service"
-if [ -d "$AUDIO_SERVICE_DIR" ]; then
-    cd "$AUDIO_SERVICE_DIR"
-    
-    # Create virtual environment
-    if [ ! -d "venv" ]; then
-        log_info "Creating Python virtual environment for Audio Service..."
-        python3 -m venv venv
-    fi
-    
-    # Activate virtual environment and install dependencies
-    log_info "Installing Audio Service Python packages..."
-    source venv/bin/activate
-    
-    # Upgrade pip
-    pip install --upgrade pip
-    
-    # Install requirements
-    if [ -f "requirements.txt" ]; then
-        pip install -r requirements.txt
-        log_success "Audio Service dependencies installed"
-    else
-        log_error "requirements.txt not found in $AUDIO_SERVICE_DIR"
-    fi
-    
-    # Verify CUDA installation with PyTorch
-    log_info "Verifying CUDA installation with PyTorch..."
-    python3 -c "import torch; print('PyTorch version:', torch.__version__); print('CUDA available:', torch.cuda.is_available()); print('CUDA version:', torch.version.cuda); print('cuDNN version:', torch.backends.cudnn.version()); print('cuDNN available:', torch.backends.cudnn.is_available())" || log_warning "CUDA verification failed"
-    
-    # Verify Opus library
-    log_info "Verifying Opus library..."
-    python3 -c "import opuslib; print('OpusLib version:', opuslib.__version__)" || log_warning "OpusLib not installed properly"
-    
-    deactivate
-    
-    # Create .env file if it doesn't exist
-    if [ ! -f ".env" ]; then
-        log_info "Creating .env file for Audio Service..."
-        cat > .env << 'ENVEOF'
-MIN_PORT=35000
-MAX_PORT=35400
-GRPC_PORT=30005
-TRANSCRIPT_DIR=./transcripts
-MODEL_WHISPER=large-v2
-TYPE_ENGINE=cuda
-
-# Whisper optimization - RTX A4000 Ampere with Tensor Cores Gen 3
-WHISPER_COMPUTE_TYPE=float16
-
-# TTS optimization parameters - Balanced for A4000 production stability
-TTS_TEMPERATURE=0.6
-TTS_LENGTH_PENALTY=0.9
-TTS_REPETITION_PENALTY=2.8
-
-# GPU optimization - A4000 Ampere architecture
-ENABLE_MIXED_PRECISION=true
-ENABLE_TENSOR_CORES=true
-BATCH_SIZE=3
-
-# A4000 specific - Professional workstation optimizations
-ENABLE_ECC_MONITORING=true
-POWER_LIMIT=140
-THERMAL_THROTTLE_TEMP=83
-
-SEMANTIC_SERVICE_HOST=localhost
-SEMANTIC_SERVICE_PORT=30006
-
-SFU_SERVICE_HOST=localhost
-
-MEDIASOUP_ANNOUNCED_IP=your_server_ip_here
-
-ENABLE_TEST_MODE=false
-
-# Logging configuration
-LOG_LEVEL=INFO
-LOG_TO_FILE=true
-LOG_DIR=logs
-LOG_FILE_PREFIX=audio_service
-
-ENABLE_TEXT_CORRECTOR=false
-
-# Model size: "small" or "base" (default: small)
-# small: 300MB, faster (0.08s CPU)
-# base:  580MB, better quality (0.15s CPU)
-TEXT_CORRECTOR_MODEL_SIZE=small
-SHARED_SOCKET_PORT=35000
-
-# Coqui TTS License Agreement (set to 1 to auto-accept non-commercial license)
-COQUI_TOS_AGREED=1
-
-# Translation models (set to false to disable and avoid warnings)
-ENABLE_TRANSLATION=false
-ENVEOF
-        log_success ".env file created for Audio Service"
-        log_warning "Please update MEDIASOUP_ANNOUNCED_IP, SEMANTIC_SERVICE_HOST and SFU_SERVICE_HOST in vionex-audio-service/.env"
-    else
-        log_warning ".env file already exists for Audio Service"
-    fi
-    
-    cd ..
-else
-    log_error "Audio Service directory not found: $AUDIO_SERVICE_DIR"
-fi
-
-################################################################################
-# 8. Chatbot Service Setup
-################################################################################
-log_info "Step 8: Setting up Chatbot Service..."
+log_info "Step 6: Setting up Chatbot Service..."
 
 CHATBOT_SERVICE_DIR="vionex-chatbot-service"
 if [ -d "$CHATBOT_SERVICE_DIR" ]; then
     cd "$CHATBOT_SERVICE_DIR"
+    
+    # Create required directories
+    log_info "Creating required directories..."
+    mkdir -p models/.cache logs
     
     # Create virtual environment
     if [ ! -d "venv" ]; then
@@ -321,56 +245,74 @@ if [ -d "$CHATBOT_SERVICE_DIR" ]; then
     log_info "Installing Chatbot Service Python packages..."
     source venv/bin/activate
     
-    # Upgrade pip
-    pip install --upgrade pip
+    # Upgrade pip, setuptools, wheel
+    pip install --upgrade pip setuptools wheel
+    
+    # Install PyTorch with CUDA support first
+    log_info "Installing PyTorch with CUDA support..."
+    pip install torch>=2.6.0 --index-url https://download.pytorch.org/whl/cu124
     
     # Install requirements
     if [ -f "requirements.txt" ]; then
+        log_info "Installing requirements.txt..."
         pip install -r requirements.txt
         log_success "Chatbot Service dependencies installed"
     else
         log_error "requirements.txt not found in $CHATBOT_SERVICE_DIR"
     fi
     
+    # Verify installations
+    log_info "Verifying installations..."
+    
+    python3 -c "import torch; print('PyTorch:', torch.__version__, '| CUDA:', torch.cuda.is_available())" || log_warning "PyTorch verification failed"
+    python3 -c "import transformers; print('Transformers:', transformers.__version__)" || log_warning "Transformers not installed properly"
+    python3 -c "import peft; print('PEFT:', peft.__version__)" || log_warning "PEFT not installed properly"
+    python3 -c "import bitsandbytes; print('Bitsandbytes: OK')" || log_warning "Bitsandbytes not installed properly"
+    
     deactivate
     
     # Create .env file if it doesn't exist
     if [ ! -f ".env" ]; then
         log_info "Creating .env file for Chatbot Service..."
-        cat > .env << 'ENVEOF'
-CHATBOT_GRPC_PORT=30007
-SEMANTIC_SERVICE_HOST=localhost
-SEMANTIC_SERVICE_PORT=30006
+        
+        cat > .env << ENVEOF
+CHATBOT_GRPC_PORT=${CHATBOT_GRPC_PORT}
+SEMANTIC_SERVICE_HOST=${SEMANTIC_SERVICE_HOST}
+SEMANTIC_SERVICE_PORT=${SEMANTIC_SERVICE_PORT}
 
 # Hugging Face Configuration
-HUGGINGFACE_TOKEN=your_huggingface_token_here
-BASE_MODEL_REPO=xuantruongg003/openchat-3.5-0106
-LORA_MODEL_REPO=xuantruongg003/openchat-lora-only
+HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
+BASE_MODEL_REPO=${BASE_MODEL_REPO}
+LORA_MODEL_REPO=${LORA_MODEL_REPO}
 
 # Model Cache Configuration
-MODEL_CACHE_DIR=/app/models/.cache
-TRANSFORMERS_CACHE=/app/models/.cache
-HF_HOME=/app/models/.cache
+MODEL_CACHE_DIR=${MODEL_CACHE_DIR}
+TRANSFORMERS_CACHE=${MODEL_CACHE_DIR}
+HF_HOME=${MODEL_CACHE_DIR}
 
 # GPU Configuration
-CUDA_VISIBLE_DEVICES=0
+CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
 PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 ENVEOF
         log_success ".env file created for Chatbot Service"
-        log_warning "Please update HUGGINGFACE_TOKEN and SEMANTIC_SERVICE_HOST in vionex-chatbot-service/.env"
+        log_warning "Please verify HUGGINGFACE_TOKEN in vionex-chatbot-service/.env"
     else
         log_warning ".env file already exists for Chatbot Service"
     fi
     
+    # Set correct ownership
+    chown -R $ACTUAL_USER:$ACTUAL_USER .
+    
     cd ..
 else
     log_error "Chatbot Service directory not found: $CHATBOT_SERVICE_DIR"
+    exit 1
 fi
 
 ################################################################################
-# 9. Node.js and PM2 Installation
+# 7. Node.js and PM2 Installation
 ################################################################################
-log_info "Step 9: Installing Node.js and PM2..."
+log_info "Step 7: Installing Node.js and PM2..."
 
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then
@@ -393,13 +335,13 @@ fi
 
 # Setup PM2 to start on boot
 log_info "Configuring PM2 startup..."
-pm2 startup systemd -u $SUDO_USER --hp /home/$SUDO_USER
+pm2 startup systemd -u $ACTUAL_USER --hp $ACTUAL_HOME || log_warning "PM2 startup configuration may need manual setup"
 log_success "PM2 configured to start on boot"
 
 ################################################################################
-# 10. Firewall Configuration
+# 8. Firewall Configuration
 ################################################################################
-log_info "Step 10: Configuring firewall..."
+log_info "Step 8: Configuring firewall..."
 
 # Check if ufw is installed
 if command -v ufw &> /dev/null; then
@@ -408,12 +350,8 @@ if command -v ufw &> /dev/null; then
     # Allow SSH
     ufw allow ssh
     
-    # Allow Audio Service ports
-    ufw allow 30005/tcp comment 'Audio Service gRPC'
-    ufw allow 35000/udp comment 'Audio Service Shared Socket'
-    
     # Allow Chatbot Service port
-    ufw allow 30007/tcp comment 'Chatbot Service gRPC'
+    ufw allow ${CHATBOT_GRPC_PORT}/tcp comment 'Chatbot Service gRPC'
     
     # Enable firewall if not already enabled
     ufw --force enable
@@ -425,36 +363,13 @@ else
 fi
 
 ################################################################################
-# 11. Create PM2 Ecosystem Configuration
+# 9. Create PM2 Ecosystem Configuration
 ################################################################################
-log_info "Step 11: Creating PM2 ecosystem configuration..."
+log_info "Step 9: Creating PM2 ecosystem configuration..."
 
-cat > ecosystem.config.js << 'EOF'
+cat > ecosystem.chatbot.config.js << EOF
 module.exports = {
   apps: [
-    {
-      name: 'audio-service',
-      script: 'venv/bin/python',
-      args: 'audio_service.py',
-      cwd: './vionex-audio-service',
-      interpreter: 'none',
-      env: {
-        CUDA_HOME: '/usr/local/cuda-12.8',
-        LD_LIBRARY_PATH: '/usr/local/cuda-12.8/lib64:/usr/lib/x86_64-linux-gnu',
-        PATH: '/usr/local/cuda-12.8/bin:' + process.env.PATH,
-        PYTHONUNBUFFERED: '1',
-        COQUI_TOS_AGREED: '1'
-      },
-      error_file: './logs/audio-service-error.log',
-      out_file: './logs/audio-service-out.log',
-      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
-      merge_logs: true,
-      autorestart: true,
-      watch: false,
-      max_memory_restart: '4G',
-      instances: 1,
-      exec_mode: 'fork'
-    },
     {
       name: 'chatbot-service',
       script: 'venv/bin/python',
@@ -465,7 +380,8 @@ module.exports = {
         CUDA_HOME: '/usr/local/cuda-12.8',
         LD_LIBRARY_PATH: '/usr/local/cuda-12.8/lib64:/usr/lib/x86_64-linux-gnu',
         PATH: '/usr/local/cuda-12.8/bin:' + process.env.PATH,
-        PYTHONUNBUFFERED: '1'
+        PYTHONUNBUFFERED: '1',
+        CUDA_VISIBLE_DEVICES: '${CUDA_VISIBLE_DEVICES}'
       },
       error_file: './logs/chatbot-service-error.log',
       out_file: './logs/chatbot-service-out.log',
@@ -473,7 +389,7 @@ module.exports = {
       merge_logs: true,
       autorestart: true,
       watch: false,
-      max_memory_restart: '4G',
+      max_memory_restart: '8G',
       instances: 1,
       exec_mode: 'fork'
     }
@@ -485,54 +401,59 @@ log_success "PM2 ecosystem configuration created"
 
 # Create logs directory
 mkdir -p logs
-chown -R $SUDO_USER:$SUDO_USER logs
+chown -R $ACTUAL_USER:$ACTUAL_USER logs
+chown $ACTUAL_USER:$ACTUAL_USER ecosystem.chatbot.config.js
 
 ################################################################################
-# 12. Create Management Scripts
+# 10. Create Management Scripts
 ################################################################################
-log_info "Step 12: Creating management scripts..."
+log_info "Step 10: Creating management scripts..."
 
 # Start script
-cat > start-services.sh << 'EOF'
+cat > start-chatbot.sh << 'EOF'
 #!/bin/bash
-echo "Starting Vionex Backend Services..."
-pm2 start ecosystem.config.js
+echo "Starting Vionex Chatbot Service..."
+cd "$(dirname "$0")"
+pm2 start ecosystem.chatbot.config.js
 pm2 save
-echo "Services started. Use 'pm2 status' to check status."
+echo "Chatbot Service started. Use 'pm2 status' to check status."
 EOF
-chmod +x start-services.sh
+chmod +x start-chatbot.sh
+chown $ACTUAL_USER:$ACTUAL_USER start-chatbot.sh
 
 # Stop script
-cat > stop-services.sh << 'EOF'
+cat > stop-chatbot.sh << 'EOF'
 #!/bin/bash
-echo "Stopping Vionex Backend Services..."
-pm2 stop ecosystem.config.js
-echo "Services stopped."
+echo "Stopping Vionex Chatbot Service..."
+pm2 stop chatbot-service
+echo "Chatbot Service stopped."
 EOF
-chmod +x stop-services.sh
+chmod +x stop-chatbot.sh
+chown $ACTUAL_USER:$ACTUAL_USER stop-chatbot.sh
 
 # Restart script
-cat > restart-services.sh << 'EOF'
+cat > restart-chatbot.sh << 'EOF'
 #!/bin/bash
-echo "Restarting Vionex Backend Services..."
-pm2 restart ecosystem.config.js
-echo "Services restarted."
+echo "Restarting Vionex Chatbot Service..."
+pm2 restart chatbot-service
+echo "Chatbot Service restarted."
 EOF
-chmod +x restart-services.sh
+chmod +x restart-chatbot.sh
+chown $ACTUAL_USER:$ACTUAL_USER restart-chatbot.sh
 
 # Status script
-cat > status-services.sh << 'EOF'
+cat > status-chatbot.sh << 'EOF'
 #!/bin/bash
 echo "==================================="
-echo "Vionex Backend Services Status"
+echo "Vionex Chatbot Service Status"
 echo "==================================="
-pm2 status
+pm2 status chatbot-service
 echo ""
 echo "==================================="
 echo "System Resources"
 echo "==================================="
 echo "GPU Status:"
-nvidia-smi --query-gpu=index,name,temperature.gpu,utilization.gpu,utilization.memory,memory.used,memory.total --format=csv,noheader
+nvidia-smi --query-gpu=index,name,temperature.gpu,utilization.gpu,memory.used,memory.total --format=csv,noheader 2>/dev/null || echo "No GPU detected"
 echo ""
 echo "Memory Usage:"
 free -h
@@ -540,18 +461,31 @@ echo ""
 echo "Disk Usage:"
 df -h | grep -E '^/dev/|Filesystem'
 EOF
-chmod +x status-services.sh
+chmod +x status-chatbot.sh
+chown $ACTUAL_USER:$ACTUAL_USER status-chatbot.sh
 
 # Logs script
-cat > logs-services.sh << 'EOF'
+cat > logs-chatbot.sh << 'EOF'
 #!/bin/bash
-SERVICE=${1:-audio-service}
-echo "Viewing logs for: $SERVICE"
+echo "Viewing logs for Chatbot Service"
 echo "Press Ctrl+C to exit"
 echo "==================================="
-pm2 logs $SERVICE
+pm2 logs chatbot-service
 EOF
-chmod +x logs-services.sh
+chmod +x logs-chatbot.sh
+chown $ACTUAL_USER:$ACTUAL_USER logs-chatbot.sh
+
+# Run directly script (without PM2)
+cat > run-chatbot-direct.sh << 'EOF'
+#!/bin/bash
+echo "Running Chatbot Service directly..."
+cd "$(dirname "$0")/vionex-chatbot-service"
+source venv/bin/activate
+export CUDA_VISIBLE_DEVICES=0
+python main.py
+EOF
+chmod +x run-chatbot-direct.sh
+chown $ACTUAL_USER:$ACTUAL_USER run-chatbot-direct.sh
 
 log_success "Management scripts created"
 
@@ -560,44 +494,35 @@ log_success "Management scripts created"
 ################################################################################
 echo ""
 echo "========================================"
-log_success "Setup completed successfully!"
+log_success "Chatbot Service Setup completed successfully!"
 echo "========================================"
 echo ""
 echo "Next steps:"
-echo "1. Review and configure .env files for both services:"
-echo "   - vionex-audio-service/.env"
-echo "     * Update MEDIASOUP_ANNOUNCED_IP with your server IP"
-echo "     * Update SEMANTIC_SERVICE_HOST and SFU_SERVICE_HOST if needed"
-echo "   - vionex-chatbot-service/.env"
-echo "     * Update HUGGINGFACE_TOKEN with your Hugging Face token"
-echo "     * Update SEMANTIC_SERVICE_HOST if needed"
+echo "1. Verify .env file has correct Hugging Face token:"
+echo "   nano vionex-chatbot-service/.env"
+echo "   -> Ensure HUGGINGFACE_TOKEN is valid"
 echo ""
-echo "2. Start services:"
-echo "   ./start-services.sh"
+echo "2. Start Chatbot Service:"
+echo "   ./start-chatbot.sh"
 echo ""
-echo "3. Check status:"
-echo "   ./status-services.sh"
+echo "3. Or run directly (for debugging):"
+echo "   ./run-chatbot-direct.sh"
 echo ""
-echo "4. View logs:"
-echo "   ./logs-services.sh audio-service"
-echo "   ./logs-services.sh chatbot-service"
+echo "4. Check status:"
+echo "   ./status-chatbot.sh"
 echo ""
-echo "5. Stop services:"
-echo "   ./stop-services.sh"
+echo "5. View logs:"
+echo "   ./logs-chatbot.sh"
 echo ""
-echo "6. Restart services:"
-echo "   ./restart-services.sh"
+echo "NOTE: First run will download models (~7GB for OpenChat-3.5)"
+echo "      This may take 10-30 minutes depending on internet speed."
 echo ""
 echo "PM2 Commands:"
-echo "  pm2 status              - View all services status"
-echo "  pm2 logs                - View all logs"
-echo "  pm2 logs audio-service  - View audio service logs"
-echo "  pm2 logs chatbot-service - View chatbot service logs"
-echo "  pm2 monit               - Monitor resources in real-time"
-echo "  pm2 restart all         - Restart all services"
-echo "  pm2 stop all            - Stop all services"
-echo "  pm2 delete all          - Remove all services from PM2"
+echo "  pm2 status               - View service status"
+echo "  pm2 logs chatbot-service - View logs"
+echo "  pm2 monit                - Monitor resources"
+echo "  pm2 restart chatbot-service - Restart service"
 echo ""
-log_warning "Please reboot the system to ensure all changes take effect:"
+log_warning "IMPORTANT: Reboot the system to ensure all changes take effect:"
 echo "  sudo reboot"
 echo ""

@@ -1,0 +1,271 @@
+================================================================================
+      HƯỚNG DẪN CÀI ĐẶT CHATBOT SERVICE TRÊN UBUNTU 24.04 (CHẠY TAY)
+================================================================================
+
+Nếu không chạy được file chatbot_setup.sh, hãy chạy từng lệnh dưới đây theo thứ tự.
+Copy từng block lệnh và paste vào terminal.
+
+⚠️  LƯU Ý: Chatbot Service YÊU CẦU GPU NVIDIA để chạy!
+
+================================================================================
+BƯỚC 1: CẬP NHẬT HỆ THỐNG VÀ CÀI ĐẶT CƠ BẢN
+================================================================================
+
+# Cập nhật hệ thống
+sudo apt update && sudo apt upgrade -y
+
+# Cài đặt công cụ cơ bản
+sudo apt install -y wget curl git build-essential software-properties-common lsof htop unzip
+
+================================================================================
+BƯỚC 2: CÀI ĐẶT PYTHON 3
+================================================================================
+
+sudo apt install -y python3 python3-pip python3-venv python3-dev python3-full
+
+================================================================================
+BƯỚC 3: CÀI ĐẶT CUDA 12.8 (BẮT BUỘC)
+================================================================================
+
+# Kiểm tra có GPU không
+lspci | grep -i nvidia
+
+# Tải CUDA keyring cho Ubuntu 24.04
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+
+# Cài đặt keyring
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+rm cuda-keyring_1.1-1_all.deb
+
+# Cài đặt CUDA
+sudo apt update
+sudo apt install -y cuda-cudart-12-8 cuda-compat-12-8
+
+# Cài đặt cuDNN
+sudo apt install -y libcudnn9-cuda-12 libcudnn9-dev-cuda-12
+
+# Tạo file environment CUDA
+sudo tee /etc/profile.d/cuda.sh > /dev/null << 'EOF'
+export CUDA_HOME=/usr/local/cuda-12.8
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+export PATH=$CUDA_HOME/bin:$PATH
+EOF
+
+# Áp dụng ngay
+source /etc/profile.d/cuda.sh
+
+================================================================================
+BƯỚC 4: THIẾT LẬP CHATBOT SERVICE
+================================================================================
+
+# Di chuyển vào thư mục chatbot service
+cd /path/to/vionex-backend/vionex-chatbot-service
+
+# Tạo các thư mục cần thiết
+mkdir -p models/.cache logs
+
+# Tạo virtual environment
+python3 -m venv venv
+
+# Kích hoạt virtual environment
+source venv/bin/activate
+
+# Nâng cấp pip
+pip install --upgrade pip setuptools wheel
+
+================================================================================
+BƯỚC 5: CÀI ĐẶT PYTORCH VỚI CUDA
+================================================================================
+
+pip install torch>=2.6.0 --index-url https://download.pytorch.org/whl/cu124
+
+================================================================================
+BƯỚC 6: CÀI ĐẶT CÁC PACKAGE PYTHON
+================================================================================
+
+# Cài đặt từ requirements.txt
+pip install -r requirements.txt
+
+# Nếu gặp lỗi bitsandbytes, cài riêng:
+pip install bitsandbytes
+
+================================================================================
+BƯỚC 7: KIỂM TRA CÀI ĐẶT
+================================================================================
+
+# Kiểm tra PyTorch và CUDA
+python3 -c "import torch; print('PyTorch:', torch.__version__, '| CUDA:', torch.cuda.is_available())"
+
+# Kiểm tra Transformers
+python3 -c "import transformers; print('Transformers:', transformers.__version__)"
+
+# Kiểm tra PEFT
+python3 -c "import peft; print('PEFT:', peft.__version__)"
+
+# Kiểm tra Bitsandbytes
+python3 -c "import bitsandbytes; print('Bitsandbytes: OK')"
+
+================================================================================
+BƯỚC 8: TẠO FILE .ENV
+================================================================================
+
+# Tạo file .env (thay YOUR_HUGGINGFACE_TOKEN bằng token thực)
+cat > .env << 'EOF'
+CHATBOT_GRPC_PORT=30007
+SEMANTIC_SERVICE_HOST=localhost
+SEMANTIC_SERVICE_PORT=30006
+
+# Hugging Face Configuration (BẮT BUỘC)
+HUGGINGFACE_TOKEN=YOUR_HUGGINGFACE_TOKEN_HERE
+BASE_MODEL_REPO=xuantruongg003/openchat-3.5-0106
+LORA_MODEL_REPO=xuantruongg003/openchat-lora-only
+
+# Model Cache Configuration
+MODEL_CACHE_DIR=./models/.cache
+TRANSFORMERS_CACHE=./models/.cache
+HF_HOME=./models/.cache
+
+# GPU Configuration
+CUDA_VISIBLE_DEVICES=0
+PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+EOF
+
+# Sửa file .env với token của bạn
+nano .env
+# -> Thay YOUR_HUGGINGFACE_TOKEN_HERE bằng token thực từ https://huggingface.co/settings/tokens
+
+================================================================================
+BƯỚC 9: CÀI ĐẶT NODE.JS VÀ PM2 (TÙY CHỌN - CHO PRODUCTION)
+================================================================================
+
+# Cài Node.js 20
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -
+sudo apt install -y nodejs
+
+# Cài PM2
+sudo npm install -g pm2
+
+# Cấu hình PM2 tự khởi động
+pm2 startup systemd
+
+================================================================================
+BƯỚC 10: CẤU HÌNH FIREWALL
+================================================================================
+
+sudo ufw allow ssh
+sudo ufw allow 30007/tcp comment 'Chatbot Service gRPC'
+sudo ufw enable
+
+================================================================================
+BƯỚC 11: CHẠY CHATBOT SERVICE
+================================================================================
+
+# CÁCH 1: Chạy trực tiếp (cho development/debug)
+cd /path/to/vionex-backend/vionex-chatbot-service
+source venv/bin/activate
+export CUDA_VISIBLE_DEVICES=0
+python main.py
+
+# CÁCH 2: Chạy với PM2 (cho production)
+cd /path/to/vionex-backend
+
+# Tạo file ecosystem.chatbot.config.js
+cat > ecosystem.chatbot.config.js << 'EOF'
+module.exports = {
+  apps: [
+    {
+      name: 'chatbot-service',
+      script: 'venv/bin/python',
+      args: 'main.py',
+      cwd: './vionex-chatbot-service',
+      interpreter: 'none',
+      env: {
+        CUDA_HOME: '/usr/local/cuda-12.8',
+        LD_LIBRARY_PATH: '/usr/local/cuda-12.8/lib64:/usr/lib/x86_64-linux-gnu',
+        PYTHONUNBUFFERED: '1',
+        CUDA_VISIBLE_DEVICES: '0'
+      },
+      error_file: './logs/chatbot-service-error.log',
+      out_file: './logs/chatbot-service-out.log',
+      autorestart: true,
+      max_memory_restart: '8G'
+    }
+  ]
+};
+EOF
+
+# Tạo thư mục logs
+mkdir -p logs
+
+# Chạy với PM2
+pm2 start ecosystem.chatbot.config.js
+pm2 save
+
+================================================================================
+CÁC LỆNH PM2 THƯỜNG DÙNG
+================================================================================
+
+pm2 status                     # Xem trạng thái service
+pm2 logs chatbot-service       # Xem logs
+pm2 restart chatbot-service    # Khởi động lại
+pm2 stop chatbot-service       # Dừng service
+pm2 delete chatbot-service     # Xóa service khỏi PM2
+pm2 monit                      # Monitor realtime
+
+================================================================================
+KHẮC PHỤC LỖI THƯỜNG GẶP
+================================================================================
+
+1. Lỗi "CUDA not available":
+   -> Kiểm tra driver: nvidia-smi
+   -> Kiểm tra CUDA: nvcc --version
+
+2. Lỗi "bitsandbytes" không cài được:
+   -> pip install bitsandbytes --no-cache-dir
+
+3. Lỗi "401 Unauthorized" khi tải model:
+   -> Kiểm tra HUGGINGFACE_TOKEN trong .env
+   -> Đảm bảo token có quyền read
+
+4. Lỗi "Out of memory":
+   -> Thêm PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256
+   -> Hoặc dùng model nhỏ hơn
+
+5. Model download chậm/timeout:
+   -> Lần đầu chạy sẽ tải model (~7GB cho OpenChat-3.5)
+   -> Đợi hoàn thành (10-30 phút tùy mạng)
+
+6. Lỗi permission denied:
+   -> sudo chown -R $USER:$USER vionex-chatbot-service
+
+7. Port 30007 đang bị chiếm:
+   -> sudo lsof -i :30007
+   -> sudo kill -9 <PID>
+
+================================================================================
+KIỂM TRA SAU KHI CHẠY
+================================================================================
+
+# Kiểm tra service đang chạy
+ps aux | grep main.py
+
+# Kiểm tra port đang listen
+sudo netstat -tlnp | grep 30007
+
+# Kiểm tra GPU usage
+nvidia-smi
+
+# Test gRPC connection (nếu có grpcurl)
+grpcurl -plaintext localhost:30007 list
+
+================================================================================
+LẤY HUGGINGFACE TOKEN
+================================================================================
+
+1. Truy cập: https://huggingface.co/settings/tokens
+2. Đăng nhập hoặc tạo tài khoản
+3. Click "New token"
+4. Đặt tên token và chọn "Read" permission
+5. Copy token và paste vào file .env
+
+================================================================================
