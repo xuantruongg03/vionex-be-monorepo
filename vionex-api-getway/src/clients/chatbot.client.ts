@@ -48,4 +48,20 @@ export class ChatBotClientService implements OnModuleInit {
             throw error;
         }
     }
+
+    async generateMeetingReport(data: {
+        room_id: string;
+        organization_id?: string;
+        room_key: string;
+    }) {
+        try {
+            const response = await firstValueFrom(
+                this.chatbotService.generateMeetingReport(data),
+            );
+            return response;
+        } catch (error) {
+            console.error('Error calling generateMeetingReport:', error);
+            throw error;
+        }
+    }
 }

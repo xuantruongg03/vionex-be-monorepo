@@ -12,7 +12,14 @@ from enum import Enum
 from typing import Dict, Optional, Any, TYPE_CHECKING, List
 
 from service.pipline_processor.VAD import VoiceActivityDetector
-from core.config import SFU_SERVICE_HOST
+from core.config import (
+    SFU_SERVICE_HOST,
+    PLAYBACK_BUFFER_DURATION,
+    PLAYBACK_MIN_QUEUE_SIZE,
+    PLAYBACK_QUEUE_MAX_SIZE,
+    TRANSLATION_WINDOW_DURATION,
+    TRANSLATION_SAMPLE_RATE,
+)
 from utils.audio_logger import AudioLogger
 
 if TYPE_CHECKING:
@@ -59,16 +66,16 @@ class PlaybackQueue:
     
     Logic:
     1. Processed chunks are enqueued immediately
-    2. Wait for BUFFER_DURATION (2s) before starting playback
+    2. Wait for BUFFER_DURATION (1s) before starting playback
     3. Play with stable pacing (paced sending)
     4. If queue is empty → play silence to maintain stream
     """
     
-    BUFFER_DURATION: float = 2.0    # Buffer 2s before starting playback
-    MIN_QUEUE_SIZE: int = 2         # Minimum 2 chunks in queue
+    BUFFER_DURATION: float = PLAYBACK_BUFFER_DURATION    # Buffer before starting playback
+    MIN_QUEUE_SIZE: int = PLAYBACK_MIN_QUEUE_SIZE         # Minimum chunks in queue
     
     def __post_init__(self):
-        self._queue: queue.Queue = queue.Queue(maxsize=32)
+        self._queue: queue.Queue = queue.Queue(maxsize=PLAYBACK_QUEUE_MAX_SIZE)
         self._buffering: bool = True
         self._buffer_start_time: Optional[float] = None
         self._total_enqueued: int = 0
@@ -193,8 +200,8 @@ class HybridChunkBuffer:
        a chunk is sliced from the beginning of the buffer and returned.
     3. The sliced portion is then removed from the buffer.
     """
-    window_duration: float = 1.5   # Each chunk is 1.5s long
-    sample_rate: int = 16000       # 16kHz mono PCM16
+    window_duration: float = TRANSLATION_WINDOW_DURATION   # Each chunk duration
+    sample_rate: int = TRANSLATION_SAMPLE_RATE              # Sample rate for processing
 
     def __post_init__(self):
         self._buffer: bytearray = bytearray()
@@ -870,15 +877,20 @@ class TranslationCabinManager:
                 f"{len(context_chunks)} chunks, total {total_duration:.2f}s"
             )
             
-            # Step 2: VAD DISABLED - always process chunks
-            # has_speech = cabin.vad.detect_speech(concatenated_audio)
-            # if not has_speech:
-            #     logger.debug(f"[TUMBLING-WINDOW-{latest_chunk_id}] No speech detected in chunk, skipping.")
-            #     return
+            # Step 2: VAD Gate - Skip STT if no speech detected (prevents Whisper hallucinations)
+            has_speech = cabin.vad.detect_speech(concatenated_audio)
+            if not has_speech:
+                logger.info(
+                    f"[TUMBLING-WINDOW-{latest_chunk_id}] No speech detected (VAD filtered), "
+                    f"skipping STT to prevent hallucination. Duration: {total_duration:.2f}s"
+                )
+                # Reset status and return - do not process silence through STT
+                cabin.status = CabinStatus.LISTENING
+                return
             
-            # Step 3: Process through translation pipeline
+            # Step 3: Process through translation pipeline (speech detected)
             cabin.status = CabinStatus.TRANSLATING
-            logger.info(f"[TUMBLING-WINDOW-{latest_chunk_id}] Processing chunk (VAD disabled)...")
+            logger.info(f"[TUMBLING-WINDOW-{latest_chunk_id}] Speech detected, processing through STT...")
             
             # Get cached pipeline to avoid recreation overhead
             pipeline = self.get_or_create_pipeline(cabin)

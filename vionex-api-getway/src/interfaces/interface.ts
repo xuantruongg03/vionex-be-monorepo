@@ -72,6 +72,16 @@ export interface ChatBotGrpcServiceInterface {
         organization_id?: string;
         room_key?: string;
     }): Observable<{ summary_json: string }>;
+
+    generateMeetingReport(data: {
+        room_id: string;
+        organization_id?: string;
+        room_key?: string;
+    }): Observable<{
+        success: boolean;
+        report_content: string;
+        error_message: string;
+    }>;
 }
 
 export interface RoomGrpcService {

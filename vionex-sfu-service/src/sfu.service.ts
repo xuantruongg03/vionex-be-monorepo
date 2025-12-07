@@ -2157,9 +2157,6 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 comedia: false, // Active connect to Audio Service
             });
 
-            // Connect to Audio Service's SharedSocketManager
-            // Use AUDIO_SERVICE_RX_PORT (public port) instead of receivePort (internal port)
-            // This is needed when SFU and Audio Service are on different servers with NAT/port forwarding
             const audioServiceHost =
                 this.configService.get('AUDIO_SERVICE_HOST') || 'localhost';
             const audioServiceRxPort = parseInt(
@@ -2180,7 +2177,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
             logger.info(
                 'sfu.service.ts',
-                `[SFU Service] ✅ sendTransport connected successfully to ${audioServiceHost}:${audioServiceRxPort}`,
+                `[SFU Service] sendTransport connected successfully to ${audioServiceHost}:${audioServiceRxPort}`,
             );
 
             // Step 3: Create consumer on send transport

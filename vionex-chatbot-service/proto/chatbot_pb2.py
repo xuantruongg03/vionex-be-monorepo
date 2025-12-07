@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rchatbot.proto\x12\x07\x63hatbot\"s\n\x11\x41skChatBotRequest\x12\x10\n\x08question\x18\x01 \x01(\t\x12\x0f\n\x07room_id\x18\x02 \x01(\t\x12\x17\n\x0forganization_id\x18\x03 \x01(\t\x12\x15\n\x08room_key\x18\x04 \x01(\tH\x00\x88\x01\x01\x42\x0b\n\t_room_key\"$\n\x12\x41skChatBotResponse\x12\x0e\n\x06\x61nswer\x18\x01 \x01(\t\"l\n\x1c\x45xtractMeetingSummaryRequest\x12\x0f\n\x07room_id\x18\x01 \x01(\t\x12\x17\n\x0forganization_id\x18\x02 \x01(\t\x12\x15\n\x08room_key\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\x0b\n\t_room_key\"5\n\x1d\x45xtractMeetingSummaryResponse\x12\x14\n\x0csummary_json\x18\x01 \x01(\t2\xbf\x01\n\x0e\x43hatbotService\x12\x45\n\nAskChatBot\x12\x1a.chatbot.AskChatBotRequest\x1a\x1b.chatbot.AskChatBotResponse\x12\x66\n\x15\x45xtractMeetingSummary\x12%.chatbot.ExtractMeetingSummaryRequest\x1a&.chatbot.ExtractMeetingSummaryResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rchatbot.proto\x12\x07\x63hatbot\"s\n\x11\x41skChatBotRequest\x12\x10\n\x08question\x18\x01 \x01(\t\x12\x0f\n\x07room_id\x18\x02 \x01(\t\x12\x17\n\x0forganization_id\x18\x03 \x01(\t\x12\x15\n\x08room_key\x18\x04 \x01(\tH\x00\x88\x01\x01\x42\x0b\n\t_room_key\"$\n\x12\x41skChatBotResponse\x12\x0e\n\x06\x61nswer\x18\x01 \x01(\t\"l\n\x1c\x45xtractMeetingSummaryRequest\x12\x0f\n\x07room_id\x18\x01 \x01(\t\x12\x17\n\x0forganization_id\x18\x02 \x01(\t\x12\x15\n\x08room_key\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\x0b\n\t_room_key\"5\n\x1d\x45xtractMeetingSummaryResponse\x12\x14\n\x0csummary_json\x18\x01 \x01(\t\"l\n\x1cGenerateMeetingReportRequest\x12\x0f\n\x07room_id\x18\x01 \x01(\t\x12\x17\n\x0forganization_id\x18\x02 \x01(\t\x12\x15\n\x08room_key\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\x0b\n\t_room_key\"_\n\x1dGenerateMeetingReportResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x16\n\x0ereport_content\x18\x02 \x01(\t\x12\x15\n\rerror_message\x18\x03 \x01(\t2\xa7\x02\n\x0e\x43hatbotService\x12\x45\n\nAskChatBot\x12\x1a.chatbot.AskChatBotRequest\x1a\x1b.chatbot.AskChatBotResponse\x12\x66\n\x15\x45xtractMeetingSummary\x12%.chatbot.ExtractMeetingSummaryRequest\x1a&.chatbot.ExtractMeetingSummaryResponse\x12\x66\n\x15GenerateMeetingReport\x12%.chatbot.GenerateMeetingReportRequest\x1a&.chatbot.GenerateMeetingReportResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -39,6 +39,10 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_EXTRACTMEETINGSUMMARYREQUEST']._serialized_end=289
   _globals['_EXTRACTMEETINGSUMMARYRESPONSE']._serialized_start=291
   _globals['_EXTRACTMEETINGSUMMARYRESPONSE']._serialized_end=344
-  _globals['_CHATBOTSERVICE']._serialized_start=347
-  _globals['_CHATBOTSERVICE']._serialized_end=538
+  _globals['_GENERATEMEETINGREPORTREQUEST']._serialized_start=346
+  _globals['_GENERATEMEETINGREPORTREQUEST']._serialized_end=454
+  _globals['_GENERATEMEETINGREPORTRESPONSE']._serialized_start=456
+  _globals['_GENERATEMEETINGREPORTRESPONSE']._serialized_end=551
+  _globals['_CHATBOTSERVICE']._serialized_start=554
+  _globals['_CHATBOTSERVICE']._serialized_end=849
 # @@protoc_insertion_point(module_scope)

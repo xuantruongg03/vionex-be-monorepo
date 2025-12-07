@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-import chatbot_pb2 as chatbot__pb2
+from proto import chatbot_pb2 as chatbot__pb2
 
 GRPC_GENERATED_VERSION = '1.76.0'
 GRPC_VERSION = grpc.__version__
@@ -44,6 +44,11 @@ class ChatbotServiceStub(object):
                 request_serializer=chatbot__pb2.ExtractMeetingSummaryRequest.SerializeToString,
                 response_deserializer=chatbot__pb2.ExtractMeetingSummaryResponse.FromString,
                 _registered_method=True)
+        self.GenerateMeetingReport = channel.unary_unary(
+                '/chatbot.ChatbotService/GenerateMeetingReport',
+                request_serializer=chatbot__pb2.GenerateMeetingReportRequest.SerializeToString,
+                response_deserializer=chatbot__pb2.GenerateMeetingReportResponse.FromString,
+                _registered_method=True)
 
 
 class ChatbotServiceServicer(object):
@@ -61,6 +66,12 @@ class ChatbotServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GenerateMeetingReport(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ChatbotServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -73,6 +84,11 @@ def add_ChatbotServiceServicer_to_server(servicer, server):
                     servicer.ExtractMeetingSummary,
                     request_deserializer=chatbot__pb2.ExtractMeetingSummaryRequest.FromString,
                     response_serializer=chatbot__pb2.ExtractMeetingSummaryResponse.SerializeToString,
+            ),
+            'GenerateMeetingReport': grpc.unary_unary_rpc_method_handler(
+                    servicer.GenerateMeetingReport,
+                    request_deserializer=chatbot__pb2.GenerateMeetingReportRequest.FromString,
+                    response_serializer=chatbot__pb2.GenerateMeetingReportResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -129,6 +145,33 @@ class ChatbotService(object):
             '/chatbot.ChatbotService/ExtractMeetingSummary',
             chatbot__pb2.ExtractMeetingSummaryRequest.SerializeToString,
             chatbot__pb2.ExtractMeetingSummaryResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GenerateMeetingReport(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/chatbot.ChatbotService/GenerateMeetingReport',
+            chatbot__pb2.GenerateMeetingReportRequest.SerializeToString,
+            chatbot__pb2.GenerateMeetingReportResponse.FromString,
             options,
             channel_credentials,
             insecure,
