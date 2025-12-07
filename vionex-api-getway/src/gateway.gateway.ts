@@ -255,6 +255,7 @@ export class GatewayGateway
                     await this.translationHandler.handleDestroyTranslationCabin(
                         null,
                         destroyData,
+                        this.io, // Pass server for broadcasting
                     );
                 } else if (cabin.queriedUserId === userId) {
                     // User disconnecting CREATED this cabin -> check consumers
@@ -270,6 +271,7 @@ export class GatewayGateway
                         await this.translationHandler.handleDestroyTranslationCabin(
                             null,
                             destroyData,
+                            this.io, // Pass server for broadcasting
                         );
                     }
                 }
@@ -2143,6 +2145,54 @@ export class GatewayGateway
             client,
             data,
         );
+    }
+
+    /**
+     * Handle mic toggle - destroy translation cabins when user mutes mic
+     * This prevents processing silence/noise when user is muted
+     */
+    @SubscribeMessage('translation:mic-toggle')
+    async handleTranslationMicToggle(
+        @ConnectedSocket() client: Socket,
+        @MessageBody()
+        data: {
+            roomId: string;
+            userId: string;
+            micEnabled: boolean;
+        },
+    ) {
+        try {
+            const { roomId, userId, micEnabled } = data;
+
+            // Only destroy cabins when mic is turned OFF
+            if (!micEnabled) {
+                logger.info(
+                    'gateway.gateway.ts',
+                    `User ${userId} muted mic, destroying their translation cabins`,
+                );
+                await this.autoDestroyCabins(userId, roomId);
+                client.emit('translation:mic-toggle:success', {
+                    success: true,
+                    message: 'Translation cabins destroyed due to mic mute',
+                    micEnabled,
+                });
+            } else {
+                // Mic turned on - just acknowledge
+                client.emit('translation:mic-toggle:success', {
+                    success: true,
+                    message: 'Mic enabled',
+                    micEnabled,
+                });
+            }
+        } catch (error) {
+            logger.error(
+                'gateway.gateway.ts',
+                `Error handling mic toggle for translation: ${error.message}`,
+            );
+            client.emit('translation:error', {
+                message: 'Failed to handle mic toggle for translation',
+            });
+        }
     }
 
     // ==================== PIN/UNPIN USER HANDLERS ====================

@@ -199,6 +199,9 @@ export class TranslationHandler {
 
     /**
      * Destroy translation cabin
+     * @param client Socket client (null for auto-destroy scenarios)
+     * @param data Cabin data to destroy
+     * @param server Optional Socket.IO server for broadcasting when client is null
      */
     async handleDestroyTranslationCabin(
         client: Socket | null,
@@ -209,6 +212,7 @@ export class TranslationHandler {
             sourceLanguage: string;
             targetLanguage: string;
         },
+        server?: any,
     ) {
         try {
             // Validate data
@@ -285,6 +289,20 @@ export class TranslationHandler {
 
                 // Notify other users in the room about destroyed translation cabin
                 client.to(data.roomId).emit('translation:cabin-update', {
+                    action: 'destroyed',
+                    roomId: data.roomId,
+                    sourceUserId: data.sourceUserId,
+                    targetUserId: data.targetUserId,
+                    sourceLanguage: data.sourceLanguage,
+                    targetLanguage: data.targetLanguage,
+                });
+            } else if (server) {
+                // Auto-destroy scenario: use server to broadcast to room
+                logger.info(
+                    'TranslationHandler',
+                    `Auto-destroy: Broadcasting cabin update to room ${data.roomId}`,
+                );
+                server.to(data.roomId).emit('translation:cabin-update', {
                     action: 'destroyed',
                     roomId: data.roomId,
                     sourceUserId: data.sourceUserId,

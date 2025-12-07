@@ -389,7 +389,7 @@ module.exports = {
       merge_logs: true,
       autorestart: true,
       watch: false,
-      max_memory_restart: '8G',
+      max_memory_restart: '12G',
       instances: 1,
       exec_mode: 'fork'
     }
