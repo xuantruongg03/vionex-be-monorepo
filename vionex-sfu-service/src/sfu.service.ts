@@ -2159,10 +2159,21 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
 
             // Connect to Audio Service's SharedSocketManager fixed port (35000)
             // Use receivePort from Audio Service (should be SHARED_SOCKET_PORT = 35000)
+            const audioServiceHost = this.configService.get('AUDIO_SERVICE_HOST') || 'localhost';
+            logger.info(
+                'sfu.service.ts',
+                `[SFU Service] 🔌 Connecting sendTransport to Audio Service: ${audioServiceHost}:${receivePort}`,
+            );
+            
             await sendTransport.connect({
-                ip: this.configService.get('AUDIO_SERVICE_HOST') || 'localhost',
+                ip: audioServiceHost,
                 port: receivePort, // Use the port from Audio Service allocation
             });
+
+            logger.info(
+                'sfu.service.ts',
+                `[SFU Service] ✅ sendTransport connected successfully to ${audioServiceHost}:${receivePort}`,
+            );
 
             // Step 3: Create consumer on send transport
             const consumer = await sendTransport.consume({
