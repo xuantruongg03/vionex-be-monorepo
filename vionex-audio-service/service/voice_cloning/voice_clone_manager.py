@@ -237,7 +237,7 @@ class VoiceCloneManager:
             # Force garbage collection after processing
             gc.collect()
             
-            logger.info(f"✅ [VOICE-CLONE] Voice clone completed for {key}")
+            logger.info(f"[VOICE-CLONE] Voice clone completed for {key}")
             
         except Exception as e:
             logger.error(f"Voice cloning processing error for {key}: {e}")

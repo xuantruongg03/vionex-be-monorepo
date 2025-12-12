@@ -97,6 +97,84 @@ class VionexChatBotService(chatbot_pb2_grpc.ChatbotServiceServicer):
                 answer="Error processing request"
             )
 
+    def ExtractMeetingSummary(self, request, context):
+        """
+        Extract meeting summary and deadlines from transcript
+        
+        Args:
+            request: ExtractMeetingSummaryRequest containing room_id, organization_id, and optional room_key
+            context: gRPC context
+
+        Returns:
+            ExtractMeetingSummaryResponse with JSON string containing summary and deadlines
+        """
+        try:
+            logger.info(f"ExtractMeetingSummary request for room {request.room_id}, org {getattr(request, 'organization_id', 'None')}")
+
+            organization_id = getattr(request, 'organization_id', None)
+            room_key = getattr(request, 'room_key', None) if hasattr(request, 'room_key') else None
+            
+            # Run async function using the global event loop
+            loop = get_event_loop()
+            future = asyncio.run_coroutine_threadsafe(
+                self.chatbot_processor.extract_meeting_summary(request.room_id, organization_id, room_key),
+                loop
+            )
+            summary_json = future.result()
+
+            return chatbot_pb2.ExtractMeetingSummaryResponse(
+                summary_json=summary_json
+            )
+
+        except Exception as e:
+            logger.error(f"ExtractMeetingSummary error: {e}")
+            import traceback
+            traceback.print_exc()
+            return chatbot_pb2.ExtractMeetingSummaryResponse(
+                summary_json='{"meeting_summary": "Error extracting summary", "deadlines": []}'
+            )
+
+    def GenerateMeetingReport(self, request, context):
+        """
+        Generate a comprehensive meeting report in Markdown format
+        
+        Args:
+            request: GenerateMeetingReportRequest containing room_id, organization_id, and optional room_key
+            context: gRPC context
+
+        Returns:
+            GenerateMeetingReportResponse with success status, report content, and error message
+        """
+        try:
+            logger.info(f"GenerateMeetingReport request for room {request.room_id}, org {getattr(request, 'organization_id', 'None')}")
+
+            organization_id = getattr(request, 'organization_id', None)
+            room_key = getattr(request, 'room_key', None) if hasattr(request, 'room_key') else None
+            
+            # Run async function using the global event loop
+            loop = get_event_loop()
+            future = asyncio.run_coroutine_threadsafe(
+                self.chatbot_processor.generate_meeting_report(request.room_id, organization_id, room_key),
+                loop
+            )
+            result = future.result()
+
+            return chatbot_pb2.GenerateMeetingReportResponse(
+                success=result.get("success", False),
+                report_content=result.get("report_content", ""),
+                error_message=result.get("error_message", "")
+            )
+
+        except Exception as e:
+            logger.error(f"GenerateMeetingReport error: {e}")
+            import traceback
+            traceback.print_exc()
+            return chatbot_pb2.GenerateMeetingReportResponse(
+                success=False,
+                report_content="",
+                error_message=f"Error generating meeting report: {str(e)}"
+            )
+
 def serve():
     """Start the gRPC server"""
     try:

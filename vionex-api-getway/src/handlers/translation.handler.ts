@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { WebSocketEventService } from '../services/websocket-event.service';
 import { AudioClientService } from '../clients/audio.client';
 import { SfuClientService } from '../clients/sfu.client';
+import { logger } from '../utils/log-manager';
 
 @Injectable()
 export class TranslationHandler {
@@ -11,8 +12,9 @@ export class TranslationHandler {
         private readonly sfuClient: SfuClientService,
         private readonly eventService: WebSocketEventService,
     ) {
-        console.log(
-            '[TranslationHandler] TranslationHandler initialized as service',
+        logger.log(
+            'TranslationHandler',
+            'TranslationHandler initialized as service',
         );
     }
 
@@ -68,7 +70,7 @@ export class TranslationHandler {
                         data.targetUserId,
                     );
             } catch (error) {
-                console.error(
+                logger.error(
                     '[TranslationHandler] Error calling Audio Service:',
                     error,
                 );
@@ -115,6 +117,29 @@ export class TranslationHandler {
                 return { success: false, error: sfuPortResponse.message };
             }
 
+            // B2.5. Update Audio Service with SFU listen port and consumer SSRC (NAT FIX + SSRC FIX)
+            if (sfuPortResponse.sfuListenPort) {
+                try {
+                    await this.audioClient.updateTranslationPort(
+                        data.roomId,
+                        data.targetUserId,
+                        sfuPortResponse.sfuListenPort,
+                        sfuPortResponse.consumerSsrc, // Pass actual consumer SSRC for RTP routing
+                    );
+                    logger.log(
+                        'TranslationHandler',
+                        `Updated Audio Service with SFU port: ${sfuPortResponse.sfuListenPort}, consumer SSRC: ${sfuPortResponse.consumerSsrc}`,
+                    );
+                } catch (error) {
+                    logger.error(
+                        'TranslationHandler',
+                        'Error updating Audio Service port:',
+                        error,
+                    );
+                    // Non-critical error - continue
+                }
+            }
+
             // B3. Start translation cabin processing
             const translationProduceResponse =
                 await this.audioClient.createTranslationProduce(
@@ -137,12 +162,6 @@ export class TranslationHandler {
                 };
             }
 
-            console.log('=== Create Translation Cabin Success ===');
-            console.log('Translation Cabin Response:', {
-                streamId: sfuPortResponse.streamId,
-                success: true,
-            });
-
             // Emit success event to client
             client.emit('translation:created', {
                 success: true,
@@ -164,8 +183,9 @@ export class TranslationHandler {
 
             return { success: true };
         } catch (error) {
-            console.error(
-                '[TranslationHandler] Error creating translation cabin:',
+            logger.error(
+                'TranslationHandler',
+                'Error creating translation cabin:',
                 error,
             );
             this.eventService.emitError(
@@ -179,6 +199,9 @@ export class TranslationHandler {
 
     /**
      * Destroy translation cabin
+     * @param client Socket client (null for auto-destroy scenarios)
+     * @param data Cabin data to destroy
+     * @param server Optional Socket.IO server for broadcasting when client is null
      */
     async handleDestroyTranslationCabin(
         client: Socket | null,
@@ -189,6 +212,7 @@ export class TranslationHandler {
             sourceLanguage: string;
             targetLanguage: string;
         },
+        server?: any,
     ) {
         try {
             // Validate data
@@ -272,12 +296,27 @@ export class TranslationHandler {
                     sourceLanguage: data.sourceLanguage,
                     targetLanguage: data.targetLanguage,
                 });
+            } else if (server) {
+                // Auto-destroy scenario: use server to broadcast to room
+                logger.info(
+                    'TranslationHandler',
+                    `Auto-destroy: Broadcasting cabin update to room ${data.roomId}`,
+                );
+                server.to(data.roomId).emit('translation:cabin-update', {
+                    action: 'destroyed',
+                    roomId: data.roomId,
+                    sourceUserId: data.sourceUserId,
+                    targetUserId: data.targetUserId,
+                    sourceLanguage: data.sourceLanguage,
+                    targetLanguage: data.targetLanguage,
+                });
             }
 
             return { success: true };
         } catch (error) {
-            console.error(
-                '[TranslationHandler] Error destroying translation cabin:',
+            logger.error(
+                'TranslationHandler',
+                'Error destroying translation cabin:',
                 error,
             );
             if (client) {
@@ -338,8 +377,9 @@ export class TranslationHandler {
 
             return { success: true };
         } catch (error) {
-            console.error(
-                '[TranslationHandler] Error listing translation cabins:',
+            logger.error(
+                'TranslationHandler',
+                'Error listing translation cabins:',
                 error,
             );
             this.eventService.emitError(

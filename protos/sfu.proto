@@ -49,6 +49,8 @@ message AllocatePortResponse {
   bool success = 1;
   optional string stream_id = 2; // StreamId of translated audio stream
   optional string message = 3; // Optional message for additional info
+  optional uint32 sfu_listen_port = 4; // SFU receiveTransport listen port for Audio to send RTP to
+  optional uint32 consumer_ssrc = 5; // Actual SSRC of consumer (for Audio Service RTP routing)
 }
 
 message PinUserRequest {

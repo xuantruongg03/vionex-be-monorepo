@@ -4,6 +4,8 @@ package chatbot;
 
 service ChatbotService {
     rpc AskChatBot(AskChatBotRequest) returns (AskChatBotResponse);
+    rpc ExtractMeetingSummary(ExtractMeetingSummaryRequest) returns (ExtractMeetingSummaryResponse);
+    rpc GenerateMeetingReport(GenerateMeetingReportRequest) returns (GenerateMeetingReportResponse);
 }
 
 message AskChatBotRequest {
@@ -15,4 +17,26 @@ message AskChatBotRequest {
 
 message AskChatBotResponse {
     string answer = 1;
+}
+
+message ExtractMeetingSummaryRequest {
+    string room_id = 1;
+    string organization_id = 2;
+    optional string room_key = 3;
+}
+
+message ExtractMeetingSummaryResponse {
+    string summary_json = 1; // JSON string containing meeting summary and deadlines
+}
+
+message GenerateMeetingReportRequest {
+    string room_id = 1;
+    string organization_id = 2;
+    optional string room_key = 3;
+}
+
+message GenerateMeetingReportResponse {
+    bool success = 1;
+    string report_content = 2; // Markdown formatted meeting report
+    string error_message = 3;
 }

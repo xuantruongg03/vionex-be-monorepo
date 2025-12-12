@@ -54,8 +54,7 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
     constructor(
         private configService: ConfigService,
         private readonly workerPool: WorkerPoolService,
-    ) {
-    }
+    ) {}
     async onModuleInit() {
         try {
             await this.initializeMediasoup();
@@ -974,9 +973,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             // If metadata indicates media is off (audio/video: false) or isDummy: true,
             // the producer should be paused immediately
             const isDummyTrack = data.metadata?.isDummy === true;
-            const isMediaOff = data.kind === 'video' 
-                ? data.metadata?.video === false 
-                : data.metadata?.audio === false;
+            const isMediaOff =
+                data.kind === 'video'
+                    ? data.metadata?.video === false
+                    : data.metadata?.audio === false;
 
             // Auto-pause producer if it's a dummy track or media is off
             if (isDummyTrack || isMediaOff) {
@@ -997,12 +997,18 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 streamType: streamType,
                 // FIX: Ensure metadata reflects actual media state
                 // If producer is paused, media should be false
-                video: data.kind === 'video' 
-                    ? (producer.paused ? false : (data.metadata?.video ?? true))
-                    : (data.metadata?.video ?? false),
-                audio: data.kind === 'audio' 
-                    ? (producer.paused ? false : (data.metadata?.audio ?? true))
-                    : (data.metadata?.audio ?? false),
+                video:
+                    data.kind === 'video'
+                        ? producer.paused
+                            ? false
+                            : (data.metadata?.video ?? true)
+                        : (data.metadata?.video ?? false),
+                audio:
+                    data.kind === 'audio'
+                        ? producer.paused
+                            ? false
+                            : (data.metadata?.audio ?? true)
+                        : (data.metadata?.audio ?? false),
                 paused: producer.paused, // Track producer paused state
             };
 
@@ -1057,14 +1063,18 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
             // If metadata indicates media is toggled off, pause the producer
             const isVideoStream = producer.kind === 'video';
             const isAudioStream = producer.kind === 'audio';
-            
+
             if (isVideoStream && metadata.video === false && !producer.paused) {
                 await producer.pause();
                 logger.info(
                     'sfu.service.ts',
                     `[SFU] Paused video producer ${streamId} due to metadata update`,
                 );
-            } else if (isVideoStream && metadata.video === true && producer.paused) {
+            } else if (
+                isVideoStream &&
+                metadata.video === true &&
+                producer.paused
+            ) {
                 await producer.resume();
                 logger.info(
                     'sfu.service.ts',
@@ -1078,7 +1088,11 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     'sfu.service.ts',
                     `[SFU] Paused audio producer ${streamId} due to metadata update`,
                 );
-            } else if (isAudioStream && metadata.audio === true && producer.paused) {
+            } else if (
+                isAudioStream &&
+                metadata.audio === true &&
+                producer.paused
+            ) {
                 await producer.resume();
                 logger.info(
                     'sfu.service.ts',
@@ -1918,7 +1932,11 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 }
             }
         } catch (error) {
-            logger.error('sfu.service.ts', '[SFU] Error rebalancing stream priorities', error);
+            logger.error(
+                'sfu.service.ts',
+                '[SFU] Error rebalancing stream priorities',
+                error,
+            );
         }
     }
 
@@ -1963,12 +1981,14 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         sourceLanguage: string,
         targetLanguage: string,
         receivePort: number,
-        sendPort: number, // Optional for backward compatibility
-        ssrc: number, // Optional SSRC for translation cabin
+        sendPort: number, // Deprecated - no longer needed
+        ssrc: number,
     ): Promise<{
         success: boolean;
         message?: string;
         streamId?: string;
+        sfuListenPort?: number; // Return SFU listen port
+        consumerSsrc?: number; // Return actual consumer SSRC for Audio routing
     }> {
         try {
             // New bidirectional translation system
@@ -2011,6 +2031,8 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
         success: boolean;
         message?: string;
         streamId?: string;
+        sfuListenPort?: number; // Return SFU listen port for Audio Service
+        consumerSsrc?: number; // Return actual consumer SSRC for Audio routing
     }> {
         try {
             const router = await this.getMediaRouter(roomId);
@@ -2068,36 +2090,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 };
             }
 
-            const sendTransport = await router.createPlainTransport({
-                listenIp: {
-                    ip:
-                        this.configService.get('MEDIASOUP_LISTEN_IP') ||
-                        '0.0.0.0',
-                    announcedIp: this.configService.get(
-                        'MEDIASOUP_ANNOUNCED_IP',
-                    ),
-                },
-                rtcpMux: true,
-                comedia: false,
-            });
-
-            // Connect to Audio Service's SharedSocketManager fixed port (35000)
-            await sendTransport.connect({
-                ip: this.configService.get('AUDIO_SERVICE_HOST') || 'localhost',
-                port: this.configService.get(
-                        'AUDIO_LIVE_PORT',
-                    ),
-            });
-
-            // Step 3: Create consumer on receive transport
-            const consumer = await sendTransport.consume({
-                producerId: audioProducer.id,
-                rtpCapabilities: router.rtpCapabilities,
-            });
-
-            await consumer.resume();
-
-            // Step 4: Create SEND transport (Audio Service → SFU)
+            // ============================================================================
+            // NAT FIX: Create receiveTransport FIRST to get dynamic port
+            // ============================================================================
+            // Step 1: Create RECEIVE transport (Audio Service → SFU) FIRST
             const receiveTransport = await router.createPlainTransport({
                 listenIp: {
                     ip:
@@ -2108,14 +2104,102 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                     ),
                 },
                 rtcpMux: true,
-                comedia: true, // Enable comedia for receiveTransport to handle Audio Service's dynamic TX port
-                port: sendPort, // This is the port Audio Service will send RTP to
+                comedia: true, // Enable comedia for NAT traversal
+                // No port specified → MediaSoup allocates dynamic port
             });
 
-            // Connect receiveTransport
-            await receiveTransport.connect({});
+            // Get the actual port MediaSoup allocated
+            const sfuListenPort = receiveTransport.tuple.localPort;
+            logger.info(
+                'sfu.service.ts',
+                `[SFU Service] receiveTransport created on port ${sfuListenPort} (comedia mode - will learn address from first RTP)`,
+            );
 
-            // Step 5: Create producer on send transport for translated audio
+            // Log when receiveTransport learns remote address from first RTP packet
+            receiveTransport.on('tuple', (tuple) => {
+                logger.info(
+                    'sfu.service.ts',
+                    `[RTP-RX] ========== SFU ← AUDIO RTP RECEIVE ==========`,
+                );
+                logger.info(
+                    'sfu.service.ts',
+                    `[RTP-RX] Remote (Audio): ${tuple.remoteIp}:${tuple.remotePort}`,
+                );
+                logger.info(
+                    'sfu.service.ts',
+                    `[RTP-RX] Local (SFU):    ${tuple.localIp}:${tuple.localPort}`,
+                );
+                logger.info(
+                    'sfu.service.ts',
+                    `[RTP-RX] Protocol:       ${tuple.protocol}`,
+                );
+                logger.info(
+                    'sfu.service.ts',
+                    `[RTP-RX] ==============================================`,
+                );
+            });
+
+            // DO NOT connect receiveTransport when comedia=true
+            // MediaSoup will automatically learn the remote address from the first RTP packet
+            // await receiveTransport.connect({}); // REMOVED - causes "missing port" error
+
+            // Step 2: Create SEND transport (SFU → Audio Service)
+            const sendTransport = await router.createPlainTransport({
+                listenIp: {
+                    ip:
+                        this.configService.get('MEDIASOUP_LISTEN_IP') ||
+                        '0.0.0.0',
+                    announcedIp: this.configService.get(
+                        'MEDIASOUP_ANNOUNCED_IP',
+                    ),
+                },
+                rtcpMux: true,
+                comedia: false, // Active connect to Audio Service
+            });
+
+            const audioServiceHost =
+                this.configService.get('AUDIO_SERVICE_HOST') || 'localhost';
+            const audioServiceRxPort = parseInt(
+                this.configService.get('AUDIO_SERVICE_RX_PORT') ||
+                    receivePort.toString(),
+                10,
+            );
+
+            logger.info(
+                'sfu.service.ts',
+                `[SFU Service] 🔌 Connecting sendTransport to Audio Service: ${audioServiceHost}:${audioServiceRxPort} (internal port: ${receivePort})`,
+            );
+
+            await sendTransport.connect({
+                ip: audioServiceHost,
+                port: audioServiceRxPort, // Use public port from env, fallback to receivePort
+            });
+
+            logger.info(
+                'sfu.service.ts',
+                `[SFU Service] sendTransport connected successfully to ${audioServiceHost}:${audioServiceRxPort}`,
+            );
+
+            // Step 3: Create consumer on send transport
+            const consumer = await sendTransport.consume({
+                producerId: audioProducer.id,
+                rtpCapabilities: router.rtpCapabilities,
+            });
+
+            await consumer.resume();
+
+            // Get consumer SSRC - this is the SSRC that Audio Service will use to send RTP back
+            const consumerSsrc =
+                consumer.rtpParameters.encodings?.[0]?.ssrc || ssrc;
+
+            logger.info(
+                'sfu.service.ts',
+                `[SFU Service] Consumer created with SSRC: ${consumerSsrc} (original ssrc: ${ssrc})`,
+            );
+
+            // Step 4: Create producer on receiveTransport for translated audio
+            // IMPORTANT: Use consumerSsrc, not the original ssrc from Audio Service
+            // Audio Service will send RTP packets with consumerSsrc after receiving it
             const translatedProducer = await receiveTransport.produce({
                 kind: 'audio',
                 rtpParameters: {
@@ -2129,22 +2213,26 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                         },
                     ],
                     headerExtensions: [],
-                    encodings: [{ ssrc: ssrc }], // Use SSRC from Audio Service
+                    encodings: [{ ssrc: consumerSsrc }], // Use consumerSsrc - this matches what Audio Service sends
                     rtcp: {
                         cname: `translated_${safeTargetUserId}_${safeSourceLanguage}_${safeTargetLanguage}`, // Use safe identifier
                     },
                 },
             });
 
-            // Step 6: Generate unique streamId for translated audio - keep original names for storage but use safe for MediaSoup
-            // Since translation streams use metadata for client parsing, streamId can be safe
+            logger.info(
+                'sfu.service.ts',
+                `[SFU Service] TranslatedProducer created with SSRC: ${consumerSsrc}`,
+            );
+
+            // Step 5: Generate unique streamId for translated audio
             const translatedStreamId = createSafeTranslatedStreamId(
                 roomId,
                 sourceLanguage,
                 targetLanguage,
             );
 
-            // Step 7: Register translated audio as new stream
+            // Step 6: Register translated audio as new stream
             const translatedStream: T.Stream = {
                 streamId: translatedStreamId,
                 publisherId: targetUserId,
@@ -2191,11 +2279,18 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
                 createdAt: new Date(),
             });
 
+            logger.info(
+                'sfu.service.ts',
+                `[SFU Service] Translation cabin created: ${cabinId}, SFU listen port: ${sfuListenPort}, consumer SSRC: ${consumerSsrc}`,
+            );
+
             return {
                 success: true,
                 message:
                     'Bidirectional translation system created successfully',
                 streamId: translatedStreamId,
+                sfuListenPort, // Return port for Audio Service to send RTP to
+                consumerSsrc, // Return actual consumer SSRC for Audio routing
             };
         } catch (error) {
             logger.error(
@@ -2533,7 +2628,10 @@ export class SfuService implements OnModuleInit, OnModuleDestroy {
      */
     clearPinsForRoom(roomId: string): void {
         this.pinnedUsers.delete(roomId);
-        logger.info('sfu.service.ts', `[SFU] Cleared all pins for room ${roomId}`);
+        logger.info(
+            'sfu.service.ts',
+            `[SFU] Cleared all pins for room ${roomId}`,
+        );
     }
 
     /**

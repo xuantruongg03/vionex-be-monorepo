@@ -147,4 +147,210 @@ export class ChatBotHandler {
             }
         }
     }
+
+    async handleExtractMeetingSummary(
+        client: Socket,
+        data: {
+            roomId: string;
+            roomKey?: string;
+            organizationId?: string;
+        },
+    ) {
+        try {
+            logger.info(
+                'chatbot.handler.ts',
+                `Extract meeting summary request from ${client.id} for room ${data.roomId}`,
+            );
+
+            // Security: Validate user is in the room
+            const socketRooms = Array.from(client.rooms);
+            if (!socketRooms.includes(data.roomId)) {
+                logger.warn(
+                    'chatbot.handler.ts',
+                    `Summary extraction denied - client ${client.id} not in room ${data.roomId}`,
+                );
+                this.eventService.emitToClient(
+                    client,
+                    'chatbot:summary:error',
+                    {
+                        message: 'Access denied: You are not in this room',
+                    },
+                );
+                return;
+            }
+
+            // Get peerId from socket data
+            const peerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
+            if (!peerId) {
+                this.eventService.emitToClient(
+                    client,
+                    'chatbot:summary:error',
+                    {
+                        message: 'User not authenticated',
+                    },
+                );
+                return;
+            }
+
+            // Call chatbot service to extract summary
+            logger.debug(
+                'chatbot.handler.ts',
+                `Extracting meeting summary for room ${data.roomId}`,
+            );
+
+            const response = await this.chatbotClient.extractMeetingSummary({
+                room_id: data.roomId,
+                room_key: data.roomKey,
+                organization_id: data.organizationId,
+            });
+
+            // Parse and send the summary
+            try {
+                const summaryData = JSON.parse(response.summary_json);
+                this.eventService.emitToClient(
+                    client,
+                    'chatbot:summary:success',
+                    {
+                        summary: summaryData,
+                    },
+                );
+
+                logger.info(
+                    'chatbot.handler.ts',
+                    `Meeting summary extracted successfully for room ${data.roomId}`,
+                );
+            } catch (parseError) {
+                logger.error(
+                    'chatbot.handler.ts',
+                    'Failed to parse summary JSON',
+                    parseError,
+                );
+                this.eventService.emitToClient(
+                    client,
+                    'chatbot:summary:error',
+                    {
+                        message: 'Failed to parse summary data',
+                    },
+                );
+            }
+        } catch (error) {
+            const handled = this.helperService.handleServiceError(
+                client,
+                error,
+                'ChatBot Service',
+                'chatbot:summary',
+            );
+
+            if (!handled) {
+                logger.error(
+                    'chatbot.handler.ts',
+                    `Error extracting meeting summary for room ${data.roomId}`,
+                    error,
+                );
+
+                this.eventService.emitToClient(
+                    client,
+                    'chatbot:summary:error',
+                    {
+                        message: 'Failed to extract meeting summary',
+                    },
+                );
+            }
+        }
+    }
+
+    async handleGenerateMeetingReport(
+        client: Socket,
+        data: {
+            roomId: string;
+            roomKey: string;
+            organizationId?: string;
+        },
+    ) {
+        try {
+            logger.info(
+                'chatbot.handler.ts',
+                `Generate meeting report request from ${client.id} for room ${data.roomId}`,
+            );
+
+            // Security: Validate user is in the room
+            const socketRooms = Array.from(client.rooms);
+            if (!socketRooms.includes(data.roomId)) {
+                logger.warn(
+                    'chatbot.handler.ts',
+                    `Report generation denied - client ${client.id} not in room ${data.roomId}`,
+                );
+                this.eventService.emitToClient(client, 'meeting:report:error', {
+                    message: 'Access denied: You are not in this room',
+                });
+                return;
+            }
+
+            // Get peerId from socket data
+            const peerId = this.helperService.getParticipantBySocketId(
+                client.id,
+            );
+            if (!peerId) {
+                this.eventService.emitToClient(client, 'meeting:report:error', {
+                    message: 'User not authenticated',
+                });
+                return;
+            }
+
+            // Call chatbot service to generate report
+            logger.debug(
+                'chatbot.handler.ts',
+                `Generating meeting report for room ${data.roomId}`,
+            );
+
+            const response = await this.chatbotClient.generateMeetingReport({
+                room_id: data.roomId,
+                room_key: data.roomKey,
+                organization_id: data.organizationId,
+            });
+
+            if (response.success) {
+                // Send the report content to client
+                this.eventService.emitToClient(
+                    client,
+                    'meeting:report:success',
+                    {
+                        reportContent: response.report_content,
+                    },
+                );
+
+                logger.info(
+                    'chatbot.handler.ts',
+                    `Meeting report generated successfully for room ${data.roomId}`,
+                );
+            } else {
+                this.eventService.emitToClient(client, 'meeting:report:error', {
+                    message:
+                        response.error_message ||
+                        'Failed to generate meeting report',
+                });
+            }
+        } catch (error) {
+            const handled = this.helperService.handleServiceError(
+                client,
+                error,
+                'ChatBot Service',
+                'meeting:report',
+            );
+
+            if (!handled) {
+                logger.error(
+                    'chatbot.handler.ts',
+                    `Error generating meeting report for room ${data.roomId}`,
+                    error,
+                );
+
+                this.eventService.emitToClient(client, 'meeting:report:error', {
+                    message: 'Failed to generate meeting report',
+                });
+            }
+        }
+    }
 }

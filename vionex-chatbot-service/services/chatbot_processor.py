@@ -25,18 +25,86 @@ class ChatBotProcessor:
         even if the transcript is in another language.
         """
         return (
-            "You are a professional meeting assistant AI. Your role is to answer questions STRICTLY based on the provided meeting transcript below.\n\n"
+            "You are a professional meeting assistant AI. Your role is to answer questions based on the provided meeting transcript below.\n\n"
             "CRITICAL RULES:\n"
             "1. ONLY use information from the transcript below\n"
             "2. DO NOT make up or fabricate any information\n"
             "3. DO NOT add extra conversations or scenarios\n"
-            "4. If the transcript doesn't contain the answer, say: 'Not found data for this question.'\n"
-            "5. Keep your answer SHORT (maximum 2 sentences)\n"
-            "6. Answer in the SAME LANGUAGE as the question\n\n"
-            "7. Use language from the question to prioritize choosing data meeting transcript\n\n"
+            "4. If the transcript doesn't contain the answer, say: 'Tôi không tìm thấy thông tin về điều này trong cuộc họp.' (Vietnamese) or 'I couldn't find information about this in the meeting.' (English)\n"
+            "5. Provide a COMPLETE and DETAILED answer (3-5 sentences) that fully addresses the question\n"
+            "6. Answer in the SAME LANGUAGE as the question\n"
+            "7. Use natural, conversational language\n"
+            "8. Include relevant context and details from the transcript\n\n"
             f"===== MEETING TRANSCRIPT =====\n{data}\n===== END TRANSCRIPT =====\n\n"
             f"Question: {question}\n\n"
-            "Answer (SHORT, based ONLY on transcript above):"
+            "Answer (DETAILED and COMPLETE, based on transcript above):"
+        )
+
+    def create_summary_extraction_prompt(self, transcript: str) -> str:
+        """
+        Create a prompt to extract meeting summary and deadlines in JSON format.
+        """
+        return (
+            "You are a professional meeting secretary AI. Analyze the meeting transcript below and extract:\n"
+            "1. Meeting summary (key points discussed)\n"
+            "2. All deadlines, tasks, and action items mentioned\n\n"
+            "CRITICAL RULES:\n"
+            "1. ONLY extract information that is EXPLICITLY mentioned in the transcript\n"
+            "2. DO NOT make up or infer dates/times that are not stated\n"
+            "3. For dates, convert relative references (e.g., 'next week', 'tomorrow') to actual dates based on today being November 18, 2025\n"
+            "4. Extract in Vietnamese if transcript is in Vietnamese, otherwise in English\n"
+            "5. Return ONLY valid JSON, no additional text\n\n"
+            "JSON Format:\n"
+            "{\n"
+            '  "meeting_summary": "Brief summary of the meeting",\n'
+            '  "deadlines": [\n'
+            "    {\n"
+            '      "task": "Task description",\n'
+            '      "assignee": "Person responsible (if mentioned)",\n'
+            '      "deadline": "YYYY-MM-DD or description if not specific",\n'
+            '      "priority": "high/medium/low (if mentioned)"\n'
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            f"===== MEETING TRANSCRIPT =====\n{transcript}\n===== END TRANSCRIPT =====\n\n"
+            "Extract JSON (ONLY valid JSON, no markdown, no extra text):"
+        )
+
+    def create_meeting_report_prompt(self, transcript: str) -> str:
+        """
+        Create a prompt to generate a comprehensive meeting report in Markdown format.
+        """
+        from datetime import datetime
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        
+        return (
+            "You are a professional meeting secretary AI. Analyze the meeting transcript below and generate a comprehensive meeting report.\n\n"
+            "CRITICAL RULES:\n"
+            "1. ONLY use information that is EXPLICITLY mentioned in the transcript\n"
+            "2. DO NOT make up or infer information that is not stated\n"
+            "3. For dates, convert relative references (e.g., 'next week', 'tomorrow') to actual dates based on today being " + current_date + "\n"
+            "4. Generate the report in the same language as the transcript (Vietnamese if transcript is in Vietnamese)\n"
+            "5. Format the output as clean Markdown\n"
+            "6. If no deadlines or action items are found, indicate that clearly\n\n"
+            "REPORT FORMAT:\n"
+            "# 📋 Meeting Report\n\n"
+            "**Date:** [Current date]\n\n"
+            "## 📝 Meeting Summary\n"
+            "[Brief summary of the meeting - 2-3 paragraphs covering main topics discussed]\n\n"
+            "## 🎯 Key Discussion Points\n"
+            "- [Point 1]\n"
+            "- [Point 2]\n"
+            "- ...\n\n"
+            "## ⏰ Deadlines & Action Items\n"
+            "| Task | Assignee | Deadline | Priority |\n"
+            "|------|----------|----------|----------|\n"
+            "| [Task description] | [Person] | [Date] | [High/Medium/Low] |\n\n"
+            "## 📌 Important Notes\n"
+            "[Any other important information mentioned in the meeting]\n\n"
+            "---\n"
+            "*This report was automatically generated from the meeting transcript.*\n\n"
+            f"===== MEETING TRANSCRIPT =====\n{transcript}\n===== END TRANSCRIPT =====\n\n"
+            "Generate the meeting report in Markdown format:"
         )
 
     def generate_response(self, data: str, answer: str) -> str:
@@ -83,8 +151,9 @@ class ChatBotProcessor:
                            (f" for organization {organization_id}" if organization_id else "") +
                            (f" with room_key {room_key}" if room_key else "") +
                            (f" with transcript: {combined_transcript[:50]}..." if combined_transcript else ""))
-                # return generated_response
-                return self.generate_response(combined_transcript, generated_response)
+                
+                # Return the generated response directly (remove debug info)
+                return generated_response
             else:
                 logger.warning(f"No results found from semantic service for room {room_id} (room_key: {room_key})")
                 return "I'm sorry, I couldn't find an answer to your question."
@@ -94,4 +163,141 @@ class ChatBotProcessor:
             import traceback
             traceback.print_exc()
             return "Error processing question"
+
+    async def extract_meeting_summary(self, room_id: str, organization_id: str = None, room_key: str = None) -> str:
+        """
+        Extract meeting summary and deadlines from the meeting transcript.
+        
+        Args:
+            room_id: Room ID (for backward compatibility)
+            organization_id: Organization ID for filtering
+            room_key: Unique room key for context isolation
+            
+        Returns:
+            JSON string containing meeting summary and deadlines
+        """
+        try:
+            # Get all transcript data from semantic service
+            # Use a broad query to get comprehensive transcript coverage
+            logger.info(f"Extracting meeting summary for room_id={room_id}, room_key={room_key}")
+            results = await self.semantic_client.search(
+                room_id=room_id,
+                text="meeting discussion agenda action item task deadline",  # Broad query to capture meeting content
+                organization_id=organization_id,
+                room_key=room_key
+            )
+            
+            results_list = list(results) if results else []
+            logger.info(f"Received {len(results_list)} transcript chunks for summary extraction")
+            
+            if not results_list or len(results_list) == 0:
+                return '{"meeting_summary": "No meeting content to summarize.", "deadlines": []}'
+            
+            # Combine all transcript chunks
+            transcript_data = [result.text for result in results_list]
+            combined_transcript = "\n".join(transcript_data)
+            
+            # Create extraction prompt
+            prompt = self.create_summary_extraction_prompt(combined_transcript)
+            
+            # Generate JSON response
+            json_response = self.model.generate(prompt)
+            logger.info(f"Generated summary JSON for room {room_id}")
+            
+            # Clean up response - remove markdown code blocks if present
+            json_response = json_response.strip()
+            if json_response.startswith("```json"):
+                json_response = json_response[7:]
+            if json_response.startswith("```"):
+                json_response = json_response[3:]
+            if json_response.endswith("```"):
+                json_response = json_response[:-3]
+            json_response = json_response.strip()
+            
+            # Validate JSON
+            import json
+            try:
+                json.loads(json_response)  # Just validate, don't modify
+                return json_response
+            except json.JSONDecodeError as e:
+                logger.error(f"Invalid JSON generated: {e}")
+                return '{"meeting_summary": "Lỗi khi trích xuất thông tin cuộc họp.", "deadlines": []}'
+            
+        except Exception as e:
+            logger.error(f"Error extracting meeting summary: {e}")
+            import traceback
+            traceback.print_exc()
+            return '{"meeting_summary": "Lỗi khi xử lý yêu cầu.", "deadlines": []}'
     
+    async def generate_meeting_report(self, room_id: str, organization_id: str = None, room_key: str = None) -> dict:
+        """
+        Generate a comprehensive meeting report in Markdown format.
+        
+        Args:
+            room_id: Room ID (for backward compatibility)
+            organization_id: Organization ID for filtering
+            room_key: Unique room key for context isolation
+            
+        Returns:
+            Dict containing success status, report content (Markdown), and error message if any
+        """
+        try:
+            logger.info(f"Generating meeting report for room_id={room_id}, room_key={room_key}")
+            
+            # Get all transcript data from semantic service using a broad query
+            results = await self.semantic_client.search(
+                room_id=room_id,
+                text="summary",
+                organization_id=organization_id,
+                room_key=room_key
+            )
+            
+            results_list = list(results) if results else []
+            logger.info(f"Received {len(results_list)} transcript chunks for report generation")
+            
+            if not results_list or len(results_list) == 0:
+                return {
+                    "success": False,
+                    "report_content": "",
+                    "error_message": "No transcript data available for report generation."
+                }
+            
+            # Combine all transcript chunks
+            transcript_data = [result.text for result in results_list]
+            combined_transcript = "\n".join(transcript_data)
+            
+            # Create report generation prompt
+            prompt = self.create_meeting_report_prompt(combined_transcript)
+            
+            # Generate Markdown report
+            report_content = self.model.generate(prompt)
+            logger.info(f"Generated meeting report for room {room_id}")
+            
+            # Clean up response - remove markdown code blocks if the model wrapped it
+            report_content = report_content.strip()
+            if report_content.startswith("```markdown"):
+                report_content = report_content[11:]
+            if report_content.startswith("```md"):
+                report_content = report_content[5:]
+            if report_content.startswith("```"):
+                report_content = report_content[3:]
+            if report_content.endswith("```"):
+                report_content = report_content[:-3]
+            report_content = report_content.strip()
+            
+            return {
+                "success": True,
+                "report_content": report_content,
+                "error_message": ""
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating meeting report: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "success": False,
+                "report_content": "",
+                "error_message": f"Lỗi khi tạo báo cáo cuộc họp: {str(e)}"
+            }
+

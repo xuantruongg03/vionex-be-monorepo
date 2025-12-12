@@ -9,16 +9,21 @@ logger = logging.getLogger(__name__)
 @dataclass
 class VoiceActivityDetector:
     """
-    Optimized energy-based voice activity detection for real-time translation.
+    Optimized voice activity detection for real-time translation.
     
     Features:
-    - Lower energy threshold for better sensitivity
-    - Immediate speech detection (no warmup period)
-    - Configurable silence tolerance
+    - WebRTC VAD with energy-based fallback
+    - Configurable energy threshold and speech ratio
+    - Hangover logic for smooth transitions
+    - Higher thresholds to prevent Whisper hallucinations on silence
+    
+    CRITICAL: Both WebRTC VAD speech ratio AND energy threshold must be met
+    to prevent hallucinations on silence/noise.
     """
-    # energy_threshold: float = 25.0  # Lowered for better sensitivity to quiet speech
-    # silence_duration_ms: int = 800  # Reduced silence tolerance for faster response
-    vad_aggressiveness: int = 1  # WebRTC VAD aggressiveness level (0-3)
+    energy_threshold: float = 200.0  # Increased from 50 to prevent noise triggering
+    silence_duration_ms: int = 300   # Reduced from 800ms for faster silence detection
+    vad_aggressiveness: int = 3      # Maximum strictness (0-3)
+    min_speech_ratio: float = 0.3    # At least 30% of frames must have speech
     last_speech_time: float = field(default=0.0)
     _debug_counter: int = field(default=0, init=False)
     _vad: object = field(default=None, init=False)  # WebRTC VAD instance
@@ -27,7 +32,10 @@ class VoiceActivityDetector:
         """Initialize WebRTC VAD instance once during object creation."""
         try:
             self._vad = webrtcvad.Vad(self.vad_aggressiveness)
-            logger.info(f"[VAD] WebRTC VAD initialized with aggressiveness level {self.vad_aggressiveness}")
+            logger.info(
+                f"[VAD] WebRTC VAD initialized: aggressiveness={self.vad_aggressiveness}, "
+                f"energy_threshold={self.energy_threshold}, min_speech_ratio={self.min_speech_ratio}"
+            )
         except Exception as e:
             logger.error(f"[VAD] Failed to initialize WebRTC VAD: {e}")
             self._vad = None
@@ -62,19 +70,20 @@ class VoiceActivityDetector:
             self._debug_counter += 1
             current_time = time.time()
 
-            # --- Energy-based fallback ---
+            # --- Calculate energy for logging and fallback ---
             pcm_array = np.frombuffer(pcm, dtype=np.int16)
             energy = np.mean(np.abs(pcm_array))
-            if energy > 25:  # ngưỡng 20–30 tuỳ mic
-                self.last_speech_time = current_time
-                return True
-
-            # Iterate through consecutive 20ms frames
+            
+            # Iterate through consecutive 20ms frames using WebRTC VAD
             total_frames = 0
             speech_frames = 0
 
-            # If the frame is not enough 20ms, process according to the hangover below
+            # If the frame is not enough 20ms, use energy-based fallback
             if len(pcm) < frame_bytes:
+                # Short audio: use energy threshold only
+                if energy > self.energy_threshold:
+                    self.last_speech_time = current_time
+                    return True
                 total_frames = 0
             else:
                 # Only use full frames; any remainder is discarded (next stream will compensate)
@@ -88,25 +97,52 @@ class VoiceActivityDetector:
                     if is_sp:
                         speech_frames += 1
 
-            # Decide based on frame-level
-            if speech_frames > 0:
-                # At least 1 speech frame → consider speaking
+            # Calculate speech ratio
+            speech_ratio = speech_frames / max(total_frames, 1)
+            
+            # CRITICAL: Must meet BOTH conditions to prevent hallucinations
+            # 1. WebRTC VAD detects speech in sufficient frames
+            # 2. Audio energy is above threshold (not just noise)
+            has_sufficient_speech = (
+                total_frames > 0 and 
+                speech_ratio >= self.min_speech_ratio and
+                energy > self.energy_threshold
+            )
+            
+            # Always log VAD decision for debugging Whisper hallucinations
+            if self._debug_counter % 10 == 0:
+                logger.info(
+                    f"[VAD] Check: frames={speech_frames}/{total_frames} "
+                    f"({speech_ratio:.1%}), energy={energy:.1f} (threshold={self.energy_threshold}), "
+                    f"decision={'SPEECH' if has_sufficient_speech else 'SILENCE'}"
+                )
+            
+            if has_sufficient_speech:
                 self.last_speech_time = current_time
-                # Occasionally log for easier tracking
-                if self._debug_counter % 50 == 0:
-                    logger.info(f"[WebRTC-VAD] Speech detected: {speech_frames}/{max(total_frames,1)} frames")
                 return True
 
-            # No speech frames in this batch:
-            # Keep hangover if still within allowed silence
+            # No sufficient speech in this batch - check hangover
             if self.last_speech_time > 0.0:
                 silence_ms = (current_time - self.last_speech_time) * 1000.0
                 in_tolerance = silence_ms < float(self.silence_duration_ms)
-                if self._debug_counter % 200 == 0 and in_tolerance:
-                    logger.debug(f"[WebRTC-VAD] Silence tolerance: {silence_ms:.0f}ms / {self.silence_duration_ms}ms")
+                
+                # Log silence detection periodically
+                if self._debug_counter % 100 == 0:
+                    if in_tolerance:
+                        logger.debug(
+                            f"[VAD] Hangover active: silence={silence_ms:.0f}ms/{self.silence_duration_ms}ms, "
+                            f"energy={energy:.1f}"
+                        )
+                    else:
+                        logger.info(
+                            f"[VAD] SILENCE detected: ratio={speech_ratio:.1%}, "
+                            f"energy={energy:.1f} (threshold={self.energy_threshold})"
+                        )
                 return in_tolerance
 
             # Never detected speech and currently silent
+            if self._debug_counter % 100 == 0:
+                logger.debug(f"[VAD] No speech history, energy={energy:.1f}")
             return False
 
         except Exception as e:

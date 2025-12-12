@@ -14,6 +14,8 @@ MAX_SEARCH_RESULTS = int(os.getenv("MAX_SEARCH_RESULTS", 10))
 
 # Model configuration
 MODEL_VECTOR = os.getenv("MODEL_VECTOR", "intfloat/e5-small-v2")  # Default model for vectorization
+# Vector dimension: 384 for e5-small-v2, 1024 for Alibaba-NLP/gte-large-en-v1.5
+VECTOR_DIMENSION = int(os.getenv("VECTOR_DIMENSION", 1024))
 
 # Logging configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

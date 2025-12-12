@@ -6,19 +6,28 @@ import queue
 import threading
 import time
 import wave
+import numpy as np
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, Optional, Any, TYPE_CHECKING, List
 
 from service.pipline_processor.VAD import VoiceActivityDetector
-from core.config import SFU_SERVICE_HOST
-from service.utils.audio_logger import AudioLogger
+from core.config import (
+    SFU_SERVICE_HOST,
+    PLAYBACK_BUFFER_DURATION,
+    PLAYBACK_MIN_QUEUE_SIZE,
+    PLAYBACK_QUEUE_MAX_SIZE,
+    TRANSLATION_WINDOW_DURATION,
+    TRANSLATION_SAMPLE_RATE,
+)
+from utils.audio_logger import AudioLogger
 
 if TYPE_CHECKING:
     from service.pipline_processor.translation_pipeline import TranslationPipeline
 
-from .port_manager import port_manager
+# DEPRECATED: port_manager no longer used - all cabins share SHARED_SOCKET_PORT
+# from .port_manager import port_manager
 from .socket_pool import get_shared_socket_manager
 from .codec_utils import opus_codec_manager, AudioProcessingUtils, RTPUtils
 
@@ -58,16 +67,16 @@ class PlaybackQueue:
     
     Logic:
     1. Processed chunks are enqueued immediately
-    2. Wait for BUFFER_DURATION (2s) before starting playback
+    2. Wait for BUFFER_DURATION (1s) before starting playback
     3. Play with stable pacing (paced sending)
     4. If queue is empty → play silence to maintain stream
     """
     
-    BUFFER_DURATION: float = 2.0    # Buffer 2s before starting playback
-    MIN_QUEUE_SIZE: int = 2         # Minimum 2 chunks in queue
+    BUFFER_DURATION: float = PLAYBACK_BUFFER_DURATION    # Buffer before starting playback
+    MIN_QUEUE_SIZE: int = PLAYBACK_MIN_QUEUE_SIZE         # Minimum chunks in queue
     
     def __post_init__(self):
-        self._queue: queue.Queue = queue.Queue(maxsize=32)
+        self._queue: queue.Queue = queue.Queue(maxsize=PLAYBACK_QUEUE_MAX_SIZE)
         self._buffering: bool = True
         self._buffer_start_time: Optional[float] = None
         self._total_enqueued: int = 0
@@ -134,7 +143,30 @@ class PlaybackQueue:
             
     def is_ready(self) -> bool:
         """Check if queue is ready to start playback"""
-        return not self._buffering and self._playback_started
+        # If already started, return True
+        if not self._buffering and self._playback_started:
+            return True
+        
+        # Check if buffer conditions are met (even if not checked during enqueue)
+        if self._buffer_start_time is not None:
+            buffered_time = time.time() - self._buffer_start_time
+            queue_size = self._queue.qsize()
+            
+            # Ready if buffer time elapsed OR enough chunks
+            if buffered_time >= self.BUFFER_DURATION and queue_size > 0:
+                if self._buffering:
+                    self._buffering = False
+                    self._playback_started = True
+                    logger.info(f"[PLAYBACK-QUEUE] Buffer ready (timeout)! Queue size: {queue_size}, buffered: {buffered_time:.2f}s")
+                return True
+            elif queue_size >= self.MIN_QUEUE_SIZE:
+                if self._buffering:
+                    self._buffering = False
+                    self._playback_started = True
+                    logger.info(f"[PLAYBACK-QUEUE] Buffer ready (queue full)! Queue size: {queue_size}")
+                return True
+        
+        return False
         
     def get_stats(self) -> dict:
         """Get queue statistics"""
@@ -192,8 +224,8 @@ class HybridChunkBuffer:
        a chunk is sliced from the beginning of the buffer and returned.
     3. The sliced portion is then removed from the buffer.
     """
-    window_duration: float = 1.5   # Each chunk is 1.5s long
-    sample_rate: int = 16000       # 16kHz mono PCM16
+    window_duration: float = TRANSLATION_WINDOW_DURATION   # Each chunk duration
+    sample_rate: int = TRANSLATION_SAMPLE_RATE              # Sample rate for processing
 
     def __post_init__(self):
         self._buffer: bytearray = bytearray()
@@ -276,6 +308,10 @@ class AudioRecorder:
     def write_output_audio(self, audio_data: bytes):
         """Write output audio to WAV file (AFTER processing - translated audio)"""
         try:
+            import numpy as np
+            from scipy.signal import resample_poly
+            from math import gcd
+            
             # Check if input is already WAV format
             if audio_data.startswith(b"RIFF"):
                 # Extract PCM from WAV
@@ -284,21 +320,28 @@ class AudioRecorder:
                     sample_rate = wav_file.getframerate()
                     channels = wav_file.getnchannels()
                     
-                    # Convert to mono 16kHz if needed
-                    if channels == 2:
-                        # Stereo to mono
-                        import numpy as np
-                        audio_array = np.frombuffer(pcm_data, dtype=np.int16)
-                        audio_array = audio_array.reshape(-1, 2)
-                        pcm_data = np.mean(audio_array, axis=1).astype(np.int16).tobytes()
+                    # Convert to numpy array
+                    audio_array = np.frombuffer(pcm_data, dtype=np.int16)
                     
-                    # Resample if needed (48kHz -> 16kHz or other)
+                    # Convert to mono if needed
+                    if channels == 2:
+                        audio_array = audio_array.reshape(-1, 2)
+                        audio_array = np.mean(audio_array, axis=1).astype(np.int16)
+                    
+                    # Resample if needed (e.g., 24kHz -> 16kHz)
                     if sample_rate != 16000:
-                        import numpy as np
-                        from scipy.signal import resample_poly
-                        audio_array = np.frombuffer(pcm_data, dtype=np.int16)
-                        resampled = resample_poly(audio_array, 16000, sample_rate)
-                        pcm_data = resampled.astype(np.int16).tobytes()
+                        # FIX: Convert to float before resampling (resample_poly fails with int16)
+                        audio_float = audio_array.astype(np.float32)
+                        
+                        # Simplify ratio using GCD for better performance
+                        g = gcd(16000, sample_rate)
+                        up = 16000 // g
+                        down = sample_rate // g
+                        
+                        resampled = resample_poly(audio_float, up, down)
+                        audio_array = resampled.astype(np.int16)
+                    
+                    pcm_data = audio_array.tobytes()
             else:
                 # Already PCM, assume 16kHz mono
                 pcm_data = audio_data
@@ -353,7 +396,12 @@ class TranslationCabin:
     # SFU integration parameters
     send_port: Optional[int] = None
     sfu_send_port: Optional[int] = None  # Actual SFU destination port
-    ssrc: Optional[int] = None           # RTP SSRC identifier
+    ssrc: Optional[int] = None           # RTP SSRC identifier (generated)
+    expected_consumer_ssrc: Optional[int] = None  # Actual SFU consumer SSRC for routing
+    
+    # SharedSocket references for SSRC routing updates
+    _shared_socket_manager: Optional[Any] = None  # Reference to SharedSocketManager
+    _shared_socket_id: Optional[str] = None       # Cabin ID used in socket registration
     
     # RTP packet sequencing (for outbound streams)
     _rtp_seq_num: int = 0
@@ -495,16 +543,6 @@ class TranslationCabinManager:
                     user_id=user_id
                 )
                 
-                # Initialize audio recorder for debugging
-                cabin.audio_recorder = AudioRecorder(cabin_id)
-                
-                # ============================================================================
-                # Step 4: Setup SSRC and register with SharedSocketManager
-                # ============================================================================
-                # IMPORTANT: All cabins share single socket (port from config.SHARED_SOCKET_PORT)
-                #            Routing is based on SSRC extracted from RTP header
-                #            NO need for individual port per cabin
-                
                 # Generate unique SSRC from cabin ID for RTP identification
                 cabin_ssrc = hash(cabin_id) & 0xFFFFFFFF
                 cabin.ssrc = cabin_ssrc
@@ -517,9 +555,7 @@ class TranslationCabinManager:
                 # ============================================================================
                 # Register cabin with SharedSocketManager for SSRC-based routing
                 # ============================================================================
-                # NOTE: receive_port and send_port returned here are VIRTUAL only
-                #       They are allocated for tracking/logging purposes but NOT used for RTP
-                #       Actual RTP communication uses SHARED_SOCKET_PORT with SSRC routing
+                # All cabins share SHARED_SOCKET_PORT, routing based on SSRC
                 ports = self.socket_manager.register_cabin_for_routing(
                     cabin_id, cabin_ssrc, audio_callback
                 )
@@ -527,16 +563,13 @@ class TranslationCabinManager:
                     logger.error(f"[CABIN-MANAGER] Failed to register cabin {cabin_id} for routing")
                     return None
                 
-                # ============================================================================
-                # Step 5: Configure VIRTUAL port allocation (for compatibility only)
-                # ============================================================================
-                # DEPRECATED: These ports are allocated but NOT used for actual RTP
-                #             - receive_port: Virtual (tracking only)
-                #             - send_port: Virtual (tracking only)
-                #             - Actual RTP uses: SharedSocketManager.rx_sock (SHARED_SOCKET_PORT)
+                # Store reference to socket manager for SSRC routing updates
+                cabin._shared_socket_manager = self.socket_manager
+                cabin._shared_socket_id = cabin_id
+                
                 receive_port, send_port = ports
-                cabin.receive_port = receive_port      # VIRTUAL - not used for RTP
-                cabin.send_port = send_port            # VIRTUAL - not used for RTP
+                cabin.receive_port = receive_port      # SHARED_SOCKET_PORT
+                cabin.send_port = send_port            # SHARED_SOCKET_PORT
                 cabin.sfu_send_port = sfu_send_port    # Real SFU destination port (for TX)
                 
                 # Step 6: Start cabin processing
@@ -549,7 +582,7 @@ class TranslationCabinManager:
                 logger.info(f"[CABIN-MANAGER] Cabin created successfully!")
                 logger.info(f"[CABIN-MANAGER]    Cabin ID: {cabin_id}")
                 logger.info(f"[CABIN-MANAGER]    SSRC: {cabin_ssrc}")
-                logger.info(f"[CABIN-MANAGER]    RX Port: {receive_port}, TX Port: {send_port}")
+                logger.info(f"[CABIN-MANAGER]    Shared RX/TX Port: {receive_port} (SSRC-based routing)")
                 logger.info(f"[CABIN-MANAGER]    Status: {cabin.status.value}")
 
                 # Start single processor thread for this cabin
@@ -634,13 +667,6 @@ class TranslationCabinManager:
                     duration=chunk_duration
                 )
                 
-                # SAVE INDIVIDUAL CHUNK for debugging
-                if cabin.audio_recorder:
-                    cabin.audio_recorder.write_audio(complete_chunk)
-                
-                # --- TUMBLING WINDOW LOGIC ---
-                # The buffer now only returns complete, non-overlapping chunks.
-                # We can process them directly.
                 logger.info(f"[TUMBLING-WINDOW] Processing chunk {context_chunk.chunk_id} ({context_chunk.duration:.2f}s)")
                 processing_task = {
                     'context_chunks': [context_chunk], # Still pass as a list for compatibility
@@ -723,22 +749,22 @@ class TranslationCabinManager:
                         audio_chunk = cabin.playback_queue.dequeue(timeout=0.5)
                         
                         if audio_chunk is None:
-                            # Queue empty → send silence to maintain stream
-                            logger.warning(f"[PLAYBACK-THREAD] Queue empty, sending silence")
-                            silence = self._generate_silence_audio(duration=0.5)
-                            self._send_audio_sync(cabin, silence)
+                            # Queue empty → just wait, don't send silence
+                            # logger.warning(f"[PLAYBACK-THREAD] Queue empty, waiting...")
                             continue
                         
                         # Send audio chunk to SFU
-                        logger.debug(
-                            f"[PLAYBACK-THREAD] Sending chunk {audio_chunk.chunk_id}, "
+                        logger.info(
+                            f"[PLAYBACK-THREAD] 📤 Sending chunk {audio_chunk.chunk_id}, "
                             f"duration: {audio_chunk.duration:.2f}s, "
-                            f"queue size: {cabin.playback_queue._queue.qsize()}"
+                            f"size: {len(audio_chunk.data)} bytes, "
+                            f"queue remaining: {cabin.playback_queue._queue.qsize()}"
                         )
                         
                         # SAVE OUTPUT AUDIO before sending to SFU
-                        if cabin.audio_recorder:
-                            cabin.audio_recorder.write_output_audio(audio_chunk.data)
+                        # DISABLED: Reduce CPU load during testing
+                        # if cabin.audio_recorder:
+                        #     cabin.audio_recorder.write_output_audio(audio_chunk.data)
                         
                         self._send_audio_sync(cabin, audio_chunk.data)
 
@@ -766,12 +792,20 @@ class TranslationCabinManager:
         FIX: Synchronous version of send audio to SFU
         Used by playback thread (not async)
         """
+        start_time = time.time()
         try:
+            logger.info(f"[SEND-AUDIO-SYNC] Sending {len(audio_data)} bytes to SFU for cabin {cabin.cabin_id}")
             success = self._send_rtp_chunks_to_sfu(cabin, audio_data)
+            elapsed = time.time() - start_time
             if not success:
-                logger.error(f"[PLAYBACK-THREAD] Failed to send audio to SFU")
+                logger.error(f"[SEND-AUDIO-SYNC] Failed to send audio to SFU after {elapsed:.2f}s")
+            else:
+                logger.info(f"[SEND-AUDIO-SYNC] Successfully sent audio to SFU in {elapsed:.2f}s")
         except Exception as e:
-            logger.error(f"[PLAYBACK-THREAD] Error sending audio: {e}")
+            elapsed = time.time() - start_time
+            logger.error(f"[SEND-AUDIO-SYNC] Error sending audio after {elapsed:.2f}s: {e}")
+            import traceback
+            logger.error(f"[SEND-AUDIO-SYNC] Traceback: {traceback.format_exc()}")
 
     def _generate_silence_audio(self, duration: float = 0.5) -> bytes:
         """
@@ -839,21 +873,34 @@ class TranslationCabinManager:
             concatenated_audio = b''.join([chunk.audio_data for chunk in context_chunks])
             total_duration = sum(chunk.duration for chunk in context_chunks)
             
+            # Calculate audio energy for logging
+            pcm_array = np.frombuffer(concatenated_audio, dtype=np.int16)
+            audio_energy = np.mean(np.abs(pcm_array))
+            audio_max = np.max(np.abs(pcm_array))
+            
             logger.info(
                 f"[TUMBLING-WINDOW-{latest_chunk_id}] Processing chunk: "
-                f"{len(context_chunks)} chunks, total {total_duration:.2f}s"
+                f"{len(context_chunks)} chunks, total {total_duration:.2f}s, "
+                f"energy={audio_energy:.1f}, max={audio_max}"
             )
             
-            # Step 2: VAD is less critical now as we process fixed chunks, but can still be used as a filter.
+            # Step 2: VAD Gate - Skip STT if no speech detected (prevents Whisper hallucinations)
             has_speech = cabin.vad.detect_speech(concatenated_audio)
-            
             if not has_speech:
-                logger.debug(f"[TUMBLING-WINDOW-{latest_chunk_id}] No speech detected in chunk, skipping.")
+                logger.info(
+                    f"[TUMBLING-WINDOW-{latest_chunk_id}] VAD BLOCKED - No speech detected, "
+                    f"skipping STT to prevent hallucination. Duration: {total_duration:.2f}s, energy={audio_energy:.1f}"
+                )
+                # Reset status and return - do not process silence through STT
+                cabin.status = CabinStatus.LISTENING
                 return
             
-            # Step 3: Speech detected → process through translation pipeline
+            # Step 3: Process through translation pipeline (speech detected)
             cabin.status = CabinStatus.TRANSLATING
-            logger.info(f"[TUMBLING-WINDOW-{latest_chunk_id}] Speech detected, processing chunk...")
+            logger.info(
+                f"[TUMBLING-WINDOW-{latest_chunk_id}] VAD PASSED - Speech detected, "
+                f"energy={audio_energy:.1f}, processing through STT..."
+            )
             
             # Get cached pipeline to avoid recreation overhead
             pipeline = self.get_or_create_pipeline(cabin)
@@ -937,138 +984,6 @@ class TranslationCabinManager:
             # Fallback: estimate 2s
             return 2.0
 
-    # def _extract_new_translated_text(self, current_text: str, previous_text: str) -> str:
-    #     """
-    #     DEPRECATED: This logic was for the old Sliding Window architecture.
-    #     It is no longer needed with the Tumbling Window approach.
-    #
-    #     Extract ONLY the new portion from current_text that hasn't been TTS'd yet.
-    #     
-    #     Uses same multi-strategy approach as STT overlap detection.
-    #     
-    #     Args:
-    #         current_text: Full translated text from current context window
-    #         previous_text: Previously TTS'd translated text
-    #         
-    #     Returns:
-    #         New portion of text to TTS, or empty string if no new text
-    #     """
-    #     if not current_text:
-    #         return ""
-    #     
-    #     if not previous_text:
-    #         # First translation, return all
-    #         return current_text
-    #     
-    #     # Normalize text for comparison
-    #     curr_norm = current_text.strip()
-    #     prev_norm = previous_text.strip()
-    #     
-    #     if curr_norm == prev_norm:
-    #         # Exact duplicate
-    #         return ""
-    #     
-    #     # Strategy 1: Character-level exact prefix matching (most accurate)
-    #     if curr_norm.startswith(prev_norm):
-    #         new_text = curr_norm[len(prev_norm):].strip()
-    #         if new_text:
-    #             logger.debug(f"[TTS-OVERLAP] Character-level prefix match, new: '{new_text[:30]}...'")
-    #             return new_text
-    #     
-    #     # Strategy 2: Find previous as substring (handles minor variations)
-    #     prev_idx = curr_norm.find(prev_norm)
-    #     if prev_idx != -1:
-    #         new_text = curr_norm[prev_idx + len(prev_norm):].strip()
-    #         if new_text:
-    #             logger.debug(f"[TTS-OVERLAP] Substring match at {prev_idx}, new: '{new_text[:30]}...'")
-    #             return new_text
-    #     
-    #     # Strategy 3: Word-level matching with threshold
-    #     curr_words = curr_norm.split()
-    #     prev_words = prev_norm.split()
-    #     
-    #     # Find longest common prefix in words
-    #     common_prefix_len = 0
-    #     for i, (cw, pw) in enumerate(zip(curr_words, prev_words)):
-    #         if cw.lower() == pw.lower():
-    #             common_prefix_len = i + 1
-    #         else:
-    #             break
-    #     
-    #     # If >50% words match as prefix, extract remaining
-    #     if common_prefix_len > 0 and common_prefix_len >= len(prev_words) * 0.5:
-    #         new_words = curr_words[common_prefix_len:]
-    #         new_text = ' '.join(new_words).strip()
-    #         if new_text:
-    #             logger.debug(
-    #                 f"[TTS-OVERLAP] Word-level match ({common_prefix_len}/{len(prev_words)} words), "
-    #                 f"new: '{new_text[:30]}...'"
-    #             )
-    #             return new_text
-    #     
-    #     # Strategy 4: Fuzzy matching (last resort)
-    #     try:
-    #         from difflib import SequenceMatcher
-    #         ratio = SequenceMatcher(None, prev_norm, curr_norm).ratio()
-    #         
-    #         logger.debug(f"[TTS-OVERLAP] Similarity ratio: {ratio:.2f}")
-    #         
-    #         # CRITICAL: Check for duplicate content (same meaning, different wording)
-    #         if ratio > 0.6:  # 60% similarity → likely same content
-    #             if ratio >= 0.8:
-    #                 # Very high similarity → probably duplicate → SKIP
-    #                 logger.warning(
-    #                     f"[TTS-OVERLAP] HIGH similarity ({ratio:.2f}) detected - "
-    #                     f"likely duplicate content, SKIPPING TTS. "
-    #                     f"Prev: '{prev_norm[:50]}...', Curr: '{curr_norm[:50]}...'"
-    #                 )
-    #                 return ""  # Skip TTS for duplicate content
-    #             elif ratio >= 0.7:
-    #                 # High similarity → extract new portion if possible
-    #                 matcher = SequenceMatcher(None, prev_norm, curr_norm)
-    #                 match = matcher.find_longest_match(0, len(prev_norm), 0, len(curr_norm))
-    #                 
-    #                 if match.size > 0:
-    #                     # Extract text after longest match
-    #                     new_text = curr_norm[match.b + match.size:].strip()
-    #                     if new_text:
-    #                         logger.debug(
-    #                             f"[TTS-OVERLAP] Fuzzy match (ratio={ratio:.2f}), new: '{new_text[:30]}...'"
-    #                         )
-    #                         return new_text
-    #                 
-    #                 # No clear new portion but high similarity → skip
-    #                 logger.warning(
-    #                     f"[TTS-OVERLAP] HIGH similarity ({ratio:.2f}) but no clear new text, "
-    #                     f"SKIPPING to avoid duplicate. Prev: '{prev_norm[:50]}...', Curr: '{curr_norm[:50]}...'"
-    #                 )
-    #                 return ""
-    #             else:
-    #                 # Medium similarity (0.6-0.7) → might be variation of same content
-    #                 # Check word overlap
-    #                 prev_words_set = set(prev_norm.lower().split())
-    #                 curr_words_set = set(curr_norm.lower().split())
-    #                 common_words = prev_words_set & curr_words_set
-    #                 word_overlap_ratio = len(common_words) / max(len(prev_words_set), len(curr_words_set))
-    #                 
-    #                 if word_overlap_ratio > 0.6:
-    #                     logger.warning(
-    #                         f"[TTS-OVERLAP] MEDIUM similarity ({ratio:.2f}) with high word overlap "
-    #                         f"({word_overlap_ratio:.2f}) - likely same content rephrased, SKIPPING. "
-    #                         f"Prev: '{prev_norm[:50]}...', Curr: '{curr_norm[:50]}...'"
-    #                     )
-    #                     return ""  # Skip duplicate content
-    #     except Exception as e:
-    #         logger.warning(f"[TTS-OVERLAP] Fuzzy matching failed: {e}")
-    #     
-    #     # Low similarity → treat as completely new text
-    #     logger.info(
-    #         f"[TTS-OVERLAP] LOW similarity detected, treating as new text. "
-    #         f"Prev: '{prev_norm[:50]}...', Curr: '{curr_norm[:50]}...'"
-    #     )
-    #     return current_text
-
-
     def _send_rtp_chunks_to_sfu(self, cabin: TranslationCabin, audio_data: bytes) -> bool:
         """
         Send RTP packets in 20ms chunks for proper streaming.
@@ -1077,9 +992,18 @@ class TranslationCabinManager:
         from scipy.signal import resample_poly
         import numpy as np
 
+        logger.info(f"[RTP-CHUNKS] Starting to send {len(audio_data)} bytes for cabin {cabin.cabin_id}")
+
         try:
             sfu_host = SFU_SERVICE_HOST  # Load from config instead of hardcoded
-            sfu_port = cabin.send_port  # Use real SFU port if available
+            # Use actual SFU port (from receiveTransport) - sfu_send_port must be set via updateTranslationPort
+            sfu_port = cabin.sfu_send_port if cabin.sfu_send_port else cabin.send_port
+            
+            if not cabin.sfu_send_port:
+                logger.warning(
+                    f"[RTP-CHUNKS] Cabin {cabin.cabin_id} missing sfu_send_port! "
+                    "SFU port not updated via updateTranslationPort - may cause NAT issues!"
+                )
             
             # --- 0) Normalize input: WAV -> PCM16 mono + sample_rate ---
             # If WAV (starts with "RIFF"), extract PCM and get sample_rate
@@ -1099,18 +1023,22 @@ class TranslationCabinManager:
 
             if src_sr != 48000:
                 from scipy.signal import butter, sosfilt
+                from math import gcd
                 
                 x = pcm16.astype(np.float32) / 32767.0
                 
-                # Anti-aliasing filter necessary
+                # Anti-aliasing filter necessary for downsampling
                 if src_sr > 48000:
                     nyquist = src_sr / 2
                     cutoff = 48000 / 2 * 0.9  # 90% of target Nyquist
                     sos = butter(6, cutoff / nyquist, btype='low', output='sos')
                     x = sosfilt(sos, x)
                 
-                # Resample
-                x_48k = resample_poly(x, 48000, src_sr, window=('kaiser', 8.0))
+                # Resample using simplified ratio (GCD optimization)
+                g = gcd(48000, src_sr)
+                up = 48000 // g
+                down = src_sr // g
+                x_48k = resample_poly(x, up, down, window=('kaiser', 8.0))
                 
                 # Normalize carefully
                 max_val = np.max(np.abs(x_48k))
@@ -1124,19 +1052,22 @@ class TranslationCabinManager:
             if len(pcm16) == 0:
                 return False
 
-            # ---2) Just noise gate to remove Silent Samples ---
-            # Instead of Multiple Filters can create Artifacts
-            noise_threshold = 500  # Threshold for noise
-            mask = np.abs(pcm16) > noise_threshold
-            
-            from scipy.ndimage import binary_dilation
-            mask_expanded = binary_dilation(mask, iterations=480)  # ~10ms expansion @ 48kHz
-            
-            # Apply noise gate
-            pcm16_clean = pcm16.copy()
-            pcm16_clean[~mask_expanded] = 0
-            
-            pcm16 = pcm16_clean
+            # DEBUG: Log audio stats before sending
+            pcm16_rms = np.sqrt(np.mean(pcm16.astype(np.float32)**2))
+            pcm16_max = np.max(np.abs(pcm16))
+            pcm16_nonzero = np.count_nonzero(pcm16)
+            logger.info(f"[RTP-CHUNKS] Audio before sending: RMS={pcm16_rms:.1f}, Max={pcm16_max}, NonZero={pcm16_nonzero}/{len(pcm16)}, SampleRate={src_sr}->48000")
+
+            # ---2) Noise gate DISABLED - causing audio to be silent ---
+            # The threshold was too aggressive and removing actual speech
+            # TODO: Re-enable with proper calibration if needed
+            # noise_threshold = 500  # Threshold for noise
+            # mask = np.abs(pcm16) > noise_threshold
+            # from scipy.ndimage import binary_dilation
+            # mask_expanded = binary_dilation(mask, iterations=480)
+            # pcm16_clean = pcm16.copy()
+            # pcm16_clean[~mask_expanded] = 0
+            # pcm16 = pcm16_clean
 
             # --- 3) Split into 20ms @48kHz mono (960 samples) ---
             samples_per_chunk = 960  # 20ms at 48kHz mono
@@ -1155,9 +1086,13 @@ class TranslationCabinManager:
                 chunks.append(chunk)
 
             # --- 4) RTP state ---
-            if not cabin._rtp_ssrc:
+            # Always use cabin.ssrc (which is updated via update_sfu_port with consumer SSRC from SFU)
+            # Initialize timestamp only if not set
+            if not cabin._rtp_timestamp:
                 cabin._rtp_timestamp = int(time.time() * 48000)
-                cabin._rtp_ssrc = cabin.ssrc or (hash(cabin.cabin_id) & 0xFFFFFFFF)
+            
+            # Always use the current cabin.ssrc (may have been updated by update_sfu_port)
+            cabin._rtp_ssrc = cabin.ssrc or (hash(cabin.cabin_id) & 0xFFFFFFFF)
 
             success_count = 0
             
@@ -1181,6 +1116,11 @@ class TranslationCabinManager:
                         pcm_stereo = pcm_stereo[:1920]
                 
                 pcm_48k_stereo = pcm_stereo.astype(np.int16).tobytes()
+                
+                # DEBUG: Log first chunk audio level
+                if idx == 0:
+                    stereo_rms = np.sqrt(np.mean(pcm_stereo.astype(np.float32)**2))
+                    logger.info(f"[RTP-CHUNKS] First chunk stereo: RMS={stereo_rms:.1f}, len={len(pcm_48k_stereo)}")
                 
                 # Encode Opus
                 opus_payload = opus_codec_manager.encode_pcm_to_opus(cabin.cabin_id, pcm_48k_stereo)
@@ -1206,15 +1146,16 @@ class TranslationCabinManager:
 
                 # Create and send RTP packet
                 rtp_packet = RTPUtils.create_rtp_packet(opus_payload, 100, cabin._rtp_seq_num, cabin._rtp_timestamp, cabin._rtp_ssrc)
-                ok = self.socket_manager.send_rtp_to_sfu(rtp_packet, sfu_host, sfu_port, cabin.cabin_id)  # DEV: Pass cabin_id for test mode
+                ok = self.socket_manager.send_rtp_to_sfu(rtp_packet, sfu_host, sfu_port, cabin.cabin_id)
                 if ok:
                     success_count += 1
                 
                 # Precise timing instead of fixed sleep
                 current_time = time.time()
-                # Log progress every 50 packets
-                if (idx + 1) % 50 == 0:
-                    logger.debug(f"[RTP-CHUNKS] Sent {idx + 1}/{len(encoded_chunks)} packets")
+                # Log progress every 25 packets (more frequent for debugging)
+                if (idx + 1) % 25 == 0 or idx == len(encoded_chunks) - 1:
+                    elapsed = current_time - start_time
+                    logger.info(f"[RTP-CHUNKS] Progress: {idx + 1}/{len(encoded_chunks)} packets sent in {elapsed:.2f}s, success: {success_count}")
                 
                 if current_time < expected_time:
                     sleep_time = expected_time - current_time
@@ -1223,6 +1164,8 @@ class TranslationCabinManager:
                 elif current_time > expected_time + 0.010:
                     pass
 
+            total_time = time.time() - start_time
+            logger.info(f"[RTP-CHUNKS] Completed: {success_count}/{len(chunks)} packets in {total_time:.2f}s for cabin {cabin.cabin_id}")
             return success_count > (len(chunks) * 0.8)
 
         except Exception as e:
@@ -1254,21 +1197,6 @@ class TranslationCabinManager:
         except Exception as e:
             logger.error(f"[CABIN-MANAGER] Error starting cabin {cabin_id}: {e}")
             return False
-
-    def find_cabin_by_user(self, room_id: str, user_id: str) -> Optional[str]:
-        """
-        Find cabin ID by room and user (regardless of languages)
-        This is needed because B1 creates cabin with default languages,
-        but B3 may have different languages
-        """
-        try:
-            for cabin_id, cabin in self.cabins.items():
-                if cabin.room_id == room_id and cabin.user_id == user_id:
-                    return cabin_id
-            return None
-        except Exception as e:
-            logger.error(f"[CABIN-MANAGER] Error finding cabin: {e}")
-            return None
 
     def update_cabin_languages(self, cabin_id: str, source_language: str, target_language: str) -> bool:
         """
@@ -1406,6 +1334,61 @@ class TranslationCabinManager:
             logger.error(f"[CABIN-MANAGER] Error destroying cabin {cabin_id}: {e}")
             return False
 
+    def find_cabin_by_user(self, room_id: str, user_id: str) -> Optional[str]:
+        """
+        Find cabin ID by room and user (regardless of languages)
+        
+        Args:
+            room_id: Room identifier
+            user_id: User identifier
+            
+        Returns:
+            cabin_id if found, None otherwise
+        """
+        with self._lock:
+            for cabin_id, cabin in self.cabins.items():
+                if cabin.room_id == room_id and cabin.user_id == user_id:
+                    return cabin_id
+        return None
+    
+    def update_sfu_port(self, cabin_id: str, sfu_port: int, consumer_ssrc: int = None) -> bool:
+        """
+        Update SFU send port and consumer SSRC for a cabin (NAT FIX + SSRC FIX)
+        
+        Args:
+            cabin_id: Cabin identifier
+            sfu_port: Actual SFU receiveTransport listen port
+            consumer_ssrc: Actual SFU consumer SSRC for RTP routing
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        with self._lock:
+            cabin = self.cabins.get(cabin_id)
+            if not cabin:
+                logger.error(f"[CABIN-MANAGER] Cabin {cabin_id} not found for port update")
+                return False
+            
+            cabin.sfu_send_port = sfu_port
+            
+            # Update expected consumer SSRC if provided
+            if consumer_ssrc is not None:
+                old_ssrc = cabin.ssrc
+                cabin.expected_consumer_ssrc = consumer_ssrc
+                
+                # FIX: Also update the SSRC used for RTP packet creation
+                cabin.ssrc = consumer_ssrc
+                cabin._rtp_ssrc = consumer_ssrc  # Reset so next send uses new SSRC
+                
+                logger.info(f"[CABIN-MANAGER] Updated cabin {cabin_id} SSRC: {consumer_ssrc} (was: {old_ssrc})")
+                
+                # Also update SharedSocketManager's SSRC routing if cabin is using shared socket
+                if cabin._shared_socket_manager and cabin._shared_socket_id:
+                    cabin._shared_socket_manager.update_cabin_ssrc(cabin._shared_socket_id, consumer_ssrc)
+            
+            logger.info(f"[CABIN-MANAGER] Updated cabin {cabin_id} SFU port: {sfu_port}, consumer SSRC: {consumer_ssrc}")
+            return True
+
     def get_cabin_info(self, cabin_id: str) -> Optional[Dict[str, Any]]:
         """
         Get comprehensive information about a specific translation cabin.
@@ -1455,6 +1438,7 @@ class TranslationCabinManager:
             "rtp_port": cabin.receive_port,
             "send_port": cabin.send_port,
             "sfu_send_port": cabin.sfu_send_port,
+            "ssrc": cabin.ssrc,  # FIX: Add missing SSRC field
             "source_language": cabin.source_language,
             "target_language": cabin.target_language,
             "status": cabin.status.value,

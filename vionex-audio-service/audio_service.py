@@ -209,7 +209,7 @@ class AudioService(audio_pb2_grpc.AudioServiceServicer):
                     ssrc=0
                 )
             
-            logger.info(f"✅ Cabin created: room={request.roomId}, user={request.userId}, "
+            logger.info(f"Cabin created: room={request.roomId}, user={request.userId}, "
                        f"ports=({cabin_info['rtp_port']}, {cabin_info['send_port']}), ssrc={cabin_info['ssrc']}")
             
             return audio_pb2.PortReply(
@@ -230,6 +230,58 @@ class AudioService(audio_pb2_grpc.AudioServiceServicer):
                 send_port=0,
                 ready=False,
                 ssrc=0
+            )
+
+    def UpdateTranslationPort(self, request, context):
+        """
+        Update translation cabin with actual SFU listen port and consumer SSRC (NAT FIX + SSRC FIX)
+        This is called after SFU creates receiveTransport and knows its dynamic port and consumer SSRC
+        
+        Args:
+            request: UpdatePortRequest with roomId, userId, sfu_port, consumer_ssrc
+            
+        Returns:
+            UpdatePortReply with success status
+        """
+        try:
+            # Find existing cabin
+            existing_cabin_id = cabin_manager.find_cabin_by_user(request.roomId, request.userId)
+            if not existing_cabin_id:
+                logger.error(f"No cabin found for room={request.roomId}, user={request.userId}")
+                return audio_pb2.UpdatePortReply(
+                    success=False,
+                    message="No cabin found for this user"
+                )
+            
+            # Get consumer SSRC if provided (for SSRC-based routing fix)
+            consumer_ssrc = None
+            if request.HasField('consumer_ssrc'):
+                consumer_ssrc = request.consumer_ssrc
+                logger.info(f"Received consumer SSRC from SFU: {consumer_ssrc}")
+            
+            # Update SFU send port and consumer SSRC in cabin
+            success = cabin_manager.update_sfu_port(existing_cabin_id, request.sfu_port, consumer_ssrc)
+            
+            if success:
+                logger.info(f"Updated cabin {existing_cabin_id} with SFU port: {request.sfu_port}, consumer SSRC: {consumer_ssrc}")
+                return audio_pb2.UpdatePortReply(
+                    success=True,
+                    message=f"SFU port updated to {request.sfu_port}, consumer SSRC: {consumer_ssrc}"
+                )
+            else:
+                logger.error(f"Failed to update SFU port for cabin {existing_cabin_id}")
+                return audio_pb2.UpdatePortReply(
+                    success=False,
+                    message="Failed to update SFU port"
+                )
+                
+        except Exception as e:
+            logger.error(f"UpdateTranslationPort error: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return audio_pb2.UpdatePortReply(
+                success=False,
+                message=str(e)
             )
 
     def CreateTranslationProduce(self, request, context):

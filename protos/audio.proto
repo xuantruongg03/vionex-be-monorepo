@@ -6,6 +6,9 @@ service AudioService {
   // Translation Cabin methods for B1-B4 flow
   rpc AllocateTranslationPort (PortRequest) returns (PortReply);
 
+  // Update translation port with SFU listen port (NAT fix)
+  rpc UpdateTranslationPort (UpdatePortRequest) returns (UpdatePortReply);
+
   // Establish a plain RTP connection for audio streaming
   rpc CreateTranslationProduce (CreateTranslationCabinRequest) returns (CreateTranslationCabinResponse);
   
@@ -14,7 +17,7 @@ service AudioService {
   
   // Legacy audio chunk processing
   // This is for compatibility with existing clients that send audio in chunks
-  rpc ProcessAudioChunk (ProcessAudioRequest) returns (ProcessAudioResponse);
+  // rpc ProcessAudioChunk (ProcessAudioRequest) returns (ProcessAudioResponse);
   
   // Service statistics
   rpc GetServiceStats (Empty) returns (ServiceStatsResponse);
@@ -30,6 +33,7 @@ service AudioService {
 message PortRequest {
   string roomId = 1;
   string userId = 2; // Target user ID for translation
+  int32 sfu_port = 3; // SFU receiveTransport listen port (for Audio to send RTP to)
 }
 
 /**
@@ -42,6 +46,25 @@ message PortReply {
   int32 send_port = 3; // RTP port allocated for sending translated audio back to SFU
   bool ready = 4;
   uint32 ssrc = 5;    // SSRC for the producer in the translation cabin
+}
+
+/**
+ * UpdatePortRequest message for updating SFU port.
+ * Contains room ID, user ID, SFU listen port, and consumer SSRC.
+ */
+message UpdatePortRequest {
+  string roomId = 1;
+  string userId = 2;
+  int32 sfu_port = 3; // Actual SFU receiveTransport listen port
+  optional uint32 consumer_ssrc = 4; // Actual SSRC of SFU consumer for RTP routing
+}
+
+/**
+ * UpdatePortReply message for port update result.
+ */
+message UpdatePortReply {
+  bool success = 1;
+  string message = 2;
 }
 
 /**
@@ -83,23 +106,23 @@ message ProcessAudioBufferResponse {
  * ProcessAudioRequest message for processing audio chunks.
  * Contains room ID, user ID, timestamp, audio buffer, and duration.
  */
-message ProcessAudioRequest {
-  string roomId = 1;
-  string userId = 2;
-  int64 timestamp = 3;
-  bytes audioBuffer = 4;
-  double duration = 5;
-  optional string roomKey = 6; // NEW: Room key for semantic context isolation
-}
+// message ProcessAudioRequest {
+//   string roomId = 1;
+//   string userId = 2;
+//   int64 timestamp = 3;
+//   bytes audioBuffer = 4;
+//   double duration = 5;
+//   optional string roomKey = 6; // NEW: Room key for semantic context isolation
+// }
 
 /**
  * ProcessAudioResponse message for the result of audio chunk processing.
  * Contains success status and additional message.
  */
-message ProcessAudioResponse {
-  bool success = 1;
-  string message = 2;
-}
+// message ProcessAudioResponse {
+//   bool success = 1;
+//   string message = 2;
+// }
 
 message ServiceStatsResponse {
   bool success = 1;

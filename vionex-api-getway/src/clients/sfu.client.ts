@@ -356,7 +356,13 @@ export class SfuClientService implements OnModuleInit {
         audioPort: number,
         sendPort: number,
         ssrc: number,
-    ): Promise<{ success: boolean; message?: string; streamId?: string }> {
+    ): Promise<{
+        success: boolean;
+        message?: string;
+        streamId?: string;
+        sfuListenPort?: number;
+        consumerSsrc?: number; // Actual consumer SSRC for Audio Service RTP routing
+    }> {
         try {
             const response = await firstValueFrom(
                 this.sfuService.allocatePort({
@@ -376,6 +382,8 @@ export class SfuClientService implements OnModuleInit {
                 success: response.success,
                 streamId: response.stream_id, // Map stream_id to streamId
                 message: response.message,
+                sfuListenPort: response.sfu_listen_port, // NAT FIX: Return SFU listen port
+                consumerSsrc: response.consumer_ssrc, // Return actual consumer SSRC
             };
         } catch (error) {
             console.error(
